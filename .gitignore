@@ -1,0 +1,19 @@
+node_modules/
+*.log
+*.zip
+shot-*.png
+screenshot-*.png
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Build artifacts
+dist/
+build/
+
+# Test artifacts
+test-output/
+test-clone*/
+test-clone/

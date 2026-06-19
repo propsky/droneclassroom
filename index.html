@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='52'%3E%F0%9F%9A%9F%3C/text%3E%3C/svg%3E">
+    <title>CREAFLY Drone Simulator — 教育用無人機程式化飛行</title>
+
+    <!-- Blockly core (v=1.1 強制重抓 CDN，避免舊版 extension 重複註冊) -->
+    <script src="https://unpkg.com/blockly@10.4.3/blockly.min.js?v=1.1"></script>
+    <script src="https://unpkg.com/blockly@10.4.3/blocks_compressed.js?v=1.1"></script>
+    <script src="https://unpkg.com/blockly@10.4.3/javascript_compressed.js?v=1.1"></script>
+    <script src="https://unpkg.com/blockly@10.4.3/msg/zh-hant.js?v=1.1"></script>
+
+    <!-- Virtual joystick (nipplejs) for iPad/touch devices -->
+    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.2/dist/nipplejs.min.js"></script>
+
+    <style>
+        :root {
+            --creafly-cyan: #00A3E0;
+            --creafly-green: #1B998B;
+            --creafly-yellow: #FFCE00;
+            --creafly-dark: #0A2540;
+            --creafly-light: #F4F7F9;
+            --creafly-accent: #FF6B6B;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            background: var(--creafly-light);
+            color: var(--creafly-dark);
+            overflow: hidden;
+        }
+
+        #app {
+            display: grid;
+            grid-template-columns: 420px 1fr;
+            grid-template-rows: 56px 1fr 64px;
+            height: 100vh;
+            gap: 0;
+        }
+
+        /* iPad / touch detection: 在觸控裝置上 Blockly 變窄一點、場景拉大 */
+        @media (max-width: 1100px), (pointer: coarse) {
+            #app { grid-template-columns: 320px 1fr; }
+        }
+        @media (max-width: 820px) {
+            #app { grid-template-columns: 1fr; grid-template-rows: 200px 1fr 64px; }
+            #blockly-panel { display: none; }  /* 極小螢幕：先隱藏 Blockly，純手動模式 */
+        }
+
+        /* ===== Header ===== */
+        #header {
+            grid-column: 1 / 3;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            background: linear-gradient(90deg, var(--creafly-cyan), var(--creafly-green));
+            color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        #header .logo {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+        #header .logo .accent { color: var(--creafly-yellow); }
+        #header .subtitle {
+            margin-left: 12px;
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        #header .header-right {
+            margin-left: auto;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .mission-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .version-tag {
+            display: inline-block;
+            background: rgba(255,200,0,0.25);
+            color: var(--creafly-yellow);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            margin-left: 6px;
+            font-family: 'Consolas', monospace;
+        }
+        .timer-badge {
+            background: rgba(0,0,0,0.25);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-family: 'Consolas', monospace;
+            min-width: 90px;
+            text-align: center;
+        }
+        .header-btn {
+            position: fixed;
+            top: 12px;
+            right: 240px;
+            z-index: 250;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+        }
+        .header-btn:hover { background: rgba(255,255,255,0.3); }
+        .header-btn.active { background: var(--creafly-yellow); color: var(--creafly-dark); border-color: transparent; }
+
+        /* 校正按鈕（在 gamepad-hud 內） */
+        .calib-btn-start {
+            background: var(--creafly-yellow);
+            color: var(--creafly-dark);
+            border: none;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-left: 8px;
+        }
+        .calib-btn-start:hover { background: #ffd633; }
+
+        /* ===== Blockly panel ===== */
+        #blockly-panel {
+            background: white;
+            border-right: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #blockly-div {
+            flex: 1;
+        }
+        #blockly-toolbar {
+            padding: 10px 14px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        #blockly-toolbar button {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: white;
+        }
+        .btn-run {
+            background: var(--creafly-green);
+        }
+        .btn-run:hover:not(:disabled) {
+            background: #157d70;
+        }
+        .btn-stop {
+            background: var(--creafly-accent);
+        }
+        .btn-stop:hover:not(:disabled) {
+            background: #e85454;
+        }
+        .btn-reset {
+            background: #6c757d;
+            flex: 0 0 auto;
+        }
+        .btn-reset:hover:not(:disabled) {
+            background: #545b62;
+        }
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        /* ===== 3D scene ===== */
+        #scene-panel {
+            position: relative;
+            background: #87CEEB;
+            overflow: hidden;
+        }
+        #scene-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #scene-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+        }
+        .hud {
+            position: absolute;
+            background: rgba(10, 37, 64, 0.85);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            pointer-events: auto;
+            backdrop-filter: blur(4px);
+        }
+        #status-hud {
+            top: 16px;
+            left: 16px;
+        }
+        #status-hud .label { color: var(--creafly-yellow); font-weight: 600; }
+        #status-hud .value { color: white; }
+        #status-hud .row { margin: 4px 0; }
+
+        #help-hud {
+            bottom: 16px;
+            right: 16px;
+            max-width: 280px;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+        #help-hud h4 { margin: 0 0 6px 0; color: var(--creafly-yellow); }
+
+        /* ===== 實體搖桿 HUD ===== */
+        #gamepad-hud {
+            position: absolute;
+            top: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 37, 64, 0.92);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-family: 'Consolas', monospace;
+            z-index: 70;
+            border: 1px solid var(--creafly-green);
+            box-shadow: 0 0 12px rgba(27, 153, 139, 0.4);
+            max-width: 90vw;
+            display: none;
+        }
+        #gamepad-hud.show { display: block; }
+        body.debug-gamepad #gamepad-hud { display: block; }
+        #gamepad-hud .gp-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: var(--creafly-green);
+        }
+        #gamepad-hud .gp-name {
+            color: white;
+            font-size: 11px;
+            max-width: 280px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #gamepad-hud .gp-mapping {
+            color: var(--creafly-yellow);
+            font-size: 10px;
+        }
+        #gamepad-hud .gp-axes-row {
+            margin-top: 4px;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            font-size: 10px;
+        }
+        #gamepad-hud .gp-axes-label {
+            color: var(--creafly-yellow);
+        }
+        #gamepad-hud .gp-axes {
+            color: white;
+        }
+        #gamepad-hud .gp-buttons-row {
+            margin-top: 4px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+            max-width: 320px;
+        }
+        #gamepad-hud .gp-btn {
+            display: inline-block;
+            min-width: 18px;
+            padding: 2px 5px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            color: #aab;
+            font-size: 9px;
+            text-align: center;
+        }
+        #gamepad-hud .gp-btn.on {
+            background: var(--creafly-green);
+            color: var(--creafly-dark);
+            border-color: var(--creafly-green);
+            box-shadow: 0 0 6px rgba(27, 153, 139, 0.6);
+        }
+        #gamepad-hud .gp-btn.analog {
+            color: var(--creafly-yellow);
+        }
+
+        /* ===== PS4 視覺搖桿 — flex 簡單布局 ===== */
+        .ps4-controller {
+            position: relative;
+            width: 300px;
+            height: 170px;
+            margin: 8px 0;
+            display: none;
+            flex-direction: column;
+            z-index: 5;
+        }
+        body.gamepad-connected .ps4-controller,
+        body.debug-gamepad .ps4-controller {
+            display: flex;
+        }
+
+        /* 頂排：L2 L1 SHARE PS OPTIONS R1 R2 */
+        .ps4-top-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 22px;
+            padding: 0 2px;
+            gap: 3px;
+            position: relative;
+            z-index: 10;
+        }
+        .ps4-top-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #222;
+            color: #ddd;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            cursor: pointer;
+            padding: 0;
+            overflow: hidden;
+            height: 20px;
+            min-width: 26px;
+        }
+        .ps4-top-btn:hover { background: #333; border-color: #888; }
+        .ps4-top-btn.active { background: var(--creafly-green); color: var(--creafly-dark); border-color: var(--creafly-green); }
+        .ps4-shoulder-btn { background: #1a1a1a; }
+        .ps4-trigger-btn { background: #0a0a0a; min-width: 30px; }
+        .ps4-trigger-btn span { position: relative; z-index: 1; }
+        .ps4-trigger-fill {
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 0%;
+            background: rgba(27, 153, 139, 0.7);
+            transition: width 0.05s;
+            pointer-events: none;
+        }
+        .ps4-mini { font-size: 7px; background: #1a1a1a; min-width: 36px; }
+        .ps4-ps-btn {
+            background: radial-gradient(circle, #444, #111);
+            border-radius: 50%;
+            color: #fff;
+            font-size: 8px;
+            width: 22px;
+            height: 22px;
+            min-width: 22px;
+        }
+        .ps4-ps-btn.active { background: var(--creafly-cyan); color: var(--creafly-dark); }
+
+        /* 主區：body + 左右分區 */
+        .ps4-body {
+            flex: 1;
+            background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
+            border-radius: 60px 60px 30px 30px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+            pointer-events: none;
+            position: relative;
+        }
+        .ps4-controller.listening { animation: gp-listen 1s infinite; }
+        @keyframes gp-listen {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.3) hue-rotate(20deg); }
+        }
+        .ps4-main {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 14px;
+            z-index: 10;
+        }
+
+        /* 類比桿 */
+        .ps4-stick {
+            position: relative;
+            width: 44px;
+            height: 44px;
+            cursor: pointer;
+        }
+        .ps4-stick-l { order: 1; }
+        .ps4-stick-r { order: 3; }
+        .ps4-stick-base {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 30% 30%, #555, #111);
+            border-radius: 50%;
+            box-shadow: inset 0 0 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        .ps4-stick-cap {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            left: 50%;
+            top: 50%;
+            margin: -10px 0 0 -10px;
+            background: radial-gradient(circle at 30% 30%, #888, #333);
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+            transition: transform 0.05s;
+            pointer-events: none;
+        }
+        .ps4-stick.active .ps4-stick-cap {
+            background: radial-gradient(circle at 30% 30%, var(--creafly-yellow), #aa8800);
+            box-shadow: 0 0 8px var(--creafly-yellow);
+        }
+        .ps4-stick-label {
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 6px;
+            color: #aaa;
+            white-space: nowrap;
+            font-family: 'Consolas', monospace;
+            pointer-events: none;
+        }
+
+        /* D-pad（左中） */
+        .ps4-dpad {
+            order: 2;
+            display: grid;
+            grid-template-columns: repeat(3, 16px);
+            grid-template-rows: repeat(3, 16px);
+            gap: 1px;
+            position: relative;
+        }
+        .ps4-dpad-center { background: #333; border-radius: 2px; }
+        .ps4-dpad-btn {
+            background: #2a2a2a;
+            border: 1px solid #666;
+            color: #ddd;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 0;
+            cursor: pointer;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ps4-dpad-btn:hover { background: #444; border-color: #888; }
+        .ps4-dpad-btn.active {
+            background: var(--creafly-green);
+            color: var(--creafly-dark);
+            box-shadow: 0 0 6px var(--creafly-green);
+        }
+
+        /* 面按鍵（右中） */
+        .ps4-face {
+            order: 4;
+            display: grid;
+            grid-template-columns: repeat(3, 18px);
+            grid-template-rows: repeat(3, 18px);
+            gap: 1px;
+            position: relative;
+        }
+        .ps4-face-center { background: #333; border-radius: 50%; }
+        .ps4-face-btn {
+            border: 1px solid #666;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 0;
+            cursor: pointer;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ps4-face-btn:hover { transform: scale(1.1); }
+        .ps4-tri  { background: #2a4d2a; color: #6df; }   /* △ 綠 */
+        .ps4-circ { background: #4d2a2a; color: #f66; }   /* ○ 紅 */
+        .ps4-cros { background: #2a3d4d; color: #6cf; }   /* ✕ 藍 */
+        .ps4-sq   { background: #4d4a2a; color: #fc6; }   /* □ 粉 */
+        .ps4-face-btn.active {
+            box-shadow: 0 0 12px currentColor;
+            transform: scale(1.2);
+        }
+
+        /* 校正按鈕（在 gamepad-hud 內） */
+        .gp-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .gp-action-btn {
+            flex: 1;
+            background: var(--creafly-cyan);
+            color: white;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .gp-action-btn:hover { background: #0084b8; }
+        #gp-reset-btn { background: #6c757d; }
+        #gp-reset-btn:hover { background: #545b62; }
+
+        /* 📌 對映按鈕 — 每個 PS4 按鍵右上角小圖示（純視覺，不擋 click）*/
+        .ps4-pin {
+            position: absolute;
+            top: -3px;
+            right: -3px;
+            font-size: 7px;
+            background: rgba(255, 200, 0, 0.9);
+            color: #222;
+            border-radius: 50%;
+            width: 10px;
+            height: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;   /* 關鍵：讓 click 穿透到 button */
+            border: 1px solid #fff;
+            opacity: 0;
+            transition: opacity 0.15s, transform 0.15s;
+            z-index: 5;
+            line-height: 1;
+        }
+        /* 滑鼠 hover 按鍵時，📌 顯示 */
+        [data-key]:hover > .ps4-pin { opacity: 1; }
+        /* 對映中（listening）：📌 變大、閃爍 */
+        .ps4-controller.listening [data-pin-listening] .ps4-pin {
+            opacity: 1;
+            transform: scale(1.6);
+            background: #ff6;
+            animation: pin-pulse 0.6s infinite;
+        }
+        @keyframes pin-pulse {
+            0%, 100% { box-shadow: 0 0 4px #ff6; }
+            50% { box-shadow: 0 0 12px #ff6; }
+        }
+
+        /* 推桿軸標籤（顯示目前對映到哪個 axes index） */
+        .ps4-stick-axis-label {
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 7px;
+            color: #aaa;
+            white-space: nowrap;
+            font-family: 'Consolas', monospace;
+        }
+
+        /* 推桿「對映中」hover 提示 */
+        .ps4-stick {
+            position: relative;
+            cursor: pointer;
+            z-index: 10;
+        }
+        .ps4-stick::after {
+            content: '📌';
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            font-size: 7px;
+            background: rgba(255, 200, 0, 0.9);
+            color: #222;
+            border-radius: 50%;
+            width: 10px;
+            height: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #fff;
+            opacity: 0;
+            transition: opacity 0.15s;
+            pointer-events: none;
+        }
+        .ps4-stick:hover::after { opacity: 1; }
+        .ps4-stick.armed::after {
+            opacity: 1;
+            transform: scale(1.4);
+            background: #ff6;
+            animation: pin-pulse 0.6s infinite;
+        }
+
+        /* 確保 gamepad-hud 蓋在 Blockly 上方（不被擋） */
+        #gamepad-hud {
+            z-index: 250 !important;
+            display: none;   /* 預設隱藏，避免擋飛行視線 */
+        }
+        #gamepad-hud.show { display: block; }
+        body.debug-gamepad #gamepad-hud { display: block; }   /* debug 模式預設顯示 */
+        #gamepad-hud button,
+        #gamepad-hud input[type="range"] {
+            z-index: 10;
+            position: relative;
+        }
+
+        /* 設定模式 toggle 按鈕（展開 / 收起 gamepad-hud） */
+        #gp-settings-toggle {
+            position: fixed;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 245;
+            background: rgba(10, 37, 64, 0.85);
+            color: white;
+            border: 1px solid var(--creafly-cyan);
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #gp-settings-toggle:hover { background: var(--creafly-cyan); }
+        #gp-settings-toggle.active { background: var(--creafly-cyan); }
+        body.gamepad-connected #gp-settings-toggle { display: inline-block; }
+        body:not(.gamepad-connected) #gp-settings-toggle { display: none; }
+
+        /* 模式切換 / 校正入口按鈕（header 內） */
+        .header-btn {
+            background: rgba(255,255,255,0.15);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-right: 6px;
+        }
+        .header-btn:hover { background: rgba(255,255,255,0.25); }
+        .header-btn.active { background: var(--creafly-cyan); border-color: var(--creafly-cyan); }
+
+        /* 校正搖桿 FAB（fixed 在右上角，挨著 mode-toggle 左邊） */
+        .header-btn-calib {
+            position: fixed;
+            top: 12px;
+            right: 360px;
+            z-index: 260;
+            background: linear-gradient(135deg, var(--creafly-yellow), #f0b020) !important;
+            color: var(--creafly-dark) !important;
+            border-color: transparent !important;
+            font-weight: 700 !important;
+            box-shadow: 0 2px 8px rgba(255, 200, 0, 0.5);
+        }
+        .header-btn-calib:hover {
+            background: linear-gradient(135deg, #f0b020, #d09010) !important;
+            box-shadow: 0 4px 12px rgba(255, 200, 0, 0.7);
+        }
+        /* 沒搖桿時變灰 */
+        body:not(.gamepad-connected) .header-btn-calib {
+            background: rgba(255,255,255,0.3) !important;
+            color: rgba(255,255,255,0.7) !important;
+        }
+
+        /* ===== 即時 tuning（反轉 / 死區）===== */
+        .gp-tuning {
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255,255,255,0.15);
+        }
+        .gp-tuning-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            margin-top: 4px;
+        }
+        .gp-tuning-label {
+            flex: 0 0 80px;
+            text-align: right;
+            color: #aaa;
+        }
+        .gp-toggle-btn {
+            flex: 1;
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            cursor: pointer;
+            font-family: 'Consolas', monospace;
+        }
+        .gp-toggle-btn.on {
+            background: var(--creafly-yellow);
+            color: var(--creafly-dark);
+            border-color: var(--creafly-yellow);
+        }
+        .gp-slider {
+            flex: 1;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #444;
+            border-radius: 2px;
+            cursor: pointer;
+        }
+        .gp-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: var(--creafly-cyan);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        /* Mode 1 / Mode 2 toggle */
+        .gp-mode-toggle {
+            flex: 1;
+            display: flex;
+            gap: 2px;
+        }
+        .gp-mode-btn {
+            flex: 1;
+            background: #444;
+            color: white;
+            border: 1px solid #666;
+            padding: 3px 4px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .gp-mode-btn:hover { background: #555; }
+        .gp-mode-btn.active {
+            background: var(--creafly-cyan);
+            color: white;
+            border-color: var(--creafly-cyan);
+            box-shadow: 0 0 6px var(--creafly-cyan);
+        }
+        .gp-tuning-val {
+            flex: 0 0 32px;
+            text-align: right;
+            color: var(--creafly-yellow);
+            font-family: 'Consolas', monospace;
+            font-size: 10px;
+        }
+
+        /* ===== Axes 即時條形圖 ===== */
+        .gp-axis-bars {
+            margin-top: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .gp-axis-bar {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 9px;
+            font-family: 'Consolas', monospace;
+        }
+        .gp-axis-name {
+            flex: 0 0 14px;
+            color: #888;
+        }
+        .gp-axis-track {
+            flex: 1;
+            height: 6px;
+            background: #1a1a1a;
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }
+        .gp-axis-center {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: #555;
+        }
+        .gp-axis-fill {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 0;
+            background: var(--creafly-cyan);
+            transition: width 0.05s, background 0.1s, left 0.05s;
+        }
+        .gp-axis-fill.negative {
+            background: var(--creafly-yellow);
+        }
+        .gp-axis-num {
+            flex: 0 0 32px;
+            text-align: right;
+            color: white;
+        }
+
+        #mission-hud {
+            top: 16px;
+            right: 16px;
+            min-width: 220px;
+        }
+        #mission-hud h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: var(--creafly-yellow);
+        }
+        #mission-hud .ring-status {
+            display: flex;
+            gap: 8px;
+            margin-top: 6px;
+        }
+        .ring-dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid white;
+            background: transparent;
+            transition: all 0.3s;
+        }
+        .ring-dot.done {
+            background: var(--creafly-green);
+            box-shadow: 0 0 8px var(--creafly-green);
+        }
+        .ring-dot.current {
+            background: var(--creafly-yellow);
+            animation: pulse 1.2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.7; }
+        }
+
+        /* ===== Footer ===== */
+        #footer {
+            grid-column: 1 / 3;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            background: var(--creafly-dark);
+            color: #aab;
+            font-size: 12px;
+        }
+        #footer .left { flex: 1; }
+        #footer .right { opacity: 0.7; }
+
+        /* ===== Blockly toolbox style overrides ===== */
+        .blocklyToolboxDiv {
+            background: #f8f9fa !important;
+            border-right: 1px solid #e0e0e0 !important;
+        }
+        .blocklyTreeRow {
+            font-size: 14px !important;
+            font-weight: 500;
+        }
+
+        /* ===== Error display ===== */
+        #error-display {
+            position: fixed;
+            top: 80px;
+            right: 16px;
+            background: var(--creafly-accent);
+            color: white;
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            display: none;
+            z-index: 1000;
+            max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+
+        /* ===== Toast ===== */
+        #toast {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--creafly-dark);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        #toast.show { opacity: 1; }
+        #toast.success { background: var(--creafly-green); }
+        #toast.error { background: var(--creafly-accent); }
+
+        /* ===== Virtual Joystick (iPad / touch) ===== */
+        #joystick-layer {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 50;
+        }
+        .joystick-zone {
+            position: absolute;
+            bottom: max(24px, env(safe-area-inset-bottom, 24px));
+            width: 160px;
+            height: 160px;
+            pointer-events: auto;
+            display: none;       /* 預設隱藏，偵測到觸控才顯示 */
+            overflow: hidden;
+            touch-action: none;
+        }
+        #joystick-left  { left:  max(24px, env(safe-area-inset-left, 24px)); }
+        #joystick-right { right: max(24px, env(safe-area-inset-right, 24px)); }
+        body.touch-device .joystick-zone { display: block; }
+        body.joystick-forced .joystick-zone { display: block; }
+
+        /* nipplejs 內部樣式覆寫 */
+        .joystick-zone .back,
+        .joystick-zone .front {
+            background: rgba(0, 163, 224, 0.45) !important;
+            border: 2px solid rgba(255, 255, 255, 0.7) !important;
+        }
+        .joystick-zone .front {
+            background: rgba(27, 153, 139, 0.7) !important;
+            box-shadow: 0 0 16px rgba(27, 153, 139, 0.5) !important;
+        }
+
+        .joystick-label {
+            position: absolute;
+            top: -28px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(10, 37, 64, 0.7);
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 12px;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        /* ===== 模式切換按鈕樣式由 .header-btn 提供（見前段） ===== */
+
+        /* ===== 搖桿校正 Wizard ===== */
+        #calib-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(10, 37, 64, 0.96);
+            z-index: 500;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-family: 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+        }
+        #calib-overlay.show { display: flex; }
+        #calib-overlay .calib-card {
+            background: rgba(0, 30, 50, 0.95);
+            border: 2px solid var(--creafly-cyan);
+            border-radius: 16px;
+            padding: 32px 40px;
+            max-width: 540px;
+            width: 90vw;
+            box-shadow: 0 0 40px rgba(0, 163, 224, 0.3);
+        }
+        #calib-overlay h2 {
+            margin: 0 0 8px 0;
+            color: var(--creafly-cyan);
+            font-size: 22px;
+        }
+        #calib-overlay .calib-subtitle {
+            color: #aab;
+            font-size: 13px;
+            margin-bottom: 24px;
+        }
+        #calib-overlay .calib-step {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--creafly-yellow);
+            margin: 20px 0;
+            min-height: 40px;
+            text-align: center;
+        }
+        #calib-overlay .calib-hint {
+            font-size: 14px;
+            color: #ccc;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        #calib-overlay .calib-progress {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+        #calib-overlay .calib-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transition: all 0.3s;
+        }
+        #calib-overlay .calib-dot.active {
+            background: var(--creafly-green);
+            box-shadow: 0 0 8px var(--creafly-green);
+        }
+        #calib-overlay .calib-dot.current {
+            background: var(--creafly-yellow);
+            box-shadow: 0 0 12px var(--creafly-yellow);
+            transform: scale(1.3);
+        }
+        #calib-overlay .calib-live {
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-family: 'Consolas', monospace;
+            font-size: 13px;
+            margin: 16px 0;
+        }
+        #calib-overlay .calib-axes {
+            color: var(--creafly-cyan);
+            margin-bottom: 6px;
+        }
+        #calib-overlay .calib-btns {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        #calib-overlay .calib-btn {
+            min-width: 28px;
+            padding: 4px 8px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            color: #aab;
+            font-size: 11px;
+            text-align: center;
+        }
+        #calib-overlay .calib-btn.on {
+            background: var(--creafly-green);
+            color: var(--creafly-dark);
+            border-color: var(--creafly-green);
+        }
+        #calib-overlay .calib-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 24px;
+        }
+        #calib-overlay .calib-actions button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        #calib-overlay .btn-skip {
+            background: #6c757d;
+            color: white;
+        }
+        #calib-overlay .btn-cancel {
+            background: var(--creafly-accent);
+            color: white;
+        }
+        #calib-overlay .btn-save {
+            background: var(--creafly-green);
+            color: white;
+        }
+        #calib-overlay .calib-result {
+            background: rgba(27, 153, 139, 0.2);
+            border-left: 3px solid var(--creafly-green);
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-top: 16px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        #calib-overlay .calib-result b { color: var(--creafly-yellow); }
+        #calib-overlay .calib-arrow {
+            display: inline-block;
+            font-size: 20px;
+            margin: 0 8px;
+            animation: calib-bounce 1s infinite;
+        }
+        @keyframes calib-bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+        #calib-overlay .calib-timer-wrap {
+            margin: 14px 0 6px;
+        }
+        #calib-overlay .calib-timer-text {
+            font-size: 14px;
+            color: var(--creafly-yellow);
+            font-weight: 700;
+            margin-bottom: 6px;
+            font-family: 'Consolas', monospace;
+        }
+        #calib-overlay .calib-timer-bar {
+            background: rgba(255,255,255,0.15);
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #calib-overlay .calib-timer-fill {
+            background: linear-gradient(90deg, var(--creafly-yellow), #ffeb3b);
+            height: 100%;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+        html, body, #app, #scene-panel, #scene-canvas {
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #blockly-div, .blocklyToolboxDiv {
+            touch-action: manipulation;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div id="header">
+        <div class="logo">CREAFLY<span class="accent">.</span></div>
+        <span class="version-tag" id="version-tag">v1.2</span>
+        <div class="subtitle">無人機教育模擬器 · Blockly 程式化飛行</div>
+        <div class="header-right">
+            <div class="mission-badge" id="mission-name">任務 1：穿過三個圈</div>
+            <div class="timer-badge" id="timer-display">0.0s</div>
+        </div>
+    </div>
+
+    <div id="blockly-panel">
+        <div id="blockly-div"></div>
+        <div id="blockly-toolbar">
+            <button class="btn-run" id="btn-run">▶ 執行程式</button>
+            <button class="btn-stop" id="btn-stop" disabled>■ 停止</button>
+            <button class="btn-reset" id="btn-reset" title="重置無人機位置">↻</button>
+        </div>
+    </div>
+
+    <div id="scene-panel">
+        <canvas id="scene-canvas"></canvas>
+        <div id="joystick-layer">
+            <div id="joystick-left" class="joystick-zone">
+                <div class="joystick-label">⬆ 升降 / ↔ 旋轉</div>
+            </div>
+            <div id="joystick-right" class="joystick-zone">
+                <div class="joystick-label">⬆ 前後 / ↔ 左右</div>
+            </div>
+        </div>
+        <div id="scene-overlay">
+            <div id="gamepad-hud">
+                <div class="gp-header">
+                    <span>🎮</span>
+                    <span class="gp-name">—</span>
+                    <span class="gp-mapping">—</span>
+                </div>
+                <!-- PS4 視覺搖桿 -->
+                <div class="ps4-controller" id="ps4-controller">
+                    <!-- 頂排：L2 L1 SHARE PS OPTIONS R1 R2 -->
+                    <div class="ps4-top-row">
+                        <button class="ps4-top-btn ps4-trigger-btn"   data-key="l2"      title="L2 扳機"><div class="ps4-trigger-fill" id="ps4-l2-fill"></div><span>L2</span></button>
+                        <button class="ps4-top-btn ps4-shoulder-btn"  data-key="l1"      title="L1">L1</button>
+                        <button class="ps4-top-btn ps4-mini"          data-key="share"   title="SHARE">SHARE</button>
+                        <div    class="ps4-top-btn ps4-ps-btn"        data-key="ps"      title="PS 鍵">PS</div>
+                        <button class="ps4-top-btn ps4-mini"          data-key="options" title="OPTIONS">OPTIONS</button>
+                        <button class="ps4-top-btn ps4-shoulder-btn"  data-key="r1"      title="R1">R1</button>
+                        <button class="ps4-top-btn ps4-trigger-btn"   data-key="r2"      title="R2 扳機"><div class="ps4-trigger-fill" id="ps4-r2-fill"></div><span>R2</span></button>
+                    </div>
+                    <!-- 主區 -->
+                    <div class="ps4-body"></div>
+                    <div class="ps4-main">
+                        <!-- 左類比桿 -->
+                        <div class="ps4-stick ps4-stick-l" id="ps4-stick-left">
+                            <div class="ps4-stick-base"></div>
+                            <div class="ps4-stick-cap" id="ps4-stick-cap-l"></div>
+                            <div class="ps4-stick-label" id="ps4-stick-label-l">LX0 LY1</div>
+                        </div>
+                        <!-- D-pad -->
+                        <div class="ps4-dpad">
+                            <div></div>
+                            <button class="ps4-dpad-btn" data-key="dpadUp"    title="D-Pad 上">▲</button>
+                            <div></div>
+                            <button class="ps4-dpad-btn" data-key="dpadLeft"  title="D-Pad 左">◀</button>
+                            <div class="ps4-dpad-center"></div>
+                            <button class="ps4-dpad-btn" data-key="dpadRight" title="D-Pad 右">▶</button>
+                            <div></div>
+                            <button class="ps4-dpad-btn" data-key="dpadDown"  title="D-Pad 下">▼</button>
+                            <div></div>
+                        </div>
+                        <!-- 右類比桿 -->
+                        <div class="ps4-stick ps4-stick-r" id="ps4-stick-right">
+                            <div class="ps4-stick-base"></div>
+                            <div class="ps4-stick-cap" id="ps4-stick-cap-r"></div>
+                            <div class="ps4-stick-label" id="ps4-stick-label-r">RX2 RY3</div>
+                        </div>
+                        <!-- 面按鍵 -->
+                        <div class="ps4-face">
+                            <div></div>
+                            <button class="ps4-face-btn ps4-tri"  data-key="triangle" title="△ 三角">△</button>
+                            <div></div>
+                            <button class="ps4-face-btn ps4-sq"   data-key="square"   title="□ 方塊">□</button>
+                            <div class="ps4-face-center"></div>
+                            <button class="ps4-face-btn ps4-circ" data-key="circle"   title="○ 圓圈">○</button>
+                            <div></div>
+                            <button class="ps4-face-btn ps4-cros" data-key="cross"    title="✕ 叉叉">✕</button>
+                            <div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="gp-axes-row">
+                    <span class="gp-axes-label">axes:</span>
+                    <span class="gp-axes" id="gamepad-axes">0.00 | 0.00 | 0.00 | 0.00</span>
+                </div>
+                <!-- Axes 即時條形圖：a0/a1/a2/a3 推到哪一目了然 -->
+                <div class="gp-axis-bars">
+                    <div class="gp-axis-bar"><span class="gp-axis-name">a0</span><div class="gp-axis-track"><div class="gp-axis-center"></div><div class="gp-axis-fill" id="axis-fill-0"></div></div><span class="gp-axis-num" id="axis-num-0">0.00</span></div>
+                    <div class="gp-axis-bar"><span class="gp-axis-name">a1</span><div class="gp-axis-track"><div class="gp-axis-center"></div><div class="gp-axis-fill" id="axis-fill-1"></div></div><span class="gp-axis-num" id="axis-num-1">0.00</span></div>
+                    <div class="gp-axis-bar"><span class="gp-axis-name">a2</span><div class="gp-axis-track"><div class="gp-axis-center"></div><div class="gp-axis-fill" id="axis-fill-2"></div></div><span class="gp-axis-num" id="axis-num-2">0.00</span></div>
+                    <div class="gp-axis-bar"><span class="gp-axis-name">a3</span><div class="gp-axis-track"><div class="gp-axis-center"></div><div class="gp-axis-fill" id="axis-fill-3"></div></div><span class="gp-axis-num" id="axis-num-3">0.00</span></div>
+                </div>
+                <div class="gp-actions">
+                    <button id="calib-start-btn" class="gp-action-btn">⚙ 校正</button>
+                    <button id="gp-reset-btn" class="gp-action-btn">↻ 重置映射</button>
+                </div>
+                <div class="gp-tuning">
+                    <div class="gp-tuning-row">
+                        <span class="gp-tuning-label">↕ 升降反轉：</span>
+                        <button id="inv-throttle-btn" class="gp-toggle-btn">關</button>
+                    </div>
+                    <div class="gp-tuning-row">
+                        <span class="gp-tuning-label">死區：</span>
+                        <input id="deadzone-slider" type="range" min="0.02" max="0.30" step="0.01" value="0.10" class="gp-slider">
+                        <span id="deadzone-val" class="gp-tuning-val">0.10</span>
+                    </div>
+                    <div class="gp-tuning-row">
+                        <button id="gp-reset-all-btn" class="gp-toggle-btn" style="flex: 1; background: #c0392b;">🔄 重置所有搖桿設定</button>
+                    </div>
+                </div>
+                <div class="gp-buttons-row" id="gamepad-buttons"></div>
+            </div>
+            <div id="status-hud" class="hud">
+                <div class="row"><span class="label">高度：</span><span class="value" id="hud-alt">0.0</span> m</div>
+                <div class="row"><span class="label">狀態：</span><span class="value" id="hud-state">待命</span></div>
+                <div class="row"><span class="label">模式：</span><span class="value">手動 (鍵盤) / 程式</span></div>
+            </div>
+            <div id="mission-hud" class="hud">
+                <h3>關卡進度</h3>
+                <div>已穿過 <span id="rings-passed">0</span> / 3 個圈</div>
+                <div class="ring-status">
+                    <div class="ring-dot current" id="dot-0"></div>
+                    <div class="ring-dot" id="dot-1"></div>
+                    <div class="ring-dot" id="dot-2"></div>
+                </div>
+            </div>
+            <div id="help-hud" class="hud">
+                <h4>🕹 控制方式</h4>
+                <div id="help-gamepad" style="display:none; margin-bottom:6px;">
+                    <strong>實體搖桿：</strong><br>
+                    左桿 上下：升降<br>
+                    左桿 左右：左飛/右飛<br>
+                    右桿 上下：前進/後退<br>
+                    右桿 左右：旋轉機頭<br>
+                    A 鍵：起飛　B 鍵：降落　X 鍵：重置
+                </div>
+                <div id="help-keyboard">
+                    <strong>鍵盤：</strong><br>
+                    W/S — 前進 / 後退<br>
+                    A/D — 左飛 / 右飛<br>
+                    Space / Shift — 上升 / 下降<br>
+                    ← / → — 旋轉機頭
+                </div>
+                <div id="help-joystick" style="display:none; margin-top:6px;">
+                    <strong>虛擬搖桿：</strong><br>
+                    左桿 上下：升降<br>
+                    左桿 左右：旋轉<br>
+                    右桿 上下：前進/後退<br>
+                    右桿 左右：左飛/右飛
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="footer">
+        <div class="left">CREAFLY 內部預覽 · 基於 <a href="https://github.com/eccc20984/drone-simulator" style="color: var(--creafly-cyan);">eccc20984/drone-simulator</a> (MIT) 改造</div>
+        <div class="right">Mavis × Sam 2026</div>
+    </div>
+</div>
+
+<div id="error-display"></div>
+<div id="toast"></div>
+<button id="mode-toggle" class="header-btn">🎮 搖桿</button>
+<button id="calib-fab" class="header-btn header-btn-calib">⚙ 校正搖桿</button>
+<button id="gp-settings-toggle" title="展開 / 收起搖桿設定面板（不擋飛行視線）">⚙ 搖桿設定</button>
+
+<!-- 搖桿校正 Wizard -->
+<div id="calib-overlay">
+    <div class="calib-card">
+        <h2>🎮 搖桿校正精靈</h2>
+        <div class="calib-subtitle">花 30 秒告訴程式你的搖桿怎麼對應，之後永遠不用再調</div>
+        <div class="calib-step" id="calib-step-label">準備中…</div>
+        <div class="calib-hint" id="calib-hint">請插上搖桿後開始</div>
+        <div class="calib-progress" id="calib-progress"></div>
+        <div class="calib-timer-wrap" id="calib-timer-wrap" style="display:none;">
+            <div class="calib-timer-text" id="calib-timer-text">5s</div>
+            <div class="calib-timer-bar"><div class="calib-timer-fill" id="calib-timer-fill"></div></div>
+        </div>
+        <div class="calib-live">
+            <div class="calib-axes" id="calib-axes">axes: 0.00 | 0.00 | 0.00 | 0.00</div>
+            <div class="calib-btns" id="calib-btns"></div>
+        </div>
+        <div class="calib-result" id="calib-result" style="display:none;"></div>
+        <div class="calib-actions">
+            <button class="btn-skip" id="calib-skip">跳過此步</button>
+            <button class="btn-cancel" id="calib-cancel">取消</button>
+            <button class="btn-save" id="calib-save" style="display:none;">✓ 儲存並套用</button>
+        </div>
+    </div>
+</div>
+
+<!-- Three.js module import map -->
+<script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.162.0/build/three.module.js"
+        }
+    }
+</script>
+
+<script>
+    // Error display
+    window.onerror = function(msg, url, line, col, error) {
+        const errorDisplay = document.getElementById('error-display');
+        errorDisplay.style.display = 'block';
+        errorDisplay.textContent = `Error: ${msg} (line ${line})`;
+        console.error('Error:', error);
+        return false;
+    };
+
+    // Toast helper
+    let toastTimeout = null;
+    function showToast(msg, kind = '') {
+        const toast = document.getElementById('toast');
+        toast.textContent = msg;
+        toast.className = 'show ' + kind;
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => { toast.className = ''; }, 2500);
+    }
+</script>
+
+<script type="module" src="/main.js"></script>
+</body>
+</html>
