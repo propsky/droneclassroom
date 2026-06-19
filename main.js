@@ -338,6 +338,184 @@ const droneState = {
 const HOME_POSITION = new THREE.Vector3(0, 0.4, 0);
 
 // =============================================================================
+// 5.5 v1.3 音訊模組（Web Audio API 程式生成）
+// =============================================================================
+const audioState = {
+    ctx: null,           // AudioContext
+    bgmOsc: null,        // BGM gain node
+    bgmPlaying: false,
+    muted: false,
+};
+
+function initAudio() {
+    if (audioState.ctx) return audioState.ctx;
+    try {
+        audioState.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+        console.warn('Web Audio API 不可用', e);
+        return null;
+    }
+    return audioState.ctx;
+}
+
+function ensureAudio() {
+    if (!audioState.ctx) initAudio();
+    if (audioState.ctx && audioState.ctx.state === 'suspended') {
+        audioState.ctx.resume();
+    }
+    return audioState.ctx;
+}
+
+// 過關音效：3 個上升音（C5-E5-G5）
+function playRingSound() {
+    const ctx = ensureAudio();
+    if (!ctx || audioState.muted) return;
+    const now = ctx.currentTime;
+    const freqs = [523.25, 659.25, 783.99];  // C5, E5, G5
+    freqs.forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = f;
+        gain.gain.setValueAtTime(0, now + i * 0.08);
+        gain.gain.linearRampToValueAtTime(0.08, now + i * 0.08 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.2);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + i * 0.08);
+        osc.stop(now + i * 0.08 + 0.22);
+    });
+}
+
+// 撞牆 / 撞地音效：低頻方波短暫
+function playBumpSound() {
+    const ctx = ensureAudio();
+    if (!ctx || audioState.muted) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(120, now);
+    osc.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.12, now + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.2);
+}
+
+// 緊急停止音效：噪音衰減
+function playStopSound() {
+    const ctx = ensureAudio();
+    if (!ctx || audioState.muted) return;
+    const now = ctx.currentTime;
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 1000;
+    src.connect(filter).connect(gain).connect(ctx.destination);
+    src.start(now);
+    src.stop(now + 0.26);
+}
+
+// 過關完成：上行琶音 + 結束音
+function playCompleteSound() {
+    const ctx = ensureAudio();
+    if (!ctx || audioState.muted) return;
+    const now = ctx.currentTime;
+    const freqs = [523.25, 659.25, 783.99, 1046.5];  // C5 E5 G5 C6
+    freqs.forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = f;
+        gain.gain.setValueAtTime(0, now + i * 0.1);
+        gain.gain.linearRampToValueAtTime(0.1, now + i * 0.1 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.3);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(now + i * 0.1);
+        osc.stop(now + i * 0.1 + 0.32);
+    });
+}
+
+// BGM：8-bit 風格 loop（30 秒）
+function startBGM() {
+    if (audioState.bgmPlaying) return;
+    const ctx = ensureAudio();
+    if (!ctx) return;
+    audioState.bgmPlaying = true;
+
+    // 主旋律（C-E-G-C 高八度）
+    const melody = [523.25, 659.25, 783.99, 1046.5, 783.99, 659.25];
+    const bass = [130.81, 164.81, 196.00, 130.81];  // C3 E3 G3 C3
+    const beat = 0.25;  // 16 BPM / 拍
+    const loopLen = melody.length * beat;
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.value = audioState.muted ? 0 : 0.07;
+    masterGain.connect(ctx.destination);
+    audioState.bgmOsc = masterGain;
+
+    function playMelodyNote(freq, start, dur) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.5, start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+        osc.connect(gain).connect(masterGain);
+        osc.start(start);
+        osc.stop(start + dur + 0.05);
+    }
+    function playBassNote(freq, start, dur) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.6, start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
+        osc.connect(gain).connect(masterGain);
+        osc.start(start);
+        osc.stop(start + dur + 0.05);
+    }
+
+    function scheduleLoop() {
+        if (!audioState.bgmPlaying) return;
+        const t0 = ctx.currentTime;
+        melody.forEach((f, i) => playMelodyNote(f, t0 + i * beat, beat * 0.9));
+        bass.forEach((f, i) => playBassNote(f, t0 + i * (loopLen / bass.length), loopLen / bass.length * 0.9));
+        setTimeout(scheduleLoop, loopLen * 1000);
+    }
+    scheduleLoop();
+}
+
+function stopBGM() {
+    audioState.bgmPlaying = false;
+    if (audioState.bgmOsc) {
+        audioState.bgmOsc.gain.value = 0;
+        audioState.bgmOsc = null;
+    }
+}
+
+function setMute(muted) {
+    audioState.muted = muted;
+    if (audioState.bgmOsc) {
+        audioState.bgmOsc.gain.value = muted ? 0 : 0.07;
+    }
+}
+
+// =============================================================================
 // 6. 鍵盤 + 虛擬搖桿 控制
 // =============================================================================
 const keys = {};
@@ -366,6 +544,7 @@ window.addEventListener('keydown', e => {
         droneState.velocity.set(0, 0, 0);
         droneState.angularVelocity = 0;
         showToast('🛑 緊急停止 — 推桿恢復飛行', 'warning');
+        playStopSound();
     }
 });
 
@@ -1733,12 +1912,14 @@ function checkRingCollisions() {
             programState.ringsCollected++;
             updateRingHUD();
             showToast(`✓ 穿過圈 ${i+1}`, 'success');
+            playRingSound();
         }
     });
     // 手動模式：3 圈都過了也顯示完成（不結束遊戲）
     if (!programState.running && programState.ringsCollected >= programState.totalRings && !programState.manualComplete) {
         programState.manualComplete = true;
         showToast('🎉 手動模式：3 圈全破！', 'success');
+        playCompleteSound();
     }
     // 重置時把 manualComplete 清掉
     if (programState.ringsCollected < programState.totalRings) {
@@ -1768,10 +1949,12 @@ function animate() {
 
         // 地板碰撞
         if (droneState.position.y < HOME_POSITION.y) {
+            const wasFlying = droneState.isFlying;
             droneState.position.y = HOME_POSITION.y;
             droneState.velocity.y = 0;
             droneState.isGrounded = true;
             droneState.isFlying = false;
+            if (wasFlying) playBumpSound();  // 撞地音效
         }
     } else {
         // 程式執行中：物理由 tween 控制，但仍做地板保護
@@ -2176,6 +2359,26 @@ document.getElementById('calib-save').addEventListener('click', () => endCalibra
 
 // v1.3 回家按鈕
 document.getElementById('home-btn').addEventListener('click', goHome);
+
+// v1.3 靜音按鈕
+document.getElementById('mute-btn').addEventListener('click', () => {
+    const btn = document.getElementById('mute-btn');
+    audioState.muted = !audioState.muted;
+    setMute(audioState.muted);
+    btn.textContent = audioState.muted ? '🔇 靜音中' : '🔊 音效';
+    btn.classList.toggle('muted', audioState.muted);
+    showToast(audioState.muted ? '🔇 音效關閉' : '🔊 音效開啟', '');
+});
+
+// v1.3 第一次互動後啟動 BGM（autoplay policy）
+window.addEventListener('pointerdown', () => {
+    ensureAudio();
+    if (!audioState.bgmPlaying) startBGM();
+}, { once: false });
+window.addEventListener('keydown', () => {
+    ensureAudio();
+    if (!audioState.bgmPlaying) startBGM();
+}, { once: false });
 
 // 互動式 mapping — 點 PS4 視覺上的按鍵進入對映模式
 document.querySelectorAll('#ps4-controller [data-key]').forEach(el => {
