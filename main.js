@@ -425,7 +425,100 @@ const droneState = {
 const HOME_POSITION = new THREE.Vector3(0, 0.4, 0);
 
 // =============================================================================
-// 5.5 v1.3 音訊模組（Web Audio API 程式生成）
+// 5.5 v1.3 玩家模組（帳密 / 顯示名稱）
+// =============================================================================
+const player = {
+    name: '',
+    emoji: '',
+};
+
+function loadPlayer() {
+    try {
+        const saved = localStorage.getItem('creafly_player');
+        if (saved) {
+            const p = JSON.parse(saved);
+            if (p && p.name && p.emoji) {
+                player.name = p.name;
+                player.emoji = p.emoji;
+                return true;
+            }
+        }
+    } catch (e) {
+        console.warn('載入玩家資料失敗', e);
+    }
+    return false;
+}
+
+function savePlayer() {
+    try {
+        localStorage.setItem('creafly_player', JSON.stringify({
+            name: player.name,
+            emoji: player.emoji,
+            createdAt: new Date().toISOString()
+        }));
+    } catch (e) {}
+}
+
+function showLoginModal() {
+    const modal = document.getElementById('login-modal');
+    if (!modal) return;
+    // 預填上次的名字
+    const nameInput = document.getElementById('login-name');
+    if (nameInput && player.name) nameInput.value = player.name;
+    // 清掉 emoji 選擇
+    document.querySelectorAll('.emoji-btn').forEach(b => b.classList.remove('selected'));
+    if (player.emoji) {
+        const btn = document.querySelector(`.emoji-btn[data-emoji="${player.emoji}"]`);
+        if (btn) btn.classList.add('selected');
+    }
+    modal.classList.add('show');
+}
+
+function hideLoginModal() {
+    const modal = document.getElementById('login-modal');
+    if (modal) modal.classList.remove('show');
+    // 顯示 player HUD
+    const hud = document.getElementById('player-hud');
+    const display = document.getElementById('player-name-display');
+    if (hud && display) {
+        display.textContent = `${player.name}${player.emoji}`;
+        hud.style.display = 'flex';
+    }
+}
+
+function initPlayer() {
+    // emoji 選擇
+    document.querySelectorAll('.emoji-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.emoji-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            player.emoji = btn.getAttribute('data-emoji');
+        });
+    });
+    // 開始按鈕
+    document.getElementById('login-start').addEventListener('click', () => {
+        const name = (document.getElementById('login-name').value || '').trim();
+        if (!name) { showToast('請輸入名字', 'error'); return; }
+        if (!player.emoji) { showToast('請選一個動物', 'error'); return; }
+        player.name = name;
+        savePlayer();
+        hideLoginModal();
+        showToast(`✓ 歡迎 ${player.name}${player.emoji}！`, 'success');
+    });
+    // 改名
+    document.getElementById('player-rename').addEventListener('click', () => {
+        showLoginModal();
+    });
+    // 啟動時檢查
+    if (loadPlayer()) {
+        hideLoginModal();
+    } else {
+        showLoginModal();
+    }
+}
+
+// =============================================================================
+// 5.6 v1.3 音訊模組（Web Audio API 程式生成）
 // =============================================================================
 const audioState = {
     ctx: null,           // AudioContext
@@ -2137,6 +2230,7 @@ const workspace = injectBlockly();
 setupJoystick();
 detectGamepadSupport();
 resize();
+initPlayer();  // v1.3 玩家登入
 animate();
 
 document.getElementById('btn-run').addEventListener('click', () => runProgram(workspace));

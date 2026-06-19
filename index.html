@@ -1095,6 +1095,42 @@
             color: var(--creafly-yellow, #f1c40f);
         }
 
+        /* v1.3 玩家名稱 HUD（左上） */
+        #player-hud {
+            position: fixed;
+            top: 70px;
+            left: 12px;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 6px;
+            z-index: 200;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        #player-hud button {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.6);
+            cursor: pointer;
+            font-size: 12px;
+        }
+        #player-hud button:hover { color: var(--creafly-cyan, #4dd0e1); }
+
+        /* v1.3 emoji 選擇 */
+        .emoji-btn {
+            background: rgba(255,255,255,0.1);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            padding: 4px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        .emoji-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.15); }
+        .emoji-btn.selected { border-color: var(--creafly-cyan, #4dd0e1); background: rgba(77,208,225,0.2); }
+
         /* ===== 搖桿校正 Wizard ===== */
         #calib-overlay {
             position: fixed;
@@ -1462,6 +1498,31 @@
     </div>
 </div>
 
+<!-- v1.3 學生登入 modal -->
+<div id="login-modal" class="modal-overlay">
+    <div class="modal-card">
+        <div class="level-intro-title">🛩️ CREAFLY 歡迎</div>
+        <div class="level-intro-body">
+            你的名字（給老師跟同學看）：<br>
+            <input id="login-name" type="text" maxlength="10" placeholder="例：小翔" style="width: 100%; padding: 8px; margin: 8px 0; font-size: 16px; border-radius: 6px; border: 1px solid #ccc;">
+            <br>選一個代表你的動物：<br>
+            <div id="emoji-picker" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; font-size: 28px;">
+                <button class="emoji-btn" data-emoji="🐯">🐯</button>
+                <button class="emoji-btn" data-emoji="🦁">🦁</button>
+                <button class="emoji-btn" data-emoji="🐰">🐰</button>
+                <button class="emoji-btn" data-emoji="🐻">🐻</button>
+                <button class="emoji-btn" data-emoji="🐼">🐼</button>
+                <button class="emoji-btn" data-emoji="🐨">🐨</button>
+                <button class="emoji-btn" data-emoji="🐸">🐸</button>
+                <button class="emoji-btn" data-emoji="🐵">🐵</button>
+                <button class="emoji-btn" data-emoji="🦊">🦊</button>
+                <button class="emoji-btn" data-emoji="🐺">🐺</button>
+            </div>
+        </div>
+        <button id="login-start" class="modal-btn">開始飛行</button>
+    </div>
+</div>
+
 <!-- v1.3 關卡選擇器（老師用） -->
 <div id="level-selector" class="level-selector">
     <div class="level-selector-title">選擇關卡</div>
@@ -1474,6 +1535,12 @@
         <button class="level-btn" data-level="1-5">1-5 綜合</button>
     </div>
     <div class="level-selector-timer" id="level-timer">⏱ 0.0s</div>
+</div>
+
+<!-- v1.3 玩家名稱 HUD -->
+<div id="player-hud" style="display:none;">
+    <span id="player-name-display"></span>
+    <button id="player-rename" title="改名">✏️</button>
 </div>
 
 <!-- 搖桿校正 Wizard -->
