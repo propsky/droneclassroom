@@ -801,6 +801,12 @@ function setupJoystick() {
     });
     leftStick.on('move', (evt, data) => {
         // 對齊實體搖桿 W3C 標準：推上(-y) = 負值；推右(+x) = 正值
+        if (isManualLocked()) {
+            // 程式模式 / 執行中：忽略搖桿輸入（避免殘留值影響恢復）
+            joystick.throttle = 0;
+            joystick.yaw = 0;
+            return;
+        }
         joystick.throttle = data.vector.y;   // 推上(-y) → throttle 負 → 上升
         joystick.yaw      = data.vector.x;   // 推右(+x) → yaw 正 → 機頭向右
         joystick.active = true;
@@ -818,6 +824,11 @@ function setupJoystick() {
     });
     rightStick.on('move', (evt, data) => {
         // 對齊實體搖桿：推上(-y) = 負值 = 向前；推右(+x) = 正值 = 右飛
+        if (isManualLocked()) {
+            joystick.pitch = 0;
+            joystick.roll = 0;
+            return;
+        }
         joystick.pitch = data.vector.y;
         joystick.roll  = data.vector.x;
         joystick.active = true;
@@ -877,7 +888,60 @@ const CALIB_STEPS = [
 //   左桿：Y = throttle（升降），X = yaw（旋轉）
 //   右桿：Y = pitch（前後），X = roll（左右）
 //   軸向為 W3C Standard：推上 = -1、推左 = -1
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
+
+// =============================================================================
+// v1.4 T-101: 手動 ↔ 程式 模式切換
+//   - 預設手動（沿用 v1.3 行為）
+//   - HUD 右上角按鈕切換：手動 = 鍵盤/觸控/搖桿；程式 = Blockly
+//   - 程式執行中：手動鎖定（按鈕 disabled）
+//   - 切換時 drone 位置/計時不重置
+// =============================================================================
+const MODE = { MANUAL: 'manual', PROGRAM: 'program' };
+let currentMode = MODE.MANUAL;
+let isProgramRunning = false;
+
+function isManualLocked() {
+    // 手動鎖定條件：程式執行中，或當前在程式模式但程式未跑
+    return isProgramRunning || currentMode !== MODE.MANUAL;
+}
+
+function setMode(nextMode) {
+    if (currentMode === nextMode) return;
+    currentMode = nextMode;
+    const body = document.body;
+    body.classList.toggle('mode-manual', nextMode === MODE.MANUAL);
+    body.classList.toggle('mode-program', nextMode === MODE.PROGRAM);
+    // 同步 #mode-mp-toggle 按鈕文字
+    const btn = document.getElementById('mode-mp-toggle');
+    if (btn) btn.textContent = nextMode === MODE.MANUAL ? '🕹 手動' : '💻 程式';
+    // 同步 status-hud 模式顯示
+    const modeEl = document.getElementById('hud-mode');
+    if (modeEl) {
+        modeEl.textContent = nextMode === MODE.MANUAL ? '🕹 手動' : '💻 程式';
+    }
+    // 切到程式時：自動聚焦 Blockly workspace（讓學生直接拖積木）
+    if (nextMode === MODE.PROGRAM && typeof workspace !== 'undefined' && workspace) {
+        try { workspace.render(); } catch (e) {}
+    }
+    console.log(`[v${APP_VERSION}] 模式切換 → ${nextMode}`);
+}
+
+document.getElementById('mode-mp-toggle').addEventListener('click', () => {
+    if (isProgramRunning) {
+        showToast('⏳ 程式執行中，無法切換模式', 'error');
+        return;
+    }
+    setMode(currentMode === MODE.MANUAL ? MODE.PROGRAM : MODE.MANUAL);
+});
+
+// v1.4 T-101: URL 參數快速切換（給 headless 截圖 / 老師深連結用）
+//   ?mode=manual  → 強制手動
+//   ?mode=program → 強制程式
+const _modeParam = new URLSearchParams(location.search).get('mode');
+if (_modeParam === 'program' || _modeParam === 'manual') {
+    setTimeout(() => setMode(_modeParam === 'program' ? MODE.PROGRAM : MODE.MANUAL), 200);
+}
 // 攔截 Blockly.Extensions.register — 第二次註冊同名 extension 時跳過而非炸掉
 (function safeBlocklyExt() {
     if (typeof Blockly === 'undefined' || !Blockly.Extensions || !Blockly.Extensions.register) return;
@@ -1079,7 +1143,7 @@ function isButtonJustPressed(idx) {
 }
 
 function applyGamepadControls() {
-    if (!gamepadState.connected || programState.running) return;
+    if (!gamepadState.connected || isManualLocked()) return;
 
     // 從 axes 設定取出對應值（套用 center/range 校正）
     const rawAxes = gamepadState.axes;
@@ -1149,7 +1213,7 @@ function applyGamepadControls() {
 }
 
 function applyManualControls() {
-    if (programState.running) return; // 程式執行中跳過
+    if (isManualLocked()) return; // v1.4 T-101: 程式模式或程式執行中 → 跳過手動控制
 
     // v1.3 緊急停止凍結中：檢查是否有輸入恢復
     if (droneState.frozen) {
@@ -1678,6 +1742,9 @@ function runProgram(workspace) {
     programState.abort = false;
     programState.ringsCollected = 0;
     programState.startTime = Date.now();
+    // v1.4 T-101: 標記程式執行中（鎖定手動 + 切換按鈕）
+    isProgramRunning = true;
+    document.body.classList.add('program-running');
     setRunningButtons(true);
 
     const code = Blockly.JavaScript.workspaceToCode(workspace);
@@ -1688,6 +1755,8 @@ function runProgram(workspace) {
     } catch (e) {
         showToast('編譯失敗：' + e.message, 'error');
         programState.running = false;
+        isProgramRunning = false;
+        document.body.classList.remove('program-running');
         setRunningButtons(false);
         return;
     }
@@ -1700,6 +1769,8 @@ function runProgram(workspace) {
             showToast('程式結束，但只穿過 ' + programState.ringsCollected + ' 個圈', '');
         }
         programState.running = false;
+        isProgramRunning = false;
+        document.body.classList.remove('program-running');
         setRunningButtons(false);
     }).catch(e => {
         if (e.message !== '使用者中斷') {
@@ -1709,6 +1780,8 @@ function runProgram(workspace) {
             showToast('已中斷', '');
         }
         programState.running = false;
+        isProgramRunning = false;
+        document.body.classList.remove('program-running');
         setRunningButtons(false);
     });
 }

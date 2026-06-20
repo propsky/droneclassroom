@@ -54,6 +54,59 @@
             #blockly-panel { display: none; }  /* 極小螢幕：先隱藏 Blockly，純手動模式 */
         }
 
+        /* ===== v1.4 T-101: 手動 ↔ 程式 模式切換 =====
+           預設 body.mode-manual：場景滿版、Blockly panel 隱藏
+           切到 body.mode-program：左欄 420px 給 Blockly panel、場景在右欄
+        */
+        body.mode-manual #app  { grid-template-columns: 1fr; }
+        body.mode-program #app { grid-template-columns: 420px 1fr; }
+        #blockly-panel { display: none; }
+        body.mode-manual #blockly-panel { display: none; }
+        body.mode-program #blockly-panel {
+            display: flex;
+            animation: blockly-slide-in 0.3s ease;
+        }
+        @keyframes blockly-slide-in {
+            from { transform: translateX(-100%); opacity: 0; }
+            to   { transform: translateX(0); opacity: 1; }
+        }
+
+        /* 模式切換按鈕（學生最容易找到的右上角） */
+        #mode-mp-toggle {
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 260;
+            background: linear-gradient(135deg, var(--creafly-cyan), var(--creafly-green));
+            color: white;
+            border: none;
+            padding: 10px 18px;
+            border-radius: 22px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 163, 224, 0.45);
+            transition: transform 0.15s;
+            font-family: inherit;
+        }
+        #mode-mp-toggle:hover { transform: scale(1.05); }
+        #mode-mp-toggle:active { transform: scale(0.97); }
+        body.mode-program #mode-mp-toggle {
+            background: linear-gradient(135deg, var(--creafly-yellow), #f0b020);
+            color: var(--creafly-dark);
+            box-shadow: 0 2px 10px rgba(255, 206, 0, 0.5);
+        }
+        #mode-mp-toggle:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        /* 程式執行中：toggle 鎖住 */
+        body.program-running #mode-mp-toggle {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         /* ===== Header ===== */
         #header {
             grid-column: 1 / 3;
@@ -1310,11 +1363,11 @@
         }
     </style>
 </head>
-<body>
+<body class="mode-manual">
 <div id="app">
     <div id="header">
         <div class="logo">CREAFLY<span class="accent">.</span></div>
-        <span class="version-tag" id="version-tag">v1.3</span>
+        <span class="version-tag" id="version-tag">v1.4</span>
         <div class="subtitle">無人機教育模擬器 · Blockly 程式化飛行</div>
         <div class="header-right">
             <div class="mission-badge" id="mission-name">任務 1：穿過三個圈</div>
@@ -1436,7 +1489,7 @@
             <div id="status-hud" class="hud">
                 <div class="row"><span class="label">高度：</span><span class="value" id="hud-alt">0.0</span> m</div>
                 <div class="row"><span class="label">狀態：</span><span class="value" id="hud-state">待命</span></div>
-                <div class="row"><span class="label">模式：</span><span class="value">手動 (鍵盤) / 程式</span></div>
+                <div class="row"><span class="label">模式：</span><span class="value" id="hud-mode">🕹 手動</span></div>
             </div>
             <div id="mission-hud" class="hud">
                 <h3>關卡進度</h3>
@@ -1483,6 +1536,9 @@
 
 <div id="error-display"></div>
 <div id="toast"></div>
+<!-- v1.4 T-101: 學生自己切換手動 / 程式 模式 -->
+<button id="mode-mp-toggle" title="切換手動 ↔ 程式 模式">🕹 手動</button>
+<!-- v1.3 既有：搖桿模式（鍵盤 / 搖桿 互不衝突） -->
 <button id="mode-toggle" class="header-btn">🎮 搖桿</button>
 <button id="calib-fab" class="header-btn header-btn-calib">⚙ 校正搖桿</button>
 <button id="gp-settings-toggle" title="展開 / 收起搖桿設定面板（不擋飛行視線）">⚙ 搖桿設定</button>
