@@ -1432,6 +1432,24 @@ function cf_log(msg) {
     console.log('[CREAFLY]', msg);
 }
 
+// v1.4 T-103: 時間型計時 API
+// 從程式開始到現在的秒數（float），可用於「if elapsed > 5」這類條件
+function cf_elapsed() {
+    if (!programState.startTime) return 0;
+    return (Date.now() - programState.startTime) / 1000;
+}
+
+// 重設計時器回 0（每個關卡開始會自動呼叫一次）
+function cf_timerReset() {
+    programState.startTime = Date.now();
+    setStateHUD('⏱ 計時器重設');
+}
+
+// 暫停 N 秒（與 hover 同義，但語意上屬於「時間型」操作）
+async function cf_wait(seconds = 1) {
+    return cf_hover(seconds);
+}
+
 function ensureRunning() {
     if (!programState.running) throw new Error('程式未執行');
     if (programState.abort) throw new Error('使用者中斷');
@@ -1439,16 +1457,20 @@ function ensureRunning() {
 
 // 暴露給 Blockly 用（轉成 JS code 後 eval）
 // v1.4 T-102: 9 個動作 API 對應 9 個 Blockly 積木
+// v1.4 T-103: 加 elapsed / timerReset / wait
 window.CREAFLY = {
     takeoff: cf_takeoff,
     land: cf_land,
     hover: cf_hover,
+    wait: cf_wait,
     forward: cf_forward,
     backward: cf_backward,
     left: cf_left,
     right: cf_right,
     rotateClockwise: cf_rotateClockwise,
     rotateCounterClockwise: cf_rotateCounterClockwise,
+    elapsed: cf_elapsed,
+    timerReset: cf_timerReset,
     log: cf_log,
 };
 
@@ -1561,6 +1583,118 @@ function defineCreaFlyBlocks() {
     Blockly.JavaScript['cf_rotate_cw']  = (b) => `await CREAFLY.rotateClockwise(${num(b, 'ANGLE', 90)});\n`;
     Blockly.JavaScript['cf_rotate_ccw'] = (b) => `await CREAFLY.rotateCounterClockwise(${num(b, 'ANGLE', 90)});\n`;
 
+    // ========== v1.4 T-103 進階積木 ==========
+    // 邏輯 / 迴圈 / 變數 / 時間型計時（4 大類）
+    // 不做 Sensors 類（per ADR-001 距離感測器砍掉）
+
+    // ===== 邏輯（內建 + 包裝） =====
+    // Blockly 內建：controls_if, logic_compare, logic_operation, logic_negate, logic_boolean
+    // 全部直接用 Blockly 內建，無需自己寫
+
+    // ===== 迴圈（內建 + 自訂 forever） =====
+    // 內建：controls_repeat_ext（重複 N 次）、controls_whileUntil（當...時）
+    // 自訂：cf_forever（無限迴圈 + 30s timeout，避免 dead loop 卡死）
+    Blockly.Blocks['cf_forever'] = {
+        init: function() {
+            this.appendDummyInput().appendField('🔁 無限迴圈 (最長 30s)');
+            this.appendStatementInput('DO').appendField('執行');
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(120);
+            this.setTooltip('無限重複執行內部動作，最多跑 30 秒自動停止（避免卡死）');
+        }
+    };
+    Blockly.JavaScript['cf_forever'] = function(block) {
+        const body = Blockly.JavaScript.statementToCode(block, 'DO');
+        return `{
+    const _foreverStart = CREAFLY.elapsed();
+    while (CREAFLY.elapsed() - _foreverStart < 30) {
+        ensureRunning();
+        ${body}
+        await CREAFLY.wait(0.02);
+    }
+}\n`;
+    };
+
+    // ===== 變數（內建） =====
+    // 內建：variables_set, math_change, variables_get
+    // 預設變數 count / time 在 injectBlockly 裡 createVariable
+
+    // ===== 時間型計時（自訂 4 個） =====
+    // 取代原本的距離感測（per ADR-001）
+    Blockly.Blocks['cf_elapsed'] = {
+        init: function() {
+            this.appendDummyInput().appendField('⏱ 經過秒數');
+            this.setOutput(true, 'Number');
+            this.setColour(290);
+            this.setTooltip('從程式開始到現在經過的秒數（float）。例如：搭配 wait 計算 elapsed 差值 = 飛行時間');
+        }
+    };
+    Blockly.JavaScript['cf_elapsed'] = function() {
+        return ['CREAFLY.elapsed()', Blockly.JavaScript.ORDER_FUNCTION_CALL];
+    };
+
+    Blockly.Blocks['cf_wait'] = {
+        init: function() {
+            this.appendDummyInput().appendField('⏸ 等待');
+            this.appendValueInput('SEC')
+                .setCheck('Number')
+                .appendField('');
+            this.appendDummyInput().appendField('秒');
+            this.setInputsInline(true);
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(290);
+            this.setTooltip('暫停 N 秒（drone 不動作但計時繼續走）');
+        }
+    };
+    Blockly.JavaScript['cf_wait'] = (b) => `await CREAFLY.wait(${num(b, 'SEC', 1)});\n`;
+
+    Blockly.Blocks['cf_every'] = {
+        init: function() {
+            this.appendDummyInput().appendField('⏰ 每');
+            this.appendValueInput('SEC')
+                .setCheck('Number')
+                .appendField('');
+            this.appendDummyInput().appendField('秒執行');
+            this.appendStatementInput('DO').appendField('');
+            this.setInputsInline(true);
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(290);
+            this.setTooltip('每 N 秒觸發一次內部動作（pseudo interrupt）。內部用 while + elapsed 檢查實作，30s timeout 保護。');
+        }
+    };
+    Blockly.JavaScript['cf_every'] = function(block) {
+        const sec = Blockly.JavaScript.valueToCode(block, 'SEC', Blockly.JavaScript.ORDER_ATOMIC) || '1';
+        const body = Blockly.JavaScript.statementToCode(block, 'DO');
+        return `{
+    const _everyStart = CREAFLY.elapsed();
+    let _everyLast = CREAFLY.elapsed();
+    while (CREAFLY.elapsed() - _everyStart < 30) {
+        ensureRunning();
+        if (CREAFLY.elapsed() - _everyLast >= ${sec}) {
+            _everyLast = CREAFLY.elapsed();
+            ${body}
+        }
+        await CREAFLY.wait(0.02);
+    }
+}\n`;
+    };
+
+    Blockly.Blocks['cf_timer_reset'] = {
+        init: function() {
+            this.appendDummyInput().appendField('⏱ 計時器重設');
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(290);
+            this.setTooltip('把 elapsed() 計時器歸零（從現在開始算）');
+        }
+    };
+    Blockly.JavaScript['cf_timer_reset'] = function() {
+        return 'CREAFLY.timerReset();\n';
+    };
+
     function num(block, name, fallback) {
         return Blockly.JavaScript.valueToCode(block, name,
             Blockly.JavaScript.ORDER_ATOMIC) || String(fallback);
@@ -1618,6 +1752,13 @@ function injectBlockly() {
       </value>
     </block>
   </category>
+  <category name="📝 邏輯" colour="200">
+    <block type="controls_if"></block>
+    <block type="logic_compare"></block>
+    <block type="logic_operation"></block>
+    <block type="logic_negate"></block>
+    <block type="logic_boolean"></block>
+  </category>
   <category name="🔁 迴圈" colour="120">
     <block type="controls_repeat_ext">
       <value name="TIMES">
@@ -1625,16 +1766,34 @@ function injectBlockly() {
       </value>
     </block>
     <block type="controls_whileUntil"></block>
+    <block type="cf_forever"></block>
+  </category>
+  <category name="📦 變數" custom="VARIABLE" colour="330">
+    <block type="variables_set"></block>
+    <block type="math_change">
+      <value name="DELTA">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+    </block>
+  </category>
+  <category name="⏱ 時間" colour="290">
+    <block type="cf_elapsed"></block>
+    <block type="cf_wait">
+      <value name="SEC">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+    </block>
+    <block type="cf_every">
+      <value name="SEC">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+    </block>
+    <block type="cf_timer_reset"></block>
   </category>
   <category name="🔢 數字" colour="230">
     <block type="math_number"><field name="NUM">0</field></block>
     <block type="math_arithmetic"></block>
   </category>
-  <category name="📝 邏輯" colour="200">
-    <block type="controls_if"></block>
-    <block type="logic_compare"></block>
-  </category>
-  <category name="📦 變數" custom="VARIABLE" colour="330"></category>
 </xml>`;
 
     const blocklyDiv = document.getElementById('blockly-div');
@@ -1675,6 +1834,15 @@ function injectBlockly() {
 </xml>`;
     const dom = Blockly.utils.xml.textToDom(starterXml);
     Blockly.Xml.domToWorkspace(dom, workspace);
+
+    // v1.4 T-103: 預設變數 count（計數）、time（自訂時間）
+    // 用 createVariable 而非純顯示，學生才能在「變數」分類直接看到
+    if (!workspace.getVariable('count')) {
+        workspace.createVariable('count', '', 'count');
+    }
+    if (!workspace.getVariable('time')) {
+        workspace.createVariable('time', '', 'time');
+    }
 
     return workspace;
 }
