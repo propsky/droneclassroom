@@ -2680,7 +2680,8 @@ function updateBalloonHUD() {
 }
 
 // 實心方塊碰撞：把 drone 當成半徑 DRONE_RADIUS 的球，AABB 阻擋，沿最小穿透軸推出
-const DRONE_RADIUS = 0.5;
+// 0.6 略大於機身半徑，避免機翼視覺上插進方塊（看起來像穿透）
+const DRONE_RADIUS = 0.6;
 function resolveObstacleCollisions() {
     let bumped = false;
     obstacles.forEach(o => {
@@ -3401,6 +3402,8 @@ function handleArenaMessage(msg) {
             } else {
                 const m = arena.balloonMeshes.get(msg.id);
                 if (m) { scene.remove(m); arena.balloonMeshes.delete(msg.id); }
+                // 是「我」戳破的（在 pendingPop 裡）→ 播音效
+                if (arena.pendingPop.has(msg.id) && typeof playRingSound === 'function') playRingSound();
             }
             arena.pendingPop.delete(msg.id);
             break;
@@ -3488,7 +3491,7 @@ function spawnArenaObstacles() {
     const defs = [[10, 3, -8], [-10, 3, -8], [8, 5, 8], [-8, 5, 8], [0, 4, -15], [0, 6, 12], [14, 4, 0], [-14, 4, 0]];
     defs.forEach(([x, y, z]) => {
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 2.5),
-            new THREE.MeshPhongMaterial({ color: 0x9b5de5, transparent: true, opacity: 0.8, emissive: 0x9b5de5, emissiveIntensity: 0.15 }));
+            new THREE.MeshPhongMaterial({ color: 0x9b5de5, opacity: 0.95, transparent: false, emissive: 0x9b5de5, emissiveIntensity: 0.2 }));
         mesh.position.set(x, y, z);
         mesh.userData.solid = true; mesh.userData.half = 1.25; mesh.userData.arena = true;
         scene.add(mesh);
