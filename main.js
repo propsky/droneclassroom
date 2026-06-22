@@ -310,7 +310,7 @@ const SOCCER = {
 };
 // 場地尺寸(sim 單位,維持 2:1:1,放大到適合本模擬器的大無人機)
 // goalZ 往內縮(離端牆 4m)→ 飛機穿門後有空間、不會卡在邊線;goalY 抬高(真實約 2m 的相對高位)
-const SOC = { halfX: 7, halfZ: 14, top: 12, goalZ: 10, goalY: 7, goalR: 1.8, goalTube: 0.16 };
+const SOC = { halfX: 7, halfZ: 14, top: 12, goalZ: 10, goalY: 9, goalR: 1.8, goalTube: 0.16 };
 // 比例:場地長 28 / 球直徑 1.6 ≈ 18 顆球長(可玩折衷,接近真實 6m÷0.2m=30 的感覺、又看得清飛機)
 const SOCCER_BALL_R = 0.8;       // 球形保護框半徑(也當足球碰撞半徑)
 const SOCCER_DRONE_SCALE = 0.65; // 足球模式把飛機縮小,讓場地相對變大、比例正確
@@ -3025,8 +3025,8 @@ function animate() {
     if (SOCCER.active && !cameraMode.fpv) {
         // 足球：窄邊定點視角（站在己方端線後方一大步、略高，看向場內/遠端門）
         if (!droneModel.visible) droneModel.visible = true;
-        camera.position.set(0, SOC.goalY + 2, SOC.halfZ + 9);
-        camera.lookAt(0, SOC.goalY - 1.5, -5);
+        camera.position.set(0, SOC.goalY - 3, SOC.halfZ + 9);   // 視線降低一個球門
+        camera.lookAt(0, SOC.goalY - 1, -5);
     } else if (cameraMode.fpv) {
         // 第一視角：相機在機身、看機頭方向（略微往下,像 FPV 眼鏡）
         const yawE = new THREE.Euler(0, droneState.rotation.y, 0);
