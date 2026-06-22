@@ -1573,6 +1573,32 @@ function applyGamepadControls() {
     }
 }
 
+// ====== pyController 藍牙搖桿（Web Bluetooth，drone-controller.js 提供 window.DroneController）======
+let bleController = null;
+let blePad = null;          // 最新一筆搖桿狀態（事件驅動，~20Hz）
+let blePadConnected = false;
+function setupBleController() {
+    const btn = document.getElementById('connect-gamepad-btn');
+    if (!window.DroneController) { if (btn) btn.title = '找不到 drone-controller.js'; return; }
+    bleController = new window.DroneController();
+    bleController.onStatus = (t) => showToast('🎮 ' + t, /已連線/.test(t) ? 'success' : (/失敗|不支援|斷線/.test(t) ? true : ''));
+    bleController.onData = (s) => { blePad = s; blePadConnected = true; };
+    if (btn) btn.addEventListener('click', () => {
+        if (!bleController.isSupported) { showToast('此瀏覽器不支援 Web Bluetooth；iPad 請改用 Bluefy 瀏覽器開此網址', true); return; }
+        bleController.connect();
+    });
+}
+// 把 BLE 搖桿狀態餵進共用的 joystick（與 nipplejs / Web Gamepad 同一條控制路徑、可與鍵盤並存）
+function applyBleControls() {
+    if (!blePadConnected || !blePad) return;
+    const dz = (v) => Math.abs(v) < 0.08 ? 0 : v;   // 死區，避免搖桿中點飄移
+    // joystick 慣例：throttle -1=上升、pitch -1=前進、yaw +1=右旋、roll +1=右飛
+    joystick.throttle = dz(-blePad.throttle);  // 搖桿往上(+1) → 上升
+    joystick.yaw      = dz(blePad.yaw);
+    joystick.pitch    = dz(-blePad.pitch);     // 搖桿往上(+1) → 前進
+    joystick.roll     = dz(blePad.roll);
+}
+
 function applyManualControls() {
     if (isManualLocked()) return; // v1.4 T-101: 程式模式或程式執行中 → 跳過手動控制
 
@@ -1591,6 +1617,7 @@ function applyManualControls() {
 
     // 優先級：實體搖桿 > 鍵盤 > 虛擬搖桿（三者可疊加，但搖桿最權威）
     applyGamepadControls();
+    applyBleControls();      // pyController 藍牙搖桿（連線後覆寫 joystick）
 
     // 鬼抓人：鬼飛比較快
     const spd = (arena.active && arena.mode === 'tag' && arena.myRole === 'ghost' && !arena.eaten) ? GHOST_SPEED : 1;
@@ -3366,6 +3393,9 @@ function toggleView() {
     window.addEventListener('keydown', (e) => { if (!e.repeat && e.key && e.key.toLowerCase() === 'c') toggleView(); });
 })();
 
+// pyController 藍牙搖桿：綁定「🎮 連線搖桿」按鈕
+setupBleController();
+
 // 全螢幕（iPad Safari 支援元素全螢幕的 webkit 版本；桌機原生支援）
 (function setupFullscreen() {
     const btn = document.getElementById('fullscreen-btn');
@@ -4221,6 +4251,8 @@ window._creafly = {
     loadLevel, scene, arena, enterArena, exitArena,
     camera, cameraMode, droneModel,
     SOCCER, enterSoccer, exitSoccer, startDrill,
+    _injectBlePad: (s) => { blePad = s; blePadConnected = true; },  // 測試用：模擬一筆 BLE 搖桿狀態
+    get blePadConnected() { return blePadConnected; },
     get currentLevel() { return currentLevel; },
     get playgroundBVHReady() { return !!_playgroundBVH; },
     get playgroundGeo() { return _playgroundGeo; },

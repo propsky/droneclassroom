@@ -1556,6 +1556,7 @@
             <button id="mute-btn" class="header-btn" title="開關音效">🔊 音效</button>
             <button id="music-btn" class="header-btn" title="開關背景音樂">🎵 音樂：關</button>
             <button id="view-btn" class="header-btn" title="切換 第一視角 / 第三人稱（鍵盤 C）">👁 視角：第三人稱</button>
+            <button id="connect-gamepad-btn" class="header-btn" title="用藍牙連線 pyController 實體搖桿（需 HTTPS；iPad 請用 Bluefy）">🎮 連線搖桿</button>
             <button id="fullscreen-btn" class="header-btn" title="全螢幕（iPad / 桌機）">⛶ 全螢幕</button>
             <div class="timer-badge" id="timer-display">0.0s</div>
         </div>
@@ -1875,6 +1876,8 @@
     }
 </script>
 
+<!-- pyController 藍牙搖桿橋接（classic script，先載入以提供 window.DroneController） -->
+<script src="/gamepad/drone-controller.js"></script>
 <script type="module" src="/main.js"></script>
 </body>
 </html>
