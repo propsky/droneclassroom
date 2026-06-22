@@ -3099,23 +3099,28 @@ const wsState = {
 };
 
 function connectToTeacher() {
-    if (wsState.ws && wsState.ws.readyState === 1) return;
+    // 已有「連線中(CONNECTING)」或「已連線(OPEN)」的 socket 就別再開一條，
+    // 否則會建立第二條連線，且舊 socket 的 onopen 會送到新的、還在 CONNECTING 的 socket → InvalidStateError。
+    if (wsState.ws && (wsState.ws.readyState === WebSocket.CONNECTING || wsState.ws.readyState === WebSocket.OPEN)) return;
     // WS 與頁面同主機同 port：HTTPS→wss、HTTP→ws（Railway 等雲端只開一個 port）
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${window.location.host}/`;
+    let ws;
     try {
-        wsState.ws = new WebSocket(url);
+        ws = new WebSocket(url);
     } catch (e) {
         console.warn('WebSocket 連線失敗：', e);
         scheduleReconnect();
         return;
     }
-    wsState.ws.onopen = () => {
+    wsState.ws = ws;
+    ws.onopen = () => {
+        if (wsState.ws !== ws) return;  // 已被更新的連線取代，忽略
         wsState.connected = true;
         console.log('[v1.3 WS] 已連線到老師 server');
-        // 註冊玩家
+        // 註冊玩家（用本地 ws，確保送在「剛開啟的這條」連線上）
         if (player.name && player.emoji) {
-            wsState.ws.send(JSON.stringify({
+            ws.send(JSON.stringify({
                 type: 'register',
                 name: player.name,
                 emoji: player.emoji
@@ -3123,7 +3128,7 @@ function connectToTeacher() {
         }
         showToast('🟢 已連線到課程', 'success');
     };
-    wsState.ws.onmessage = (ev) => {
+    ws.onmessage = (ev) => {
         try {
             const msg = JSON.parse(ev.data);
             if (msg.type === 'welcome') {
@@ -3148,12 +3153,13 @@ function connectToTeacher() {
             }
         } catch (e) {}
     };
-    wsState.ws.onclose = () => {
+    ws.onclose = () => {
+        if (wsState.ws !== ws) return;  // 舊連線關閉，不觸發重連
         wsState.connected = false;
         console.log('[v1.3 WS] 連線關閉');
         scheduleReconnect();
     };
-    wsState.ws.onerror = (e) => {
+    ws.onerror = (e) => {
         console.warn('[v1.3 WS] 錯誤', e);
     };
 }
@@ -3167,7 +3173,7 @@ function scheduleReconnect() {
 }
 
 function wsReportComplete(levelId, timeMs) {
-    if (!wsState.connected || !wsState.ws) return;
+    if (!wsState.ws || wsState.ws.readyState !== WebSocket.OPEN) return;
     wsState.ws.send(JSON.stringify({
         type: 'complete_level',
         levelId,
@@ -3176,7 +3182,7 @@ function wsReportComplete(levelId, timeMs) {
 }
 
 function wsReportProgress(levelId) {
-    if (!wsState.connected || !wsState.ws) return;
+    if (!wsState.ws || wsState.ws.readyState !== WebSocket.OPEN) return;
     wsState.ws.send(JSON.stringify({
         type: 'progress',
         levelId
