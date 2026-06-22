@@ -1087,6 +1087,15 @@
         #arena-scoreboard .arena-row b { color: var(--creafly-green, #4ade80); }
         #arena-scoreboard .arena-row.me { background: rgba(255,206,0,0.22); font-weight: 700; }
 
+        /* 🧭 機頭方向指示（旋轉鑽圈關，置中上方） */
+        #heading-hud {
+            position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+            z-index: 240; display: none;
+            background: rgba(10, 37, 64, 0.9); border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 10px; padding: 8px 16px; color: #fff; font-size: 15px;
+            white-space: nowrap; backdrop-filter: blur(4px);
+        }
+
         /* ⚽ 足球練習 HUD（右上，與 arena-hud 同位） */
         #soccer-hud {
             position: fixed; top: 64px; right: 12px; z-index: 240; display: none;
@@ -1821,6 +1830,9 @@
         <span class="level-selector-timer" id="level-timer">⏱ 0.0s</span>
     </div>
 </div>
+
+<!-- 🧭 機頭方向指示（旋轉鑽圈關 1-5 用） -->
+<div id="heading-hud" style="display:none;"></div>
 
 <!-- ⚽ 足球單人練習 HUD：練習選單 + 進度 -->
 <div id="soccer-hud" style="display:none;">

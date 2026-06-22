@@ -450,6 +450,7 @@ function loadLevel(levelId) {
         ring.position.set(r.x, r.y, r.z);
         ring.userData.idx = idx;
         ring.userData.label = r.label || String(idx + 1);
+        ring.userData.baseColor = color;   // 對準提示用：未對準時還原此色
         scene.add(ring);
         missionRings.push({ ...r, passed: false });
         return ring;
@@ -2705,6 +2706,39 @@ function captureMapping(target, value) {
 // =============================================================================
 // 12. 物理 / 動畫主迴圈
 // =============================================================================
+// 機頭方位文字（yaw 度 → 方向）：0=前、90=左、180=後、270=右
+function headingLabel(deg) {
+    const d = ((deg % 360) + 360) % 360;
+    if (d <= 45 || d > 315) return '前 ↑';
+    if (d <= 135) return '左 ←';
+    if (d <= 225) return '後 ↓';
+    return '右 →';
+}
+// 旋轉鑽圈關（faceYaw）：顯示機頭方向指示 + 對準時把目標圈變綠
+function updateRingFaceGuidance() {
+    const hud = document.getElementById('heading-hud');
+    if (arena.active || SOCCER.active || !rings.length) { if (hud) hud.style.display = 'none'; return; }
+    let idx = -1;
+    for (let i = 0; i < missionRings.length; i++) {
+        if (!missionRings[i].passed && missionRings[i].faceYaw != null) { idx = i; break; }
+    }
+    if (idx < 0 || !rings[idx]) { if (hud) hud.style.display = 'none'; return; }
+    const yawDeg = ((droneState.rotation.y * 180 / Math.PI) % 360 + 360) % 360;
+    const target = ((missionRings[idx].faceYaw % 360) + 360) % 360;
+    const tol = missionRings[idx].faceTol || 40;
+    const signed = ((target - yawDeg + 540) % 360) - 180;  // >0 需往左轉、<0 需往右轉
+    const aligned = Math.abs(signed) <= tol;
+    const base = rings[idx].userData.baseColor;
+    rings[idx].material.color.setHex(aligned ? 0x4ade80 : base);
+    rings[idx].material.emissive.setHex(aligned ? 0x4ade80 : base);
+    if (hud) {
+        hud.style.display = 'block';
+        hud.innerHTML = aligned
+            ? `🧭 機頭：${headingLabel(yawDeg)}　<b style="color:#4ade80">✅ 對準圈 ${idx + 1} 了！往前飛穿過</b>`
+            : `🧭 機頭：${headingLabel(yawDeg)}　目標：${headingLabel(target)}　<b style="color:#FFCE00">🔄 ${signed > 0 ? '往左轉 ←' : '往右轉 →'}</b>`;
+    }
+}
+
 function checkRingCollisions() {
     rings.forEach((ring, i) => {
         if (!ring.visible) return;
@@ -2908,6 +2942,7 @@ function animate() {
             checkPassZones();
             checkBalloons();
         }
+        updateRingFaceGuidance();   // 旋轉鑽圈：機頭方向指示 + 對準變綠
         updateLevelTimer();
     }
 
@@ -4279,13 +4314,15 @@ if (new URLSearchParams(location.search).has('autorun')) {
 
 // 對外 debug
 window._creafly = {
-    droneState, missionRings, workspace, programState,
+    droneState, workspace, programState,
     loadLevel, scene, arena, enterArena, exitArena,
     camera, cameraMode, droneModel,
     SOCCER, enterSoccer, exitSoccer, startDrill,
     _injectBlePad: (s) => { blePad = s; blePadConnected = true; },  // 測試用：模擬一筆 BLE 搖桿狀態
     get blePadConnected() { return blePadConnected; },
     get _ble() { return bleController; },
+    get missionRings() { return missionRings; },   // getter：missionRings 會被 loadLevel 重新指派
+    get rings() { return rings; },
     get currentLevel() { return currentLevel; },
     get playgroundBVHReady() { return !!_playgroundBVH; },
     get playgroundGeo() { return _playgroundGeo; },
