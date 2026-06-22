@@ -297,6 +297,17 @@ const arena = {
 const GHOST_SPEED = 1.5;     // 鬼飛比較快
 const GHOST_CATCH_R = 2.2;   // 鬼的抓捕範圍（與 server ARENA_CATCH_DIST 一致）
 let myCatchAura = null;      // 自己是鬼時的抓捕光環
+// 大亂鬥場地邊界（飛不出去）—— 階段 2 接 playground 後會對齊其範圍
+const ARENA_BOUND = { x: 24, z: 24, yTop: 14 };
+function clampArenaBounds() {
+    const p = droneState.position, v = droneState.velocity;
+    if (p.x > ARENA_BOUND.x) { p.x = ARENA_BOUND.x; if (v.x > 0) v.x = 0; }
+    else if (p.x < -ARENA_BOUND.x) { p.x = -ARENA_BOUND.x; if (v.x < 0) v.x = 0; }
+    if (p.z > ARENA_BOUND.z) { p.z = ARENA_BOUND.z; if (v.z > 0) v.z = 0; }
+    else if (p.z < -ARENA_BOUND.z) { p.z = -ARENA_BOUND.z; if (v.z < 0) v.z = 0; }
+    if (p.y > ARENA_BOUND.yTop) { p.y = ARENA_BOUND.yTop; if (v.y > 0) v.y = 0; }
+    // 地板由既有的 ground clamp 處理
+}
 let _playgroundObj = null, _playgroundLoading = false;
 const BALLOON_COLORS = [0xff4d6d, 0xffd166, 0x4dd0e1, 0x9b5de5, 0x4ade80, 0xff9f1c];
 
@@ -3652,6 +3663,7 @@ function sendArenaPos() {
     }));
 }
 function arenaTick() {
+    clampArenaBounds();   // 階段 1：飛不出場地邊界
     const tagRunning = arena.mode === 'tag' && arena.status === 'running';
     // 第一輪：內插其他玩家位置，並收集「存活逃跑者」的位置（給光環危險度用）
     const runnerPos = [];
