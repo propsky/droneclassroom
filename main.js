@@ -3329,6 +3329,7 @@ document.getElementById('level-intro-start').addEventListener('click', () => {
 });
 
 // v1.3 關卡選擇器
+const closeLevelMenu = () => { const ls = document.getElementById('level-selector'); if (ls) ls.classList.remove('open'); };
 document.querySelectorAll('.level-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         const levelId = btn.getAttribute('data-level');
@@ -3338,16 +3339,31 @@ document.querySelectorAll('.level-btn').forEach(btn => {
         document.querySelectorAll('.level-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         loadLevel(levelId);
+        closeLevelMenu();                // 選完關卡就收起選單，畫面不被擋
     });
 });
 
-// 大亂鬥入口
+// 關卡選單：點「📋 關卡」開關；點選單外面自動收起
+{
+    const toggle = document.getElementById('level-menu-toggle');
+    if (toggle) toggle.addEventListener('click', (e) => { e.stopPropagation(); document.getElementById('level-selector').classList.toggle('open'); });
+    document.addEventListener('click', (e) => {
+        const ls = document.getElementById('level-selector');
+        if (ls && ls.classList.contains('open') && !ls.contains(e.target)) ls.classList.remove('open');
+    });
+}
+
+// 大亂鬥 / 足球入口
 {
     const ab = document.getElementById('arena-btn');
-    if (ab) ab.addEventListener('click', () => { if (SOCCER.active) exitSoccer(); arena.active ? exitArena() : enterArena(); });
+    if (ab) ab.addEventListener('click', () => { if (SOCCER.active) exitSoccer(); arena.active ? exitArena() : enterArena(); closeLevelMenu(); });
     const sb = document.getElementById('soccer-btn');
-    if (sb) sb.addEventListener('click', () => { SOCCER.active ? exitSoccer() : enterSoccer(); });
+    if (sb) sb.addEventListener('click', () => { SOCCER.active ? exitSoccer() : enterSoccer(); closeLevelMenu(); });
 }
+
+// iPad/iOS：擋掉「雙指縮放」(雙擊縮放由 CSS touch-action 處理)，避免學生不小心放大網頁就不能玩
+['gesturestart', 'gesturechange', 'gestureend'].forEach(ev =>
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
 
 // v1.3 計時器更新（每幀）
 function updateLevelTimer() {
