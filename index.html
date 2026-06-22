@@ -1186,6 +1186,14 @@
         #joystick-right { right: max(24px, env(safe-area-inset-right, 24px)); }
         body.touch-device .joystick-zone { display: block; }
         body.joystick-forced .joystick-zone { display: block; }
+        /* 觸控/搖桿模式：左下選關列、右下說明都抬到虛擬搖桿「上方」，避免互相擋到 */
+        /* .level-selector 是 fixed（相對視窗），footer(64) + 搖桿(24+160) → 需抬到 ~248px 以上 */
+        body.touch-device .level-selector,
+        body.joystick-forced .level-selector { bottom: 256px; }
+        /* #help-hud 是 absolute（相對場景區），抬過搖桿(24+160=184) 即可 */
+        body.touch-device #help-hud,
+        body.joystick-forced #help-hud { bottom: 200px; max-width: 240px; }
+        /* 觸控時大亂鬥計分板也避開右下搖桿（移到右上靠下一點，已在 top:64 不衝突）*/
 
         /* nipplejs 內部樣式覆寫 */
         .joystick-zone .back,
@@ -1281,8 +1289,10 @@
         }
         .level-selector-btns {
             display: flex;
+            flex-wrap: wrap;
             gap: 4px;
             margin-bottom: 6px;
+            max-width: 60vw;
         }
         .level-btn {
             background: rgba(255,255,255,0.15);
