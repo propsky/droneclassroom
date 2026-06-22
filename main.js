@@ -310,8 +310,10 @@ const SOCCER = {
 };
 // 場地尺寸(sim 單位,維持 2:1:1,放大到適合本模擬器的大無人機)
 // goalZ 往內縮(離端牆 4m)→ 飛機穿門後有空間、不會卡在邊線;goalY 抬高(真實約 2m 的相對高位)
-const SOC = { halfX: 7, halfZ: 14, top: 12, goalZ: 10, goalY: 7, goalR: 2.4, goalTube: 0.22 };
-const SOCCER_BALL_R = 1.3;   // 無人機足球：機體外的球形保護框半徑(也當足球模式的碰撞半徑)
+const SOC = { halfX: 7, halfZ: 14, top: 12, goalZ: 10, goalY: 7, goalR: 1.8, goalTube: 0.16 };
+// 比例:場地長 28 / 球直徑 1.6 ≈ 18 顆球長(可玩折衷,接近真實 6m÷0.2m=30 的感覺、又看得清飛機)
+const SOCCER_BALL_R = 0.8;       // 球形保護框半徑(也當足球碰撞半徑)
+const SOCCER_DRONE_SCALE = 0.65; // 足球模式把飛機縮小,讓場地相對變大、比例正確
 const GHOST_SPEED = 1.5;     // 鬼飛比較快
 const GHOST_CATCH_R = 2.2;   // 鬼的抓捕範圍（與 server ARENA_CATCH_DIST 一致）
 let myCatchAura = null;      // 自己是鬼時的抓捕光環
@@ -4073,13 +4075,14 @@ function buildSoccerField() {
     objs.forEach(o => scene.add(o));
     // 門框做成實心(網格碰撞)→ 只能從中間的洞穿過,撞到框會被擋
     _soccerBVH = buildBVHFromMeshes([SOCCER.goalFar, SOCCER.goalNear]);
-    // 機體外的球形保護框(像真實無人機足球的球)
+    // 機體外的球形保護框(像真實無人機足球的球)：掛在 scene、每幀貼齊飛機(不受飛機縮放影響)
     if (!SOCCER.ball) {
         SOCCER.ball = new THREE.Mesh(
             new THREE.IcosahedronGeometry(SOCCER_BALL_R, 1),
             new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.4 }));
     }
-    if (SOCCER.ball.parent !== droneModel) droneModel.add(SOCCER.ball);
+    if (SOCCER.ball.parent !== scene) scene.add(SOCCER.ball);
+    SOCCER.ball.position.copy(droneState.position);
 }
 function soccerSpawnDummies(on) {
     if (!on) return;
@@ -4108,6 +4111,7 @@ function enterSoccer() {
     if (arena.active) exitArena();
     SOCCER.active = true; SOCCER.status = 'idle'; SOCCER.drill = null;
     if (currentMode !== MODE.MANUAL) setMode(MODE.MANUAL);
+    droneModel.scale.setScalar(SOCCER_DRONE_SCALE);   // 縮小飛機 → 場地相對變大、比例正確
     clearLevelObjects(); currentLevel = null; levelArmed = true; levelCountdownActive = false;
     const introEl = document.getElementById('level-intro'); if (introEl) introEl.classList.remove('show');
     ['mission-hud', 'progress-bar', 'balloon-hud', 'arena-hud'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
@@ -4124,6 +4128,7 @@ function exitSoccer() {
     if (!SOCCER.active) return;
     SOCCER.active = false; SOCCER.status = 'idle'; SOCCER.drill = null;
     clearSoccerField();
+    droneModel.scale.setScalar(1);   // 還原飛機大小
     groundGrid.visible = true; ground.visible = true;
     const td = document.getElementById('timer-display'); if (td) td.style.display = '';
     showSoccerHud(false);
@@ -4148,9 +4153,9 @@ function startDrill(idx) {
     updateSoccerHud();
 }
 function soccerSpawnDummiesTagged() {
-    [[-1.5, SOC.goalY, -SOC.goalZ + 3], [1.5, SOC.goalY, -SOC.goalZ + 3]].forEach(([x, y, z]) => {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshPhongMaterial({ color: 0x9b5de5, opacity: 0.9, transparent: true, emissive: 0x9b5de5, emissiveIntensity: 0.2 }));
-        m.position.set(x, y, z); m.userData.solid = true; m.userData.half = 1; m.userData.soccer = true; m.userData.soccerDummy = true;
+    [[-1.2, SOC.goalY, -SOC.goalZ + 2.5], [1.2, SOC.goalY, -SOC.goalZ + 2.5]].forEach(([x, y, z]) => {
+        const m = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 1.3), new THREE.MeshPhongMaterial({ color: 0x9b5de5, opacity: 0.9, transparent: true, emissive: 0x9b5de5, emissiveIntensity: 0.2 }));
+        m.position.set(x, y, z); m.userData.solid = true; m.userData.half = 0.65; m.userData.soccer = true; m.userData.soccerDummy = true;
         m.castShadow = true;
         scene.add(m); obstacles.push(m); SOCCER.objs.push(m);
     });
@@ -4158,6 +4163,7 @@ function soccerSpawnDummiesTagged() {
 function soccerTick() {
     clampSoccerBounds();
     resolveBVHCollision(_soccerBVH, SOCCER_BALL_R);   // 門框實心：以球框半徑碰撞,撞框被擋、只能穿中間的洞
+    if (SOCCER.ball) SOCCER.ball.position.copy(droneState.position);  // 球形外框貼齊飛機
     const d = SOCCER.drill;
     if (SOCCER.status !== 'running' || !d) { updateSoccerHud(); return; }
     const z = droneState.position.z;
