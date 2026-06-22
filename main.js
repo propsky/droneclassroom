@@ -294,7 +294,8 @@ const arena = {
     others: new Map(),        // playerId -> { group, target, role, eaten }
     obstacles: [],
     posTimer: null,
-    playgroundOn: false,      // 大亂鬥背景：false = 格線競技場、true = playground 場景
+    playgroundOn: false,      // 視覺：playground 模型是否顯示中
+    field: 'grid',            // 場地(由伺服器決定、全場一致):grid | playground — 碰撞依此
 };
 const GHOST_SPEED = 1.5;     // 鬼飛比較快
 const GHOST_CATCH_R = 2.2;   // 鬼的抓捕範圍（與 server ARENA_CATCH_DIST 一致）
@@ -3279,8 +3280,6 @@ document.querySelectorAll('.level-btn').forEach(btn => {
 {
     const ab = document.getElementById('arena-btn');
     if (ab) ab.addEventListener('click', () => { arena.active ? exitArena() : enterArena(); });
-    const sb = document.getElementById('arena-scene-btn');
-    if (sb) sb.addEventListener('click', () => setArenaScene(!arena.playgroundOn));
 }
 
 // v1.3 計時器更新（每幀）
@@ -3585,6 +3584,7 @@ function handleArenaMessage(msg) {
         case 'arena_state':
             arena.status = msg.status; arena.endTime = msg.endTime || 0;
             if (msg.mode) arena.mode = msg.mode;
+            if (msg.field) setArenaField(msg.field);   // 場地全場同步
             arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
             (msg.balloons || []).forEach(b => arena.balloonMeshes.set(b.id, makeArenaBalloon(b)));
             updateArenaScoreboard(msg.players || []);
@@ -3613,6 +3613,7 @@ function handleArenaMessage(msg) {
         case 'arena_go':
             arena.status = 'running'; arena.endTime = msg.endTime;
             if (msg.mode) arena.mode = msg.mode;
+            if (msg.field) setArenaField(msg.field);
             if (msg.spawns) applyMySpawn(msg.spawns);  // 後備：確保開賽時在自己出生點
             // 套用自己的角色（鬼抓人）
             if (msg.players) { const me = msg.players.find(p => p.id === wsState.myId); if (me) setMyRole(me.role || 'runner', !!me.eaten); updateArenaPlayers(msg.players); }
@@ -3639,6 +3640,7 @@ function handleArenaMessage(msg) {
         case 'arena_scores':
             if (msg.status) arena.status = msg.status;
             if (msg.endTime) arena.endTime = msg.endTime;
+            if (msg.field) setArenaField(msg.field);
             updateArenaScoreboard(msg.scores || []);
             break;
         case 'arena_end':
@@ -3725,7 +3727,7 @@ function sendArenaPos() {
 }
 function arenaTick() {
     clampArenaBounds();   // 階段 1：飛不出場地邊界
-    if (arena.playgroundOn) resolvePlaygroundCollision();  // 階段 2：不能穿過 playground 結構
+    if (arena.field === 'playground') resolvePlaygroundCollision();  // 階段 2：不能穿過 playground 結構(場地由伺服器決定)
     const tagRunning = arena.mode === 'tag' && arena.status === 'running';
     // 第一輪：內插其他玩家位置，並收集「存活逃跑者」的位置（給光環危險度用）
     const runnerPos = [];
@@ -3832,6 +3834,13 @@ function setArenaScene(on) {
         if (_playgroundObj) _playgroundObj.visible = false;
     }
 }
+// 由伺服器決定的「場地」(全場一致):同時切視覺 + 碰撞依據
+function setArenaField(field) {
+    arena.field = (field === 'playground') ? 'playground' : 'grid';
+    setArenaScene(arena.field === 'playground');  // 視覺(格線/playground)跟著場地走
+    const lbl = document.getElementById('arena-field-label');
+    if (lbl) lbl.textContent = arena.field === 'playground' ? '🌳 場地：遊樂場（有掩體、不可穿）' : '🟩 場地：格線空場';
+}
 function enterArena() {
     if (arena.active) return;
     arena.active = true; arena.status = 'idle';
@@ -3849,7 +3858,7 @@ function enterArena() {
     resetDrone();
     spawnArenaObstacles();
     showArenaHud(true);
-    setArenaScene(arena.playgroundOn);  // 套用目前選的背景（格線 / playground）
+    setArenaField(arena.field);  // 場地由伺服器決定;進場先用目前已知值,arena_state 會再同步
     connectToTeacher();
     if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'arena_join' }));
     if (arena.posTimer) clearInterval(arena.posTimer);

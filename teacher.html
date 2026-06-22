@@ -187,6 +187,15 @@
         <div class="actions">
             <h2>🏟️ 大亂鬥（多人搶氣球）</h2>
             <p style="margin:4px 0 10px;opacity:.8;font-size:13px;">學生先點自己畫面右下角的「🏟️ 大亂鬥」進場，老師再按時長開始（全場一起倒數起跑）。</p>
+            <div class="btn-row">
+                <label style="align-self:center;">場地：
+                    <select id="arena-field">
+                        <option value="grid">🟩 格線空場</option>
+                        <option value="playground">🌳 遊樂場（有掩體、不可穿）</option>
+                    </select>
+                </label>
+                <span style="align-self:center;opacity:.7;font-size:12px;">（全場一致，開賽時套用）</span>
+            </div>
             <div style="font-weight:600;margin:4px 0;">🎈 搶氣球模式</div>
             <div class="btn-row">
                 <button class="btn success" onclick="arenaStart(180,'balloon')">▶ 3 分鐘</button>
@@ -276,8 +285,9 @@
         function arenaStart(sec, mode) {
             if (!wsState.connected) { showToast('尚未連線到 server', true); return; }
             const ghostCount = parseInt(document.getElementById('ghost-count').value, 10) || 1;
-            wsState.ws.send(JSON.stringify({ type: 'arena_start', durationSec: sec, mode: mode || 'balloon', ghostCount }));
-            showToast(`${mode === 'tag' ? '👻 鬼抓人' : '🏟️ 搶氣球'}開始（${sec / 60} 分鐘）`, false);
+            const field = document.getElementById('arena-field').value;
+            wsState.ws.send(JSON.stringify({ type: 'arena_start', durationSec: sec, mode: mode || 'balloon', ghostCount, field }));
+            showToast(`${mode === 'tag' ? '👻 鬼抓人' : '🏟️ 搶氣球'}開始（${sec / 60} 分鐘，${field === 'playground' ? '遊樂場' : '格線'}）`, false);
         }
         let arenaClockTimer = null;
         function renderArena(scores, status, endTime, mode) {
