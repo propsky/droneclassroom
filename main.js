@@ -3395,6 +3395,8 @@ function handleArenaMessage(msg) {
             arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
             (msg.balloons || []).forEach(b => arena.balloonMeshes.set(b.id, makeArenaBalloon(b)));
             updateArenaScoreboard(msg.players || []);
+            // 倒數開始時，移到自己的出生點（避免大家疊在原點）
+            if (msg.status === 'countdown' && msg.spawns) applyMySpawn(msg.spawns);
             break;
         case 'arena_players':
             updateArenaPlayers(msg.players || []);
@@ -3417,6 +3419,7 @@ function handleArenaMessage(msg) {
             break;
         case 'arena_go':
             arena.status = 'running'; arena.endTime = msg.endTime; showCountdownNumber('GO');
+            if (msg.spawns) applyMySpawn(msg.spawns);  // 後備：確保開賽時在自己出生點
             setStateHUD('🏟️ 開搶！'); showToast('🏟️ 開始搶氣球！', 'success');
             break;
         case 'arena_scores':
@@ -3454,6 +3457,14 @@ function showArenaResult(ranking) {
     setStateHUD('🏁 大亂鬥結束！');
     showToast(top ? `🏆 冠軍：${top.emoji || ''}${top.name}（${top.score} 顆）` : '🏁 結束', 'success');
     if (typeof playCompleteSound === 'function') playCompleteSound();
+}
+function applyMySpawn(spawns) {
+    const mine = (spawns || []).find(s => s.id === wsState.myId);
+    if (!mine) return;
+    droneState.position.set(mine.x, HOME_POSITION.y, mine.z);
+    droneState.velocity.set(0, 0, 0);
+    droneState.isGrounded = true; droneState.isFlying = false;
+    droneState.rotation.y = Math.atan2(mine.x, mine.z);  // 機頭朝場地中心
 }
 function sendArenaPos() {
     if (!arena.active || !wsState.ws || wsState.ws.readyState !== WebSocket.OPEN) return;

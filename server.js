@@ -114,6 +114,20 @@ function arenaRanking() {
     return arenaPlayers().map(s => ({ id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0 }))
         .sort((a, b) => b.score - a.score);
 }
+// 把所有大亂鬥玩家平均散佈在一個圓上，避免 16 台疊在同一個出生點
+function assignArenaSpawns() {
+    const players = arenaPlayers();
+    const n = players.length;
+    const r = n <= 1 ? 0 : Math.min(20, 9 + n * 0.6);
+    players.forEach((s, i) => {
+        const ang = (i / Math.max(1, n)) * Math.PI * 2;
+        s.spawnX = +(Math.cos(ang) * r).toFixed(2);
+        s.spawnZ = +(Math.sin(ang) * r).toFixed(2);
+    });
+}
+function arenaSpawns() {
+    return arenaPlayers().map(s => ({ id: s.id, x: s.spawnX || 0, z: s.spawnZ || 0 }));
+}
 function arenaSnapshot() {
     return {
         type: 'arena_state',
@@ -122,6 +136,7 @@ function arenaSnapshot() {
         durationSec: ARENA.durationSec,
         balloons: ARENA.balloons.filter(b => b.alive).map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z })),
         players: arenaPlayers().map(s => ({ id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0 })),
+        spawns: arenaSpawns(),
     };
 }
 function broadcastArenaScores() {
@@ -133,6 +148,7 @@ function arenaStart(durationSec) {
     ARENA.durationSec = durationSec;
     for (const s of students.values()) if (s.arena) s.score = 0;
     arenaInitBalloons();
+    assignArenaSpawns();   // 指派各玩家的出生點（散佈在圓上）
     ARENA.status = 'countdown';
     broadcastArena(arenaSnapshot());
     let n = 3;
@@ -141,7 +157,7 @@ function arenaStart(durationSec) {
         else {
             ARENA.status = 'running';
             ARENA.endTime = Date.now() + durationSec * 1000;
-            broadcastArena({ type: 'arena_go', endTime: ARENA.endTime });
+            broadcastArena({ type: 'arena_go', endTime: ARENA.endTime, spawns: arenaSpawns() });
             broadcastArenaScores();
             console.log(`[Arena] 開始！${durationSec}s，${arenaPlayers().length} 人`);
         }
