@@ -3100,7 +3100,9 @@ const wsState = {
 
 function connectToTeacher() {
     if (wsState.ws && wsState.ws.readyState === 1) return;
-    const url = `ws://${window.location.hostname}:8080/`;
+    // WS 與頁面同主機同 port：HTTPS→wss、HTTP→ws（Railway 等雲端只開一個 port）
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${proto}//${window.location.host}/`;
     try {
         wsState.ws = new WebSocket(url);
     } catch (e) {

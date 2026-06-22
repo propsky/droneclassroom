@@ -185,7 +185,9 @@
         const students = new Map();
 
         function connectWS() {
-            const url = `ws://${window.location.hostname}:8080/teacher`;
+            // WS 與頁面同主機同 port：HTTPS→wss、HTTP→ws（Railway 等雲端只開一個 port）
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const url = `${proto}//${window.location.host}/teacher`;
             try {
                 wsState.ws = new WebSocket(url);
             } catch (e) {

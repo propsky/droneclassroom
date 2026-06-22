@@ -51,7 +51,9 @@ const server = http.createServer((req, res) => {
 });
 
 // ===== v1.3 WebSocket：學生 ↔ 老師 =====
-const wss = new WebSocketServer({ port: 8080 });
+// 與 HTTP 共用同一個 server / port（Railway 等 PaaS 只對外開一個 port）。
+// 用 URL path 區分老師 / 學生（見下方 connection handler）。
+const wss = new WebSocketServer({ server });
 const students = new Map();   // ws → { name, emoji, level, time, connected }
 const teachers = new Set();   // 老師 dashboard 連線
 let studentCounter = 0;
@@ -139,9 +141,9 @@ wss.on('connection', (ws, req) => {
     });
 });
 
-const port = 3000;
+const port = process.env.PORT || 3000;
 server.listen(port, '0.0.0.0', () => {
     console.log(`CREAFLY Drone Simulator running at http://localhost:${port}/`);
     console.log(`[v1.3] 老師後台：http://localhost:${port}/teacher`);
-    console.log(`[v1.3] WebSocket server on ws://localhost:8080`);
+    console.log(`[v1.3] WebSocket 與 HTTP 共用 port ${port}（path: / 學生、/teacher 老師）`);
 });
