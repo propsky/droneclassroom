@@ -293,6 +293,8 @@ const arena = {
     playgroundOn: false,      // 大亂鬥背景：false = 格線競技場、true = playground 場景
 };
 const GHOST_SPEED = 1.5;     // 鬼飛比較快
+const GHOST_CATCH_R = 2.2;   // 鬼的抓捕範圍（與 server ARENA_CATCH_DIST 一致）
+let myCatchAura = null;      // 自己是鬼時的抓捕光環
 let _playgroundObj = null, _playgroundLoading = false;
 const BALLOON_COLORS = [0xff4d6d, 0xffd166, 0x4dd0e1, 0x9b5de5, 0x4ade80, 0xff9f1c];
 
@@ -3438,6 +3440,16 @@ function styleOtherDrone(o) {
     const op = o.eaten ? 0.25 : 1;
     g.traverse(m => { if (m.material && 'opacity' in m.material) { m.material.transparent = true; m.material.opacity = op; } });
 }
+// 鬼的「抓捕範圍」半透明紅色光球（半徑 = 抓捕距離），進到裡面就會被吃
+function makeCatchAura() {
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(GHOST_CATCH_R, 20, 14),
+        new THREE.MeshBasicMaterial({ color: 0xff2d55, transparent: true, opacity: 0.14, depthWrite: false, side: THREE.DoubleSide })
+    );
+    m.renderOrder = 2;
+    scene.add(m);
+    return m;
+}
 function makeArenaBalloon(b) {
     const color = BALLOON_COLORS[b.id % BALLOON_COLORS.length];
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 12),
@@ -3539,7 +3551,7 @@ function updateArenaPlayers(list) {
         if (o.role !== role || o.eaten !== eaten) { o.role = role; o.eaten = eaten; styleOtherDrone(o); }
     });
     for (const [id, o] of arena.others) {
-        if (!seen.has(id)) { scene.remove(o.group); arena.others.delete(id); }
+        if (!seen.has(id)) { scene.remove(o.group); if (o.aura) scene.remove(o.aura); arena.others.delete(id); }
     }
 }
 // 設定自己的角色：套用機體外觀（鬼=放大+紅、被吃=變暗）
@@ -3599,14 +3611,24 @@ function sendArenaPos() {
     }));
 }
 function arenaTick() {
+    const tagRunning = arena.mode === 'tag' && arena.status === 'running';
     // 其他玩家位置內插（讓移動平順）
     arena.others.forEach(o => {
-        if (o.target.x === undefined) return;
-        o.group.position.x += (o.target.x - o.group.position.x) * 0.25;
-        o.group.position.y += (o.target.y - o.group.position.y) * 0.25;
-        o.group.position.z += (o.target.z - o.group.position.z) * 0.25;
-        o.group.rotation.y = o.target.yaw || 0;
+        if (o.target.x !== undefined) {
+            o.group.position.x += (o.target.x - o.group.position.x) * 0.25;
+            o.group.position.y += (o.target.y - o.group.position.y) * 0.25;
+            o.group.position.z += (o.target.z - o.group.position.z) * 0.25;
+            o.group.rotation.y = o.target.yaw || 0;
+        }
+        // 鬼的抓捕光環（跟著鬼，不受機體放大影響 → 獨立放在場景）
+        const showAura = tagRunning && o.role === 'ghost' && !o.eaten;
+        if (showAura) { if (!o.aura) o.aura = makeCatchAura(); o.aura.visible = true; o.aura.position.copy(o.group.position); }
+        else if (o.aura) o.aura.visible = false;
     });
+    // 自己是鬼 → 顯示自己的抓捕光環
+    const meGhost = tagRunning && arena.myRole === 'ghost' && !arena.eaten;
+    if (meGhost) { if (!myCatchAura) myCatchAura = makeCatchAura(); myCatchAura.visible = true; myCatchAura.position.copy(droneState.position); }
+    else if (myCatchAura) myCatchAura.visible = false;
     // 搶氣球（撞到 → 回報 server 仲裁）
     if (arena.status === 'running') {
         arena.balloonMeshes.forEach((m, id) => {
@@ -3720,7 +3742,8 @@ function exitArena() {
     if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'arena_leave' }));
     if (arena.posTimer) { clearInterval(arena.posTimer); arena.posTimer = null; }
     arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
-    arena.others.forEach(o => scene.remove(o.group)); arena.others.clear();
+    arena.others.forEach(o => { scene.remove(o.group); if (o.aura) scene.remove(o.aura); }); arena.others.clear();
+    if (myCatchAura) { scene.remove(myCatchAura); myCatchAura = null; }
     arena.obstacles.forEach(o => scene.remove(o)); arena.obstacles = [];
     obstacles = obstacles.filter(o => !(o.userData && o.userData.arena));
     // 還原格線地面給一般關卡用（playground 物件留著快取、僅隱藏）
