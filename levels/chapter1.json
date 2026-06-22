@@ -34,15 +34,15 @@
     {
       "id": "1-2",
       "name": "水平移動",
-      "intro": "↔️ 水平移動\n\n先升到 2m 高度，再依序：\n1. 推右 Y 向前 3m → 停\n2. 推右 Y 向後回原點\n3. 推右 X 向右 3m → 停\n4. 推右 X 向左回原點",
-      "hud": "前進 → 後退 → 右飛 → 左飛（4 方向）",
+      "intro": "↔️ 水平移動\n\n先升到 2m 高度（要保持在空中，不能落地），再依序：\n1. 推右 Y 向前 3m → 停\n2. 推右 Y 向後回原點\n3. 推右 X 向右 3m → 停\n4. 推右 X 向左回原點",
+      "hud": "保持 2m 高度：前進 → 後退 → 右飛 → 左飛",
       "rings": [],
       "obstacles": [],
       "passZones": [
-        {"x": 0, "z": -3, "label": "前 3m", "type": "position", "maxZ": -2.5},
-        {"x": 0, "z": 0, "label": "後退回原點", "type": "position", "minZ": -0.5, "maxZ": 0.5},
-        {"x": 3, "z": 0, "label": "右飛 3m", "type": "position", "minX": 2.5},
-        {"x": 0, "z": 0, "label": "左飛回原點", "type": "position", "minX": -0.5, "maxX": 0.5, "minZ": -0.5, "maxZ": 0.5}
+        {"x": 0, "z": -3, "label": "前 3m", "type": "position", "maxZ": -2.5, "minY": 1.2},
+        {"x": 0, "z": 0, "label": "後退回原點", "type": "position", "minZ": -0.5, "maxZ": 0.5, "minY": 1.2},
+        {"x": 3, "z": 0, "label": "右飛 3m", "type": "position", "minX": 2.5, "minY": 1.2},
+        {"x": 0, "z": 0, "label": "左飛回原點", "type": "position", "minX": -0.5, "maxX": 0.5, "minZ": -0.5, "maxZ": 0.5, "minY": 1.2}
       ]
     },
     {
@@ -75,13 +75,13 @@
     {
       "id": "1-5",
       "name": "旋轉鑽圈",
-      "intro": "🎯 旋轉鑽圈（綜合）\n\n1. 升到 3m\n2. 旋轉 90° 往東\n3. 穿過紅圈 1\n4. 旋轉 90° 往南\n5. 穿過紅圈 2\n6. 旋轉 90° 往西\n7. 穿過紅圈 3\n8. 旋轉 90° 往北（回正）\n9. 後退回起飛墊",
-      "hud": "旋轉 + 鑽 3 個紅圈（L 型）→ 飛回原點",
+      "intro": "🎯 旋轉鑽圈（綜合）\n\n這關紅圈要「機頭對準」才算穿過 —— 先轉向、再往前飛！\n1. 升到 3m\n2. 轉向右邊（機頭朝右），飛過紅圈 1\n3. 轉 90° 朝前方，飛過紅圈 2\n4. 再轉 90° 朝左邊，飛過紅圈 3\n5. 飛回起飛墊降落\n\n提示：到了圈卻沒過，代表機頭沒對準 —— 先轉向再穿。",
+      "hud": "轉向對準紅圈穿過（3 個）→ 飛回原點降落",
       "returnHome": true,
       "rings": [
-        {"x": 5,  "y": 3, "z": 0,   "color": "red", "label": "1"},
-        {"x": 5,  "y": 3, "z": -5,  "color": "red", "label": "2"},
-        {"x": 0,  "y": 3, "z": -5,  "color": "red", "label": "3"}
+        {"x": 5,  "y": 3, "z": 0,   "color": "red", "label": "1", "faceYaw": 270, "faceTol": 40},
+        {"x": 5,  "y": 3, "z": -5,  "color": "red", "label": "2", "faceYaw": 0,   "faceTol": 40},
+        {"x": 0,  "y": 3, "z": -5,  "color": "red", "label": "3", "faceYaw": 90,  "faceTol": 40}
       ],
       "obstacles": []
     },

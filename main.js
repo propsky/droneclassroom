@@ -275,6 +275,7 @@ let passZoneProgress = [];
 // 自由活動：氣球收集（球體，靠近即戳破，任意順序、不計時）
 let balloons = [];
 let balloonState = { collected: 0, total: 0, done: false };
+let ringFaceHintAt = 0;  // 「機頭沒對準圈」提示的節流時間戳
 const BALLOON_COLORS = [0xff4d6d, 0xffd166, 0x4dd0e1, 0x9b5de5, 0x4ade80, 0xff9f1c];
 
 // 載入 chapter1.json
@@ -475,11 +476,15 @@ function checkPassZones() {
             passed = true;
         } else if (zone.type === 'position') {
             const x = droneState.position.x;
+            const y = droneState.position.y;
             const z = droneState.position.z;
             if (zone.minX !== undefined && x < zone.minX) return;
             if (zone.maxX !== undefined && x > zone.maxX) return;
             if (zone.minZ !== undefined && z < zone.minZ) return;
             if (zone.maxZ !== undefined && z > zone.maxZ) return;
+            // 可選的高度要求（例如要求「在空中」而非趴在地上爬）
+            if (zone.minY !== undefined && y < zone.minY) return;
+            if (zone.maxY !== undefined && y > zone.maxY) return;
             passed = true;
         } else if (zone.type === 'heading') {
             // rotation.y 是 Three.js Euler 軸向：正 Y 為逆時針（從上方看）
@@ -2536,15 +2541,32 @@ function checkRingCollisions() {
     rings.forEach((ring, i) => {
         if (!ring.visible) return;
         const dist = droneState.position.distanceTo(ring.position);
-        if (dist < 1.5) {
-            ring.visible = false;
-            ring.material.opacity = 0.3;
-            missionRings[i].passed = true;
-            programState.ringsCollected++;
-            updateRingHUD();
-            showToast(`✓ 穿過圈 ${i+1}`, 'success');
-            playRingSound();
+        if (dist >= 1.5) return;
+        // 旋轉鑽圈關：圈標了 faceYaw → 必須「機頭朝向正確方位」才算穿過（強制旋轉）
+        const faceYaw = missionRings[i] && missionRings[i].faceYaw;
+        if (faceYaw !== undefined && faceYaw !== null) {
+            const yawDeg = ((droneState.rotation.y * 180 / Math.PI) % 360 + 360) % 360;
+            const target = ((faceYaw % 360) + 360) % 360;
+            let d = Math.abs(yawDeg - target);
+            if (d > 180) d = 360 - d;
+            if (d > (missionRings[i].faceTol || 35)) {
+                // 到圈了但機頭沒對準 → 提示轉向（節流，避免每幀洗版）
+                const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+                if (now - ringFaceHintAt > 1500) {
+                    ringFaceHintAt = now;
+                    setStateHUD('🔄 轉向紅圈、機頭對準再穿過！');
+                    showToast('🔄 機頭要對準紅圈才算過！先轉向', 'warning');
+                }
+                return;
+            }
         }
+        ring.visible = false;
+        ring.material.opacity = 0.3;
+        missionRings[i].passed = true;
+        programState.ringsCollected++;
+        updateRingHUD();
+        showToast(`✓ 穿過圈 ${i + 1}`, 'success');
+        playRingSound();
     });
     // 手動模式：所有圈都過了也顯示完成（不結束遊戲）
     const allRingsDone = programState.totalRings > 0 && programState.ringsCollected >= programState.totalRings;
