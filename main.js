@@ -3223,6 +3223,31 @@ document.getElementById('music-btn').addEventListener('click', () => {
     }
 });
 
+// 全螢幕（iPad Safari 支援元素全螢幕的 webkit 版本；桌機原生支援）
+(function setupFullscreen() {
+    const btn = document.getElementById('fullscreen-btn');
+    if (!btn) return;
+    const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+    const update = () => {
+        const on = !!fsEl();
+        btn.textContent = on ? '⛶ 離開全螢幕' : '⛶ 全螢幕';
+        btn.classList.toggle('active', on);
+    };
+    btn.addEventListener('click', () => {
+        const el = document.documentElement;
+        if (!fsEl()) {
+            const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
+            if (req) { try { Promise.resolve(req.call(el)).catch(() => {}); } catch (e) {} }
+            else showToast('此瀏覽器不支援全螢幕；iPhone 可用 Safari「分享 → 加入主畫面」全螢幕開啟', 'warning');
+        } else {
+            const exit = document.exitFullscreen || document.webkitExitFullscreen;
+            if (exit) { try { exit.call(document); } catch (e) {} }
+        }
+    });
+    document.addEventListener('fullscreenchange', update);
+    document.addEventListener('webkitfullscreenchange', update);
+})();
+
 // =============================================================================
 // 5.7 v1.3 學生 WebSocket client（連到老師 server）
 // =============================================================================
