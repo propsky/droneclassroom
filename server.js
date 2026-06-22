@@ -14,6 +14,18 @@ const server = http.createServer((req, res) => {
         filePath = './teacher.html';
     }
 
+    // 🎮 搖桿測試頁（controllertestweb/）— 整個目錄掛在 /gamepad/ 下，相對路徑才能正確解析
+    if (urlPath === '/gamepad') {
+        res.writeHead(302, { Location: '/gamepad/' });
+        res.end();
+        return;
+    }
+    if (urlPath === '/gamepad/') {
+        filePath = './controllertestweb/index.html';
+    } else if (urlPath.startsWith('/gamepad/')) {
+        filePath = './controllertestweb/' + urlPath.slice('/gamepad/'.length);
+    }
+
     const extname = path.extname(filePath);
     const contentType = {
         '.html': 'text/html; charset=utf-8',
