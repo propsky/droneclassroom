@@ -22,6 +22,11 @@ const server = http.createServer((req, res) => {
         '.json': 'application/json; charset=utf-8',
         '.png':  'image/png',
         '.svg':  'image/svg+xml',
+        '.ico':  'image/x-icon',
+        '.mp3':  'audio/mpeg',
+        '.wav':  'audio/wav',
+        '.hdr':  'application/octet-stream',  // RGBE / Radiance HDR
+        '.glb':  'model/gltf-binary',
     }[extname] || 'text/plain; charset=utf-8';
 
     fs.readFile(filePath, (error, content) => {

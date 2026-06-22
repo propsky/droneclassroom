@@ -9,14 +9,29 @@
 // =============================================================================
 
 import * as THREE from 'three';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
 // =============================================================================
 // 1. Three.js scene 初始化
 // =============================================================================
 const sceneCanvas = document.getElementById('scene-canvas');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB);
+scene.background = new THREE.Color(0x87CEEB);   // 後備純色天空（HDRI 載入失敗時保留）
 scene.fog = new THREE.FogExp2(0xB0DFFF, 0.008);
+
+// 遠景真實感：載入 CC0 HDRI 天空盒當背景（素材來源見 docs/ATTRIBUTIONS.md）
+// 失敗（離線 / 載入錯誤）時靜默維持上面的純色天空，不影響遊戲。
+new RGBELoader().load(
+    'assets/env/pretoria_gardens_1k.hdr',
+    (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        scene.background = texture;
+        scene.backgroundBlurriness = 0.04;  // 稍微柔化，遠景不搶戲
+        scene.environment = texture;          // 給標準材質一點環境反射（Phong 不受影響）
+    },
+    undefined,
+    (err) => console.warn('HDRI 天空載入失敗，維持純色天空：', err)
+);
 
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
 camera.position.set(0, 15, 30);
@@ -255,6 +270,10 @@ let levelStartTime = 0;
 // v1.4 6/22 修正 3：1-1/1-2/1-3 過關條件用 pass zone（visible disc + state check）
 let passZoneMeshes = [];
 let passZoneProgress = [];
+// 自由活動：氣球收集（球體，靠近即戳破，任意順序、不計時）
+let balloons = [];
+let balloonState = { collected: 0, total: 0, done: false };
+const BALLOON_COLORS = [0xff4d6d, 0xffd166, 0x4dd0e1, 0x9b5de5, 0x4ade80, 0xff9f1c];
 
 // 載入 chapter1.json
 fetch('levels/chapter1.json')
@@ -285,6 +304,10 @@ function clearLevelObjects() {
     passZoneMeshes.forEach(m => scene.remove(m));
     passZoneMeshes = [];
     passZoneProgress = [];
+    // 移除所有氣球
+    balloons.forEach(b => scene.remove(b.mesh));
+    balloons = [];
+    balloonState = { collected: 0, total: 0, done: false };
     // 隱藏 progress bar
     const bar = document.getElementById('progress-bar');
     if (bar) bar.style.display = 'none';
@@ -338,6 +361,10 @@ function loadLevel(levelId) {
         );
         mesh.position.set(o.x, o.y, o.z);
         mesh.userData.soft = true;  // 軟方塊 = 碰到會消失再出現
+        // 標了 solid 的方塊：實心、不可被穿過（碰撞由 resolveObstacleCollisions 處理）
+        mesh.userData.solid = !!o.solid;
+        mesh.userData.half = o.size / 2;
+        if (mesh.userData.solid) mesh.material.opacity = 0.85;  // 實心方塊畫得更不透明
         scene.add(mesh);
         return mesh;
     });
@@ -369,6 +396,45 @@ function loadLevel(levelId) {
         });
         // 初始化 HUD progress bar
         initProgressBar(level.passZones);
+        updatePassZoneProgress();  // 一進關卡就把第 1 步標成「進行中」
+    }
+
+    // 自由活動：建立氣球（彩色球體，靠近即戳破）
+    if (level.balloons && level.balloons.length) {
+        level.balloons.forEach((b, i) => {
+            const color = BALLOON_COLORS[i % BALLOON_COLORS.length];
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(0.7, 20, 16),
+                new THREE.MeshPhongMaterial({
+                    color, emissive: color, emissiveIntensity: 0.35,
+                    shininess: 80, transparent: true, opacity: 0.95
+                })
+            );
+            mesh.position.set(b.x, b.y, b.z);
+            // 細繩（讓氣球看起來是飄的）
+            const string = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.015, 0.015, 0.9, 6),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+            );
+            string.position.set(0, -0.8, 0);
+            mesh.add(string);
+            scene.add(mesh);
+            balloons.push({ mesh, popped: false });
+        });
+        balloonState = { collected: 0, total: balloons.length, done: false };
+        updateBalloonHUD();
+    }
+
+    // HUD 顯示切換：有圈才顯示鑽圈 HUD、有氣球才顯示氣球 HUD
+    const missionHud = document.getElementById('mission-hud');
+    if (missionHud) missionHud.style.display = (level.rings && level.rings.length) ? 'block' : 'none';
+    const balloonHud = document.getElementById('balloon-hud');
+    if (balloonHud) balloonHud.style.display = (level.balloons && level.balloons.length) ? 'block' : 'none';
+    // returnHome 關卡：右側進度顯示「飛回起飛墊並降落」步驟（一開始為待辦）
+    const rhStep = document.getElementById('returnhome-step');
+    if (rhStep) {
+        if (level.returnHome) updateReturnHomeStep('pending');
+        else rhStep.style.display = 'none';
     }
 
     // 顯示教學提示
@@ -381,6 +447,9 @@ function checkPassZones() {
     if (!currentLevel || !currentLevel.passZones) return;
     currentLevel.passZones.forEach((zone, i) => {
         if (passZoneProgress[i]) return;  // 已過
+        // 必須照順序過關：前一步沒完成，這一步尚未「啟用」。
+        // 否則像「落地 / 回到原點 / 回正方位」這種步驟，會被「剛開始的初始狀態」誤判為完成。
+        if (i > 0 && !passZoneProgress[i - 1]) return;
         let passed = false;
         if (zone.type === 'altitude') {
             const y = droneState.position.y;
@@ -451,10 +520,13 @@ function updatePassZoneProgress() {
     const done = passZoneProgress.filter(p => p).length;
     const textEl = document.getElementById('progress-text');
     if (textEl) textEl.textContent = `${done}/${total}`;
+    // 找出目前「啟用中」的步驟：第一個尚未完成的步驟（照順序）
+    const activeIdx = passZoneProgress.findIndex(p => !p);
     const bar = document.getElementById('progress-bar');
     if (bar) {
         bar.querySelectorAll('.step').forEach((step, i) => {
             step.classList.toggle('completed', passZoneProgress[i]);
+            step.classList.toggle('active', i === activeIdx);
         });
     }
 }
@@ -755,64 +827,22 @@ function playCompleteSound() {
 }
 
 // BGM：8-bit 風格 loop（30 秒）
+// 背景音樂：改用 propwash 的 Magenta Metropolis（|e s c p|, CC BY 4.0；見 docs/ATTRIBUTIONS.md）
+// 取代原本單調的方波旋律，改以 HTML <audio> 串流播放（省記憶體）。
+// 預設關閉，由 #music-btn 開關；瀏覽器 autoplay 政策需使用者互動才能播放。
 function startBGM() {
-    if (audioState.bgmPlaying) return;
-    const ctx = ensureAudio();
-    if (!ctx) return;
+    const el = document.getElementById('bg-music');
+    if (!el) return;
+    el.volume = 0.15;
+    const p = el.play();
+    if (p && p.catch) p.catch(err => console.warn('背景音樂播放被瀏覽器阻擋（需使用者互動）：', err));
     audioState.bgmPlaying = true;
-
-    // 主旋律（C-E-G-C 高八度）
-    const melody = [523.25, 659.25, 783.99, 1046.5, 783.99, 659.25];
-    const bass = [130.81, 164.81, 196.00, 130.81];  // C3 E3 G3 C3
-    const beat = 0.25;  // 16 BPM / 拍
-    const loopLen = melody.length * beat;
-
-    const masterGain = ctx.createGain();
-    masterGain.gain.value = audioState.muted ? 0 : 0.07;
-    masterGain.connect(ctx.destination);
-    audioState.bgmOsc = masterGain;
-
-    function playMelodyNote(freq, start, dur) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'square';
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, start);
-        gain.gain.linearRampToValueAtTime(0.5, start + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-        osc.connect(gain).connect(masterGain);
-        osc.start(start);
-        osc.stop(start + dur + 0.05);
-    }
-    function playBassNote(freq, start, dur) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'triangle';
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, start);
-        gain.gain.linearRampToValueAtTime(0.6, start + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, start + dur);
-        osc.connect(gain).connect(masterGain);
-        osc.start(start);
-        osc.stop(start + dur + 0.05);
-    }
-
-    function scheduleLoop() {
-        if (!audioState.bgmPlaying) return;
-        const t0 = ctx.currentTime;
-        melody.forEach((f, i) => playMelodyNote(f, t0 + i * beat, beat * 0.9));
-        bass.forEach((f, i) => playBassNote(f, t0 + i * (loopLen / bass.length), loopLen / bass.length * 0.9));
-        setTimeout(scheduleLoop, loopLen * 1000);
-    }
-    scheduleLoop();
 }
 
 function stopBGM() {
+    const el = document.getElementById('bg-music');
+    if (el) el.pause();
     audioState.bgmPlaying = false;
-    if (audioState.bgmOsc) {
-        audioState.bgmOsc.gain.value = 0;
-        audioState.bgmOsc = null;
-    }
 }
 
 function setMute(muted) {
@@ -1418,6 +1448,9 @@ const programState = {
     startTime: 0,
     ringsCollected: 0,
     totalRings: 3,
+    manualComplete: false,
+    awaitingReturn: false,  // 穿完圈、正在等玩家飛回原點
+    returnPhase: null,      // 回家流程階段：null / 'return'(飛回) / 'land'(降落)
 };
 
 let programPromise = null;
@@ -2439,19 +2472,124 @@ function checkRingCollisions() {
             playRingSound();
         }
     });
-    // 手動模式：3 圈都過了也顯示完成（不結束遊戲）
-    if (!programState.running && programState.ringsCollected >= programState.totalRings && !programState.manualComplete) {
-        programState.manualComplete = true;
-        const elapsed = Date.now() - levelStartTime;
-        showToast(`🎉 過關！用時 ${(elapsed/1000).toFixed(1)}s`, 'success');
-        playCompleteSound();
-        // 上報給老師
-        if (currentLevel) wsReportComplete(currentLevel.id, elapsed);
+    // 手動模式：所有圈都過了也顯示完成（不結束遊戲）
+    const allRingsDone = programState.totalRings > 0 && programState.ringsCollected >= programState.totalRings;
+    if (!programState.running && allRingsDone && !programState.manualComplete) {
+        if (currentLevel && currentLevel.returnHome) {
+            // 穿完圈 → 飛回起飛墊（原點）→ 降落在墊上，才算過關
+            const dx = droneState.position.x - HOME_POSITION.x;
+            const dz = droneState.position.z - HOME_POSITION.z;
+            const distHome = Math.sqrt(dx * dx + dz * dz);  // 水平距離，不看高度
+            const overPad = distHome < 1.5;
+            const landed = droneState.isGrounded;           // 已降落（碰到地面）
+            if (overPad && landed) {
+                manualLevelComplete();
+            } else {
+                programState.awaitingReturn = true;
+                // 兩階段引導：先飛回原點上方，再降落
+                const phase = overPad ? 'land' : 'return';
+                if (programState.returnPhase !== phase) {
+                    programState.returnPhase = phase;
+                    if (phase === 'return') {
+                        setStateHUD('🏠 全部穿過了！飛回起飛墊（原點）');
+                        showToast('全部圈圈都穿過了！飛回起飛墊上方', 'success');
+                    } else {
+                        setStateHUD('🛬 到墊上方了！降落在起飛墊上');
+                        showToast('🛬 降下去、降落在起飛墊上就完成！', 'success');
+                    }
+                    updateReturnHomeStep(phase);
+                }
+            }
+        } else {
+            manualLevelComplete();
+        }
     }
-    // 重置時把 manualComplete 清掉
+    // 重置時把完成狀態清掉
     if (programState.ringsCollected < programState.totalRings) {
         programState.manualComplete = false;
+        programState.awaitingReturn = false;
+        programState.returnPhase = null;
     }
+}
+
+function manualLevelComplete() {
+    programState.manualComplete = true;
+    programState.awaitingReturn = false;
+    programState.returnPhase = null;
+    if (currentLevel && currentLevel.returnHome) updateReturnHomeStep('done');
+    const elapsed = Date.now() - levelStartTime;
+    showToast(`🎉 過關！用時 ${(elapsed/1000).toFixed(1)}s`, 'success');
+    playCompleteSound();
+    // 上報給老師
+    if (currentLevel) wsReportComplete(currentLevel.id, elapsed);
+}
+
+// 右側關卡進度：returnHome 關卡的「飛回起飛墊 → 降落」提示
+function updateReturnHomeStep(phase) {
+    const el = document.getElementById('returnhome-step');
+    if (!el) return;
+    const map = {
+        pending: { t: '🏁 最後：飛回起飛墊並降落', cls: '' },
+        return:  { t: '🏠 飛回起飛墊（原點）', cls: 'active' },
+        land:    { t: '🛬 降落在起飛墊上', cls: 'active' },
+        done:    { t: '✓ 已降落，完成！', cls: 'done' },
+    };
+    const m = map[phase] || map.pending;
+    el.textContent = m.t;
+    el.className = 'rh-step ' + m.cls;
+    el.style.display = 'block';
+}
+
+// 自由活動：每幀檢查氣球是否被戳破（靠近即破，任意順序、不結束遊戲）
+function checkBalloons() {
+    if (!balloons.length) return;
+    balloons.forEach((b, i) => {
+        if (b.popped) return;
+        // 氣球半徑 0.7 + drone 容差 → 1.4 內算戳破
+        if (droneState.position.distanceTo(b.mesh.position) < 1.4) {
+            b.popped = true;
+            b.mesh.visible = false;
+            balloonState.collected++;
+            updateBalloonHUD();
+            showToast(`🎈 戳破 ${balloonState.collected}/${balloonState.total}`, 'success');
+            playRingSound();
+        }
+    });
+    // 全部戳破：慶祝一次（自由活動，不鎖關、不強制結束）
+    if (!balloonState.done && balloonState.collected >= balloonState.total) {
+        balloonState.done = true;
+        showToast('🎉 12 顆氣球全部戳破！太厲害了！', 'success');
+        playCompleteSound();
+        if (currentLevel) wsReportComplete(currentLevel.id, Date.now() - levelStartTime);
+    }
+}
+
+function updateBalloonHUD() {
+    const el = document.getElementById('balloon-count');
+    if (el) el.textContent = `${balloonState.collected}/${balloonState.total}`;
+}
+
+// 實心方塊碰撞：把 drone 當成半徑 DRONE_RADIUS 的球，AABB 阻擋，沿最小穿透軸推出
+const DRONE_RADIUS = 0.5;
+function resolveObstacleCollisions() {
+    let bumped = false;
+    obstacles.forEach(o => {
+        if (!o.userData.solid) return;
+        const half = o.userData.half + DRONE_RADIUS;  // 方塊半邊長 + drone 半徑
+        const c = o.position, p = droneState.position;
+        const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+        // 不在膨脹後的方塊範圍內 → 沒撞到
+        if (Math.abs(dx) >= half || Math.abs(dy) >= half || Math.abs(dz) >= half) return;
+        // 在裡面：找穿透最淺的軸，把 drone 推到該面外，並歸零該軸速度
+        const px = half - Math.abs(dx), py = half - Math.abs(dy), pz = half - Math.abs(dz);
+        const m = Math.min(px, py, pz);
+        if (m === px) { p.x = c.x + (dx < 0 ? -half : half); droneState.velocity.x = 0; }
+        else if (m === py) { p.y = c.y + (dy < 0 ? -half : half); droneState.velocity.y = 0; }
+        else { p.z = c.z + (dz < 0 ? -half : half); droneState.velocity.z = 0; }
+        bumped = true;
+    });
+    // 撞牆音效（沿用撞地音效，避免每幀狂播：靠 velocity 已被歸零自然收斂）
+    if (bumped && droneState.isFlying && typeof playBumpSound === 'function') playBumpSound();
 }
 
 function animate() {
@@ -2490,10 +2628,15 @@ function animate() {
         }
     }
 
+    // 實心方塊碰撞：擋住 drone 不讓它穿過去（只對標了 solid 的障礙物）
+    resolveObstacleCollisions();
+
     // 不論手動 / 程式模式，每幀都檢查穿圈
     checkRingCollisions();
     // v1.4 6/22 修正 3：1-1/1-2/1-3 過關條件檢查
     checkPassZones();
+    // 自由活動：氣球戳破檢查
+    checkBalloons();
     updateLevelTimer();
 
     // 套用到模型
@@ -2925,15 +3068,26 @@ document.getElementById('mute-btn').addEventListener('click', () => {
     showToast(audioState.muted ? '🔇 音效關閉' : '🔊 音效開啟', '');
 });
 
-// v1.3 第一次互動後啟動 BGM（autoplay policy）
-window.addEventListener('pointerdown', () => {
-    ensureAudio();
-    if (!audioState.bgmPlaying) startBGM();
-}, { once: false });
-window.addEventListener('keydown', () => {
-    ensureAudio();
-    if (!audioState.bgmPlaying) startBGM();
-}, { once: false });
+// 第一次互動後解鎖 Web Audio（音效用）。背景音樂改為預設關閉、由 #music-btn 手動開啟，
+// 不再自動播放（避免一進場就放音樂）。
+window.addEventListener('pointerdown', () => ensureAudio(), { once: false });
+window.addEventListener('keydown', () => ensureAudio(), { once: false });
+
+// 背景音樂開關
+document.getElementById('music-btn').addEventListener('click', () => {
+    const btn = document.getElementById('music-btn');
+    if (audioState.bgmPlaying) {
+        stopBGM();
+        btn.textContent = '🎵 音樂：關';
+        btn.classList.remove('active');
+        showToast('🎵 背景音樂關閉', '');
+    } else {
+        startBGM();
+        btn.textContent = '🎵 音樂：開';
+        btn.classList.add('active');
+        showToast('🎵 背景音樂開啟', '');
+    }
+});
 
 // =============================================================================
 // 5.7 v1.3 學生 WebSocket client（連到老師 server）
@@ -3162,4 +3316,9 @@ if (new URLSearchParams(location.search).has('autorun')) {
 }
 
 // 對外 debug
-window._creafly = { droneState, missionRings, workspace };
+window._creafly = {
+    droneState, missionRings, workspace, programState,
+    loadLevel, scene,
+    get currentLevel() { return currentLevel; },
+    HOME_POSITION,
+};

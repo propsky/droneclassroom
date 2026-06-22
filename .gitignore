@@ -17,3 +17,17 @@ build/
 test-output/
 test-clone*/
 test-clone/
+
+# Scratch / 開發用拋棄式檔案（不進 public repo）
+.pm-*
+dom-snapshot.html
+*.err
+verify-*.js
+verify-*.png
+review-*.js
+review-*.png
+validate-*.js
+extract-balloons.js
+screenshot-*.js
+pack-zip.*
+.chrome-*

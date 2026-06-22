@@ -1,0 +1,163 @@
+{
+  "version": "v1.4",
+  "commit": "4691d43",
+  "date": "2026-06-21T15:54:47.384Z",
+  "chromeVersion": "149.0.7827.116",
+  "summary": {
+    "total": 12,
+    "pass": 10,
+    "fail": 2,
+    "consoleErrors": 1,
+    "consoleWarns": 0
+  },
+  "tests": [
+    {
+      "name": "AC#1 default = manual mode, Blockly hidden",
+      "pass": false,
+      "notes": [
+        "body.class=\"mode-manual\"",
+        "toggle=\"🕹 手動\"",
+        "hud-mode=\"🕹 手動\"",
+        "blockly display=none",
+        "version=v1.4",
+        "screenshot=170714B",
+        "AC#1: PASS"
+      ],
+      "errors": [
+        "Uncaught Error: Error: Extension \"contextMenu_variableDynamicSetterGetter\" is already registered. "
+      ],
+      "warns": []
+    },
+    {
+      "name": "AC#2 toggle button visible & clickable",
+      "pass": true,
+      "notes": [
+        "before mode=mode-manual text=\"🕹 手動\"",
+        "after  mode=mode-program text=\"💻 程式\" blockly=flex",
+        "screenshot=185075B",
+        "AC#2: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "AC#3 mode switch < 500ms",
+      "pass": true,
+      "notes": [
+        "switch took 29.1ms → mode=mode-program",
+        "AC#3: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "AC#4 state preserved across mode switch",
+      "pass": true,
+      "notes": [
+        "before alt=0.4 timer=⏱ 5.8s",
+        "after  alt=0.4 timer=⏱ 6.6s",
+        "AC#4: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "AC#5 manual locked during program run",
+      "pass": true,
+      "notes": [
+        "body=\"mode-program program-running\"",
+        "program-running=true",
+        "blockly=flex",
+        "kb dispatched=dispatched",
+        "screenshot=186215B",
+        "AC#5: PASS"
+      ],
+      "errors": [],
+      "warns": [
+        "block generator functions on CodeGenerator objects was deprecated in 10.0 and will be deleted in 11.0.\nUse the .forBlock[blockType] dictionary instead."
+      ]
+    },
+    {
+      "name": "AC#6 all 6 levels (1-0~1-5) support toggle",
+      "pass": true,
+      "notes": [
+        "L1-0: clicked=clicked active=1-0 toggle=\"🕹 手動\" afterToggle=mode-program",
+        "L1-1: clicked=clicked active=1-1 toggle=\"🕹 手動\" afterToggle=mode-program",
+        "L1-2: clicked=clicked active=1-2 toggle=\"🕹 手動\" afterToggle=mode-program",
+        "L1-3: clicked=clicked active=1-3 toggle=\"🕹 手動\" afterToggle=mode-program",
+        "L1-4: clicked=clicked active=1-4 toggle=\"🕹 手動\" afterToggle=mode-program",
+        "L1-5: clicked=clicked active=1-5 toggle=\"🕹 手動\" afterToggle=mode-program",
+        "allLevelsLoaded=true allToggleWork=true",
+        "AC#6: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "AC#7 no console errors during full flow",
+      "pass": false,
+      "notes": [
+        "1 console errors, 0 warns collected across all tests"
+      ],
+      "errors": [
+        "Uncaught Error: Error: Extension \"contextMenu_variableDynamicSetterGetter\" is already registered. "
+      ],
+      "warns": []
+    },
+    {
+      "name": "REGRESSION level 1-0 (manual mode)",
+      "pass": true,
+      "notes": [
+        "click=ok active=1-0",
+        "mode=mode-manual blockly=none toggle=\"🕹 手動\"",
+        "PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "REGRESSION level 1-1 (manual mode)",
+      "pass": true,
+      "notes": [
+        "click=ok active=1-1",
+        "mode=mode-manual blockly=none toggle=\"🕹 手動\"",
+        "PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "REGRESSION level 1-2 (manual mode)",
+      "pass": true,
+      "notes": [
+        "click=ok active=1-2",
+        "mode=mode-manual blockly=none toggle=\"🕹 手動\"",
+        "PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "REGRESSION level 1-3 (manual mode)",
+      "pass": true,
+      "notes": [
+        "click=ok active=1-3",
+        "mode=mode-manual blockly=none toggle=\"🕹 手動\"",
+        "PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "REGRESSION level 1-4 (manual mode)",
+      "pass": true,
+      "notes": [
+        "click=ok active=1-4",
+        "mode=mode-manual blockly=none toggle=\"🕹 手動\"",
+        "PASS"
+      ],
+      "errors": [],
+      "warns": []
+    }
+  ]
+}
