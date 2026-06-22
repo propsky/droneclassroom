@@ -1059,6 +1059,32 @@
             animation: cd-pop 0.7s ease-out;
         }
         #countdown-overlay.go { color: var(--creafly-green, #4ade80); }
+
+        /* 大亂鬥 HUD */
+        #arena-hud {
+            position: fixed;
+            top: 64px;
+            right: 12px;
+            z-index: 240;
+            display: none;
+            background: rgba(10, 37, 64, 0.88);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 10px;
+            padding: 10px 12px;
+            min-width: 200px;
+            color: #fff;
+            backdrop-filter: blur(4px);
+        }
+        #arena-hud .arena-title {
+            font-size: 14px; font-weight: 700; color: var(--creafly-yellow, #FFCE00);
+            margin-bottom: 6px; display: flex; justify-content: space-between; gap: 8px;
+        }
+        #arena-scoreboard .arena-row {
+            display: flex; justify-content: space-between; gap: 10px;
+            font-size: 13px; padding: 2px 4px; border-radius: 4px;
+        }
+        #arena-scoreboard .arena-row b { color: var(--creafly-green, #4ade80); }
+        #arena-scoreboard .arena-row.me { background: rgba(255,206,0,0.22); font-weight: 700; }
         @keyframes cd-pop {
             0%   { transform: scale(2.2); opacity: 0; }
             25%  { opacity: 1; }
@@ -1718,8 +1744,15 @@
         <button class="level-btn" data-level="1-4">1-4 鑽圈</button>
         <button class="level-btn" data-level="1-5">1-5 綜合</button>
         <button class="level-btn" data-level="1-6">🎈 1-6 氣球</button>
+        <button class="level-btn" id="arena-btn" style="background:linear-gradient(135deg,#ff6b6b,#f59e0b);color:#fff;">🏟️ 大亂鬥</button>
     </div>
     <div class="level-selector-timer" id="level-timer">⏱ 0.0s</div>
+</div>
+
+<!-- 大亂鬥 HUD：計時 + 即時排行 -->
+<div id="arena-hud">
+    <div class="arena-title">🏟️ 大亂鬥 <span id="arena-timer">⏳ 等待老師開始</span></div>
+    <div id="arena-scoreboard"><div class="arena-row">等待玩家加入…</div></div>
 </div>
 
 <!-- v1.3 玩家名稱 HUD -->

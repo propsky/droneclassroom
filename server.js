@@ -84,6 +84,94 @@ function broadcastToStudents(msg) {
     }
 }
 
+// =====================================================================
+// 大亂鬥 Arena（多人即時搶氣球）—— 伺服器權威
+// =====================================================================
+const ARENA = { status: 'idle', balloons: [], endTime: 0, durationSec: 180 };
+const ARENA_BALLOON_COUNT = 50;
+const ARENA_BOUNDS = { x: 22, z: 22, ymin: 1.5, ymax: 10 };
+const ARENA_RESPAWN_MS = 2500;
+
+function arenaRandPos() {
+    return {
+        x: +((Math.random() * 2 - 1) * ARENA_BOUNDS.x).toFixed(2),
+        y: +(ARENA_BOUNDS.ymin + Math.random() * (ARENA_BOUNDS.ymax - ARENA_BOUNDS.ymin)).toFixed(2),
+        z: +((Math.random() * 2 - 1) * ARENA_BOUNDS.z).toFixed(2),
+    };
+}
+function arenaInitBalloons() {
+    ARENA.balloons = [];
+    for (let i = 0; i < ARENA_BALLOON_COUNT; i++) ARENA.balloons.push({ id: i, ...arenaRandPos(), alive: true, respawnAt: 0 });
+}
+arenaInitBalloons();
+
+const arenaPlayers = () => [...students.values()].filter(s => s.arena && s.ws.readyState === 1);
+function broadcastArena(msg) {
+    const data = JSON.stringify(msg);
+    for (const s of arenaPlayers()) s.ws.send(data);
+}
+function arenaRanking() {
+    return arenaPlayers().map(s => ({ id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0 }))
+        .sort((a, b) => b.score - a.score);
+}
+function arenaSnapshot() {
+    return {
+        type: 'arena_state',
+        status: ARENA.status,
+        endTime: ARENA.endTime,
+        durationSec: ARENA.durationSec,
+        balloons: ARENA.balloons.filter(b => b.alive).map(b => ({ id: b.id, x: b.x, y: b.y, z: b.z })),
+        players: arenaPlayers().map(s => ({ id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0 })),
+    };
+}
+function broadcastArenaScores() {
+    const msg = { type: 'arena_scores', scores: arenaRanking(), status: ARENA.status, endTime: ARENA.endTime };
+    broadcastArena(msg);
+    broadcastToTeachers(msg);
+}
+function arenaStart(durationSec) {
+    ARENA.durationSec = durationSec;
+    for (const s of students.values()) if (s.arena) s.score = 0;
+    arenaInitBalloons();
+    ARENA.status = 'countdown';
+    broadcastArena(arenaSnapshot());
+    let n = 3;
+    const tick = () => {
+        if (n > 0) { broadcastArena({ type: 'arena_countdown', n }); n--; setTimeout(tick, 1000); }
+        else {
+            ARENA.status = 'running';
+            ARENA.endTime = Date.now() + durationSec * 1000;
+            broadcastArena({ type: 'arena_go', endTime: ARENA.endTime });
+            broadcastArenaScores();
+            console.log(`[Arena] 開始！${durationSec}s，${arenaPlayers().length} 人`);
+        }
+    };
+    tick();
+}
+
+// 伺服器 tick：氣球重生、結束判定、廣播所有玩家位置（~12Hz）
+setInterval(() => {
+    const now = Date.now();
+    if (ARENA.status === 'running') {
+        for (const b of ARENA.balloons) {
+            if (!b.alive && b.respawnAt && now >= b.respawnAt) {
+                Object.assign(b, arenaRandPos(), { alive: true, respawnAt: 0 });
+                broadcastArena({ type: 'arena_balloon', id: b.id, alive: true, x: b.x, y: b.y, z: b.z });
+            }
+        }
+        if (now >= ARENA.endTime) {
+            ARENA.status = 'ended';
+            broadcastArena({ type: 'arena_end', ranking: arenaRanking() });
+            broadcastArenaScores();
+            console.log('[Arena] 時間到，結束。');
+        }
+    }
+    const players = arenaPlayers();
+    if (players.length) {
+        broadcastArena({ type: 'arena_players', players: players.map(s => ({ id: s.id, name: s.name, emoji: s.emoji, x: s.ax || 0, y: s.ay || 0.4, z: s.az || 0, yaw: s.ayaw || 0 })) });
+    }
+}, 80);
+
 wss.on('connection', (ws, req) => {
     // 簡單區分：URL path /student vs /teacher
     const path = req.url.split('?')[0];
@@ -97,6 +185,11 @@ wss.on('connection', (ws, req) => {
                 if (msg.type === 'broadcast') {
                     // 老師廣播：load_level / reset_all / race_start / show_message
                     broadcastToStudents(msg.payload);
+                } else if (msg.type === 'arena_start') {
+                    // 老師開始大亂鬥（3/5/7 分鐘）
+                    arenaStart(Math.max(30, msg.durationSec || 180));
+                } else if (msg.type === 'arena_state_req') {
+                    ws.send(JSON.stringify(arenaSnapshot()));
                 }
             } catch (e) {}
         });
@@ -144,13 +237,37 @@ wss.on('connection', (ws, req) => {
                     type: 'student_update',
                     student: { id: s.id, name: s.name, emoji: s.emoji, level: s.level, time: s.time }
                 });
+            } else if (msg.type === 'arena_join') {
+                s.arena = true;
+                if (s.score == null) s.score = 0;
+                s.ax = 0; s.ay = 0.4; s.az = 0; s.ayaw = 0;
+                ws.send(JSON.stringify(arenaSnapshot()));
+                broadcastArenaScores();
+            } else if (msg.type === 'arena_leave') {
+                s.arena = false;
+                broadcastArenaScores();
+            } else if (msg.type === 'arena_pos') {
+                s.ax = msg.x; s.ay = msg.y; s.az = msg.z; s.ayaw = msg.yaw;
+            } else if (msg.type === 'arena_pop') {
+                if (ARENA.status === 'running' && s.arena) {
+                    const b = ARENA.balloons[msg.id];
+                    if (b && b.alive) {
+                        b.alive = false;
+                        b.respawnAt = Date.now() + ARENA_RESPAWN_MS;
+                        s.score = (s.score || 0) + 1;
+                        broadcastArena({ type: 'arena_balloon', id: b.id, alive: false });
+                        broadcastArenaScores();
+                    }
+                }
             }
         } catch (e) {}
     });
     ws.on('close', () => {
         console.log(`[WS] 學生斷線：${s.name}${s.emoji}`);
+        const wasArena = s.arena;
         students.delete(ws);
         broadcastToTeachers(studentListPayload());
+        if (wasArena) broadcastArenaScores();  // 更新大亂鬥排行（其他人會在下個 tick 移除其分身）
     });
 });
 

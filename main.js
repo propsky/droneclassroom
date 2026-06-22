@@ -276,6 +276,17 @@ let passZoneProgress = [];
 let balloons = [];
 let balloonState = { collected: 0, total: 0, done: false };
 let ringFaceHintAt = 0;  // 「機頭沒對準圈」提示的節流時間戳
+// 大亂鬥狀態（必須在 animate() 啟動前初始化 — isManualLocked/arenaTick 會用到）
+const arena = {
+    active: false,
+    status: 'idle',          // idle | countdown | running | ended
+    endTime: 0,
+    balloonMeshes: new Map(), // id -> mesh
+    pendingPop: new Set(),    // 已送出 pop、等 server 確認的 balloon id
+    others: new Map(),        // playerId -> { group, target }
+    obstacles: [],
+    posTimer: null,
+};
 const BALLOON_COLORS = [0xff4d6d, 0xffd166, 0x4dd0e1, 0x9b5de5, 0x4ade80, 0xff9f1c];
 
 // 載入 chapter1.json
@@ -1135,7 +1146,8 @@ let currentMode = MODE.MANUAL;
 let isProgramRunning = false;
 
 function isManualLocked() {
-    // 手動鎖定條件：程式執行中、程式模式、或 3-2-1 倒數中
+    // 手動鎖定條件：程式執行中、程式模式、3-2-1 倒數中、或大亂鬥倒數中
+    if (typeof arena !== 'undefined' && arena.active && arena.status === 'countdown') return true;
     return isProgramRunning || currentMode !== MODE.MANUAL || levelCountdownActive;
 }
 
@@ -2727,16 +2739,18 @@ function animate() {
     // 實心方塊碰撞：擋住 drone 不讓它穿過去（只對標了 solid 的障礙物）
     resolveObstacleCollisions();
 
-    // 3-2-1 倒數中不判定過關（避免倒數期間誤觸）
-    if (!levelCountdownActive) {
-        // 不論手動 / 程式模式，每幀都檢查穿圈
-        checkRingCollisions();
-        // v1.4 6/22 修正 3：1-1/1-2/1-3 過關條件檢查
-        checkPassZones();
-        // 自由活動：氣球戳破檢查
-        checkBalloons();
+    if (arena.active) {
+        // 大亂鬥模式：跑 arena 邏輯，跳過一般關卡判定
+        arenaTick();
+    } else {
+        // 3-2-1 倒數中不判定過關（避免倒數期間誤觸）
+        if (!levelCountdownActive) {
+            checkRingCollisions();
+            checkPassZones();
+            checkBalloons();
+        }
+        updateLevelTimer();
     }
-    updateLevelTimer();
 
     // 套用到模型
     droneModel.position.copy(droneState.position);
@@ -3141,12 +3155,19 @@ document.getElementById('level-intro-start').addEventListener('click', () => {
 // v1.3 關卡選擇器
 document.querySelectorAll('.level-btn').forEach(btn => {
     btn.addEventListener('click', () => {
+        if (arena.active) exitArena();   // 從大亂鬥切回一般關卡
         const levelId = btn.getAttribute('data-level');
         document.querySelectorAll('.level-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         loadLevel(levelId);
     });
 });
+
+// 大亂鬥入口
+{
+    const ab = document.getElementById('arena-btn');
+    if (ab) ab.addEventListener('click', () => { arena.active ? exitArena() : enterArena(); });
+}
 
 // v1.3 計時器更新（每幀）
 function updateLevelTimer() {
@@ -3232,12 +3253,19 @@ function connectToTeacher() {
             }));
         }
         showToast('🟢 已連線到課程', 'success');
+        // 若正在大亂鬥（含重連），重新加入
+        if (typeof arena !== 'undefined' && arena.active) {
+            ws.send(JSON.stringify({ type: 'arena_join' }));
+        }
     };
     ws.onmessage = (ev) => {
         try {
             const msg = JSON.parse(ev.data);
             if (msg.type === 'welcome') {
+                wsState.myId = msg.id;
                 console.log('[v1.3 WS] welcome', msg.id);
+            } else if (msg.type && msg.type.indexOf('arena_') === 0) {
+                handleArenaMessage(msg);
             } else if (msg.type === 'load_level' && chapterData) {
                 const level = chapterData.levels.find(l => l.id === msg.levelId);
                 if (level) {
@@ -3292,6 +3320,219 @@ function wsReportProgress(levelId) {
         type: 'progress',
         levelId
     }));
+}
+
+// =============================================================================
+// 15. 大亂鬥 Arena（多人即時搶氣球；伺服器權威）
+//     注意：arena 狀態物件宣告在檔案前段（animate 啟動前），避免 TDZ。
+// =============================================================================
+const _arenaHue = {};
+function arenaColorForId(id) {
+    if (_arenaHue[id] === undefined) {
+        let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+        _arenaHue[id] = h;
+    }
+    return new THREE.Color(`hsl(${_arenaHue[id]},70%,55%)`);
+}
+function _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
+}
+function makeNameLabel(text) {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = 'rgba(10,37,64,0.82)'; _roundRect(ctx, 4, 8, 248, 48, 14);
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(text).slice(0, 8), 128, 34);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthTest: false }));
+    sp.scale.set(3, 0.75, 1); sp.position.y = 1.4;
+    return sp;
+}
+function makeGhostDrone(id, name, emoji) {
+    const g = new THREE.Group();
+    const col = arenaColorForId(id);
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.25, 0.9), new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 0.25 })));
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.4, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    nose.rotation.x = Math.PI / 2; nose.position.z = -0.6; g.add(nose);
+    [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]].forEach(p => {
+        const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({ color: 0x222831 }));
+        m.position.set(p[0], 0, p[1]); g.add(m);
+    });
+    g.add(makeNameLabel((emoji || '') + (name || '?')));
+    scene.add(g);
+    return g;
+}
+function makeArenaBalloon(b) {
+    const color = BALLOON_COLORS[b.id % BALLOON_COLORS.length];
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 12),
+        new THREE.MeshPhongMaterial({ color, emissive: color, emissiveIntensity: 0.35, transparent: true, opacity: 0.95 }));
+    m.position.set(b.x, b.y, b.z); scene.add(m);
+    return m;
+}
+function showCountdownNumber(v) {
+    const el = document.getElementById('countdown-overlay');
+    if (!el) return;
+    el.textContent = (v === 'GO') ? 'GO!' : String(v);
+    el.className = ''; void el.offsetWidth;
+    el.className = 'show' + (v === 'GO' ? ' go' : '');
+    if (typeof playCountBeep === 'function') playCountBeep(v === 'GO');
+    if (v === 'GO') setTimeout(() => { el.className = ''; }, 700);
+}
+
+function handleArenaMessage(msg) {
+    switch (msg.type) {
+        case 'arena_state':
+            arena.status = msg.status; arena.endTime = msg.endTime || 0;
+            arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
+            (msg.balloons || []).forEach(b => arena.balloonMeshes.set(b.id, makeArenaBalloon(b)));
+            updateArenaScoreboard(msg.players || []);
+            break;
+        case 'arena_players':
+            updateArenaPlayers(msg.players || []);
+            break;
+        case 'arena_balloon':
+            if (msg.alive) {
+                const ex = arena.balloonMeshes.get(msg.id);
+                if (ex) { ex.position.set(msg.x, msg.y, msg.z); ex.visible = true; }
+                else arena.balloonMeshes.set(msg.id, makeArenaBalloon(msg));
+            } else {
+                const m = arena.balloonMeshes.get(msg.id);
+                if (m) { scene.remove(m); arena.balloonMeshes.delete(msg.id); }
+            }
+            arena.pendingPop.delete(msg.id);
+            break;
+        case 'arena_countdown':
+            arena.status = 'countdown'; showCountdownNumber(msg.n);
+            break;
+        case 'arena_go':
+            arena.status = 'running'; arena.endTime = msg.endTime; showCountdownNumber('GO');
+            setStateHUD('🏟️ 開搶！'); showToast('🏟️ 開始搶氣球！', 'success');
+            break;
+        case 'arena_scores':
+            if (msg.status) arena.status = msg.status;
+            if (msg.endTime) arena.endTime = msg.endTime;
+            updateArenaScoreboard(msg.scores || []);
+            break;
+        case 'arena_end':
+            arena.status = 'ended'; showArenaResult(msg.ranking || []);
+            break;
+    }
+}
+function updateArenaPlayers(list) {
+    const seen = new Set();
+    list.forEach(p => {
+        if (p.id === wsState.myId) return;
+        seen.add(p.id);
+        let o = arena.others.get(p.id);
+        if (!o) { o = { group: makeGhostDrone(p.id, p.name, p.emoji), target: {} }; arena.others.set(p.id, o); }
+        o.target = { x: p.x, y: p.y, z: p.z, yaw: p.yaw };
+    });
+    for (const [id, o] of arena.others) {
+        if (!seen.has(id)) { scene.remove(o.group); arena.others.delete(id); }
+    }
+}
+function updateArenaScoreboard(scores) {
+    const el = document.getElementById('arena-scoreboard');
+    if (!el) return;
+    el.innerHTML = (scores && scores.length)
+        ? scores.slice(0, 8).map((s, i) => `<div class="arena-row${s.id === wsState.myId ? ' me' : ''}"><span>${i + 1}. ${s.emoji || ''}${(s.name || '?')}</span><b>${s.score || 0}</b></div>`).join('')
+        : '<div class="arena-row">等待玩家加入…</div>';
+}
+function showArenaResult(ranking) {
+    const top = ranking[0];
+    setStateHUD('🏁 大亂鬥結束！');
+    showToast(top ? `🏆 冠軍：${top.emoji || ''}${top.name}（${top.score} 顆）` : '🏁 結束', 'success');
+    if (typeof playCompleteSound === 'function') playCompleteSound();
+}
+function sendArenaPos() {
+    if (!arena.active || !wsState.ws || wsState.ws.readyState !== WebSocket.OPEN) return;
+    wsState.ws.send(JSON.stringify({
+        type: 'arena_pos',
+        x: +droneState.position.x.toFixed(2), y: +droneState.position.y.toFixed(2),
+        z: +droneState.position.z.toFixed(2), yaw: +droneState.rotation.y.toFixed(3)
+    }));
+}
+function arenaTick() {
+    // 其他玩家位置內插（讓移動平順）
+    arena.others.forEach(o => {
+        if (o.target.x === undefined) return;
+        o.group.position.x += (o.target.x - o.group.position.x) * 0.25;
+        o.group.position.y += (o.target.y - o.group.position.y) * 0.25;
+        o.group.position.z += (o.target.z - o.group.position.z) * 0.25;
+        o.group.rotation.y = o.target.yaw || 0;
+    });
+    // 搶氣球（撞到 → 回報 server 仲裁）
+    if (arena.status === 'running') {
+        arena.balloonMeshes.forEach((m, id) => {
+            if (arena.pendingPop.has(id)) return;
+            if (droneState.position.distanceTo(m.position) < 1.4) {
+                arena.pendingPop.add(id);
+                if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'arena_pop', id }));
+            }
+        });
+    }
+    // 計時 HUD
+    const tEl = document.getElementById('arena-timer');
+    if (tEl) {
+        if (arena.status === 'running' && arena.endTime) {
+            const rem = Math.max(0, Math.ceil((arena.endTime - Date.now()) / 1000));
+            tEl.textContent = `⏱ ${Math.floor(rem / 60)}:${String(rem % 60).padStart(2, '0')}`;
+        } else if (arena.status === 'ended') tEl.textContent = '🏁 結束';
+        else tEl.textContent = '⏳ 等待老師開始';
+    }
+}
+function spawnArenaObstacles() {
+    const defs = [[10, 3, -8], [-10, 3, -8], [8, 5, 8], [-8, 5, 8], [0, 4, -15], [0, 6, 12], [14, 4, 0], [-14, 4, 0]];
+    defs.forEach(([x, y, z]) => {
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(2.5, 2.5, 2.5),
+            new THREE.MeshPhongMaterial({ color: 0x9b5de5, transparent: true, opacity: 0.8, emissive: 0x9b5de5, emissiveIntensity: 0.15 }));
+        mesh.position.set(x, y, z);
+        mesh.userData.solid = true; mesh.userData.half = 1.25; mesh.userData.arena = true;
+        scene.add(mesh);
+        arena.obstacles.push(mesh);
+        obstacles.push(mesh);  // 交給 resolveObstacleCollisions
+    });
+}
+function showArenaHud(on) {
+    const el = document.getElementById('arena-hud');
+    if (el) el.style.display = on ? 'block' : 'none';
+}
+function enterArena() {
+    if (arena.active) return;
+    arena.active = true; arena.status = 'idle';
+    if (currentMode !== MODE.MANUAL) setMode(MODE.MANUAL);
+    clearLevelObjects();
+    currentLevel = null;
+    levelArmed = true; levelCountdownActive = false;  // 取消任何一般關卡的倒數狀態
+    const introEl = document.getElementById('level-intro'); if (introEl) introEl.classList.remove('show');
+    ['mission-hud', 'progress-bar', 'balloon-hud'].forEach(id => { const e = document.getElementById(id); if (e) e.style.display = 'none'; });
+    const lt = document.getElementById('level-timer'); if (lt) lt.textContent = '🏟️ 大亂鬥';
+    const td = document.getElementById('timer-display'); if (td) td.style.display = 'none';
+    document.querySelectorAll('.level-btn').forEach(b => b.classList.remove('active'));
+    const ab = document.getElementById('arena-btn'); if (ab) ab.classList.add('active');
+    resetDrone();
+    spawnArenaObstacles();
+    showArenaHud(true);
+    connectToTeacher();
+    if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'arena_join' }));
+    if (arena.posTimer) clearInterval(arena.posTimer);
+    arena.posTimer = setInterval(sendArenaPos, 80);
+    setStateHUD('🏟️ 大亂鬥：等待老師開始…');
+    showToast('🏟️ 進入大亂鬥！等老師按開始', 'success');
+}
+function exitArena() {
+    if (!arena.active) return;
+    arena.active = false;
+    if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'arena_leave' }));
+    if (arena.posTimer) { clearInterval(arena.posTimer); arena.posTimer = null; }
+    arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
+    arena.others.forEach(o => scene.remove(o.group)); arena.others.clear();
+    arena.obstacles.forEach(o => scene.remove(o)); arena.obstacles = [];
+    obstacles = obstacles.filter(o => !(o.userData && o.userData.arena));
+    showArenaHud(false);
+    const ab = document.getElementById('arena-btn'); if (ab) ab.classList.remove('active');
+    const td = document.getElementById('timer-display'); if (td) td.style.display = '';
 }
 
 // 玩家設好名字後，自動連線 + 註冊
@@ -3431,7 +3672,7 @@ if (new URLSearchParams(location.search).has('autorun')) {
 // 對外 debug
 window._creafly = {
     droneState, missionRings, workspace, programState,
-    loadLevel, scene,
+    loadLevel, scene, arena, enterArena, exitArena,
     get currentLevel() { return currentLevel; },
     HOME_POSITION,
 };

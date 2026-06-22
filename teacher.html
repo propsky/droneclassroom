@@ -168,6 +168,7 @@
                     <option value="1-3">1-3 旋轉</option>
                     <option value="1-4" selected>1-4 鑽第一個圈</option>
                     <option value="1-5">1-5 旋轉鑽圈</option>
+                    <option value="1-6">1-6 氣球大冒險</option>
                 </select>
                 <button class="btn" onclick="loadLevel()">📋 載入關卡</button>
                 <button class="btn danger" onclick="resetAll()">🔄 廣播重置</button>
@@ -177,6 +178,21 @@
                 <input id="msg-text" type="text" placeholder="廣播訊息（給所有學生）" style="flex: 1;">
                 <button class="btn" onclick="sendMessage()">📢 送出</button>
             </div>
+        </div>
+
+        <div class="actions">
+            <h2>🏟️ 大亂鬥（多人搶氣球）</h2>
+            <p style="margin:4px 0 10px;opacity:.8;font-size:13px;">學生先點自己畫面右下角的「🏟️ 大亂鬥」進場，老師再按時長開始（全場一起倒數起跑）。</p>
+            <div class="btn-row">
+                <button class="btn success" onclick="arenaStart(180)">▶ 開始 3 分鐘</button>
+                <button class="btn success" onclick="arenaStart(300)">▶ 開始 5 分鐘</button>
+                <button class="btn success" onclick="arenaStart(420)">▶ 開始 7 分鐘</button>
+                <span id="arena-clock" style="align-self:center;font-family:Consolas,monospace;"></span>
+            </div>
+            <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+                <thead><tr><th style="text-align:left;">排名</th><th style="text-align:left;">玩家</th><th style="text-align:right;">氣球數</th></tr></thead>
+                <tbody id="arena-board"><tr><td colspan="3" class="empty">尚未開始</td></tr></tbody>
+            </table>
         </div>
     </div>
 
@@ -209,6 +225,10 @@
                         Object.assign(s, msg.student);
                         students.set(msg.student.id, s);
                         renderStudents(Array.from(students.values()));
+                    } else if (msg.type === 'arena_scores') {
+                        renderArena(msg.scores || [], msg.status, msg.endTime);
+                    } else if (msg.type === 'arena_end') {
+                        renderArena(msg.ranking || [], 'ended', 0);
                     }
                 } catch (e) {}
             };
@@ -229,6 +249,34 @@
                 return;
             }
             wsState.ws.send(JSON.stringify({ type: 'broadcast', payload }));
+        }
+
+        // ===== 大亂鬥 =====
+        function arenaStart(sec) {
+            if (!wsState.connected) { showToast('尚未連線到 server', true); return; }
+            wsState.ws.send(JSON.stringify({ type: 'arena_start', durationSec: sec }));
+            showToast(`🏟️ 大亂鬥開始（${sec / 60} 分鐘）`, false);
+        }
+        let arenaClockTimer = null;
+        function renderArena(scores, status, endTime) {
+            const tb = document.getElementById('arena-board');
+            tb.innerHTML = (scores && scores.length)
+                ? scores.map((s, i) => `<tr><td>${i + 1}</td><td>${s.emoji || ''}${s.name || '?'}</td><td style="text-align:right;"><b>${s.score || 0}</b></td></tr>`).join('')
+                : '<tr><td colspan="3" class="empty">等待玩家加入…</td></tr>';
+            const clock = document.getElementById('arena-clock');
+            if (arenaClockTimer) { clearInterval(arenaClockTimer); arenaClockTimer = null; }
+            if (status === 'running' && endTime) {
+                const upd = () => {
+                    const rem = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+                    clock.textContent = `⏱ ${Math.floor(rem / 60)}:${String(rem % 60).padStart(2, '0')}`;
+                    if (rem <= 0 && arenaClockTimer) { clearInterval(arenaClockTimer); arenaClockTimer = null; }
+                };
+                upd(); arenaClockTimer = setInterval(upd, 500);
+            } else if (status === 'ended') {
+                clock.textContent = '🏁 結束';
+            } else {
+                clock.textContent = status === 'countdown' ? '3-2-1…' : '';
+            }
         }
 
         function loadLevel() {
