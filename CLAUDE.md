@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CREAFLY 教室版無人機模擬器 — a browser-based drone flight simulator for Taiwan K-12 programming education. Students fly a 3D drone either by manual stick/keyboard/gamepad control or by composing Blockly programs; a teacher dashboard tracks the class over WebSocket. Forked from `eccc20984/drone-simulator` (MIT).
 
-Versions map to lessons: v1.3 = 6/22 first lesson (manual only), v1.4 = 6/29 second lesson (adds Blockly program mode).
+Versions map to lessons: v1.3 = 6/22 first lesson (manual only), v1.4 = 6/29 second lesson (adds Blockly program mode). v1.5 = feature release on top of the 1.4 baseline (drone soccer / arena 大亂鬥 / balloon levels / movement tilt visuals).
 
 ## Commands
 
@@ -26,7 +26,7 @@ There is no unit test suite. Verification is done by headless-Chrome screenshots
 
 ### Packaging a release
 
-`node pack-zip.js` produces `creafly-drone-simulator-v1.4.zip` from `git ls-files` (tracked files only), excluding scratch files (`.pm-*`, `dom-snapshot`, `server.log/err`, old `shot-*`). Update the `ZIP_OUT` version and the `exclude` regex when cutting a new version.
+`node pack-zip.js` produces `creafly-drone-simulator-v1.5.zip` from `git ls-files` (tracked files only), excluding scratch files (`.pm-*`, `dom-snapshot`, `server.log/err`, old `shot-*`). Update the `ZIP_OUT` version and the `exclude` regex when cutting a new version.
 
 ## Architecture
 

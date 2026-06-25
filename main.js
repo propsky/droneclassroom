@@ -1257,7 +1257,7 @@ const CALIB_STEPS = [
 //   左桿：Y = throttle（升降），X = yaw（旋轉）
 //   右桿：Y = pitch（前後），X = roll（左右）
 //   軸向為 W3C Standard：推上 = -1、推左 = -1
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 // =============================================================================
 // v1.4 T-101: 手動 ↔ 程式 模式切換
@@ -2917,6 +2917,40 @@ function resolveObstacleCollisions() {
     if (bumped && droneState.isFlying && typeof playBumpSound === 'function') playBumpSound();
 }
 
+// 視覺傾斜：飛機前後/左右移動時，機身依速度方向傾斜 pitch/roll（僅作用於模型外觀，
+// 不改 droneState.rotation，避免影響相機視角與過關判定）
+let modelTiltPitch = 0;   // 機身前後傾（弧度）
+let modelTiltRoll  = 0;   // 機身左右傾（弧度）
+const TILT_MAX     = 0.45;  // 最大傾斜角 ≈ 26°
+const TILT_REFSPD  = 0.12;  // 達此水平速度即接近最大傾斜
+const TILT_SMOOTH  = 0.12;  // 平滑係數（越小越柔和）
+const _tiltYawE    = new THREE.Euler(0, 0, 0, 'YXZ');
+const _tiltPrevPos = new THREE.Vector3();
+let   _tiltHasPrev = false;
+
+function updateModelTilt() {
+    const yaw = droneState.rotation.y;
+    // 用每幀位置變化量推導水平速度（手動模式與程式模式皆適用）
+    const vh = new THREE.Vector3();
+    if (_tiltHasPrev) vh.subVectors(droneState.position, _tiltPrevPos);
+    _tiltPrevPos.copy(droneState.position);
+    _tiltHasPrev = true;
+    vh.y = 0;                                                // 只看水平速度
+    // 機身座標的前方(-z)與右方(+x)
+    const fwd   = new THREE.Vector3(0, 0, -1).applyEuler(_tiltYawE.set(0, yaw, 0));
+    const right = new THREE.Vector3(1, 0,  0).applyEuler(_tiltYawE.set(0, yaw, 0));
+    const fSpeed = vh.dot(fwd);                              // +前進 / -後退
+    const rSpeed = vh.dot(right);                            // +右飛 / -左飛
+    const clamp = THREE.MathUtils.clamp;
+    // 前進→機頭下壓(負 pitch)；右飛→右側下沉(負 roll)
+    const targetPitch = -clamp(fSpeed / TILT_REFSPD, -1, 1) * TILT_MAX;
+    const targetRoll  = -clamp(rSpeed / TILT_REFSPD, -1, 1) * TILT_MAX;
+    modelTiltPitch += (targetPitch - modelTiltPitch) * TILT_SMOOTH;
+    modelTiltRoll  += (targetRoll  - modelTiltRoll ) * TILT_SMOOTH;
+    // 組合：先 yaw 再於機身座標套用 pitch/roll
+    droneModel.quaternion.setFromEuler(_tiltYawE.set(modelTiltPitch, yaw, modelTiltRoll, 'YXZ'));
+}
+
 function animate() {
     requestAnimationFrame(animate);
 
@@ -2974,7 +3008,7 @@ function animate() {
 
     // 套用到模型
     droneModel.position.copy(droneState.position);
-    droneModel.rotation.copy(droneState.rotation);
+    updateModelTilt();   // yaw + 依移動速度的 pitch/roll 視覺傾斜
 
     // v1.3 地面陰影：X/Z 跟著 drone，半徑隨高度變大
     groundShadow.position.x = droneState.position.x;
