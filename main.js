@@ -1073,6 +1073,9 @@ window.addEventListener('keydown', e => {
     keys[e.key.toLowerCase()] = true;
     // Space 用 ' ' 進入 keys
     if (e.key === ' ') keys[' '] = true;
+    // 方向鍵用於控制（上升/下降/旋轉），避免捲動頁面
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+        e.key === 'ArrowLeft' || e.key === 'ArrowRight') e.preventDefault();
 });
 window.addEventListener('keyup', e => {
     keys[e.key.toLowerCase()] = false;
@@ -1104,7 +1107,7 @@ function isControlInputActive() {
         (joystick.throttle !== 0 || joystick.yaw !== 0 ||
          joystick.roll !== 0 || joystick.pitch !== 0)) return true;
     if (keys['w'] || keys['a'] || keys['s'] || keys['d'] ||
-        keys['shift'] || keys[' ']) return true;
+        keys['shift'] || keys[' '] || keys['arrowup'] || keys['arrowdown']) return true;
     if (gamepadState && gamepadState.connected) {
         const a = gamepadState.axes;
         if (a && a.some(v => Math.abs(v) > 0.3)) return true;
@@ -1673,9 +1676,9 @@ function applyManualControls() {
         droneState.isFlying = true;
     }
 
-    // 上升下降（鍵盤 + 搖桿可同時）
-    if (keys[' ']) droneState.velocity.y += LIFT;
-    if (keys['shift']) droneState.velocity.y -= LIFT;
+    // 上升下降（鍵盤 + 搖桿可同時）：Space/↑ 上升，Shift/↓ 下降
+    if (keys[' '] || keys['arrowup']) droneState.velocity.y += LIFT;
+    if (keys['shift'] || keys['arrowdown']) droneState.velocity.y -= LIFT;
     if (joystick.throttle !== 0) droneState.velocity.y += -joystick.throttle * LIFT;
 
     // 水平移動（以機頭方向為準）
