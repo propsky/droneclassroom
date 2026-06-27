@@ -8,7 +8,7 @@
 | **估時** | 0.5 天 |
 | **負責** | drone-coder |
 | **測試** | drone-reviewer |
-| **狀態** | pending |
+| **狀態** | ✅ 完成（`teacher.html`，`validate-t504.js` 8/8 PASS，含 T-506）|
 | **設計依據** | `docs/drone-soccer-design.md` §2.3、§3、§4 |
 
 ---

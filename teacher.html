@@ -120,6 +120,36 @@
             animation: slideIn 0.2s ease-out;
         }
         @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        /* T-506 教材分頁 */
+        .tabs { display: flex; gap: 8px; margin: 24px 0 0; flex-wrap: wrap; }
+        .tab-btn {
+            background: rgba(255,255,255,0.08); color: #cfd8dc; border: 1px solid rgba(255,255,255,0.15);
+            border-bottom: none; border-radius: 10px 10px 0 0; padding: 12px 22px; font-size: 16px;
+            font-weight: 700; cursor: pointer; position: relative;
+        }
+        .tab-btn:hover { background: rgba(255,255,255,0.14); }
+        .tab-btn.active { background: rgba(255,255,255,0.05); color: #4dd0e1; border-color: rgba(77,208,225,0.4); }
+        .tab-btn .live-dot { display: none; position: absolute; top: 7px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: #ff5252; box-shadow: 0 0 6px #ff5252; animation: livePulse 1s infinite; }
+        .tab-btn.live .live-dot { display: inline-block; }
+        @keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+        .tab-panel .actions { margin-top: 0; border-radius: 0 12px 12px 12px; }
+        /* T-504 足球控制 */
+        .soccer-teams { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0 14px; }
+        .team-col { flex: 1; min-width: 220px; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 10px 12px; }
+        .team-col h3 { margin: 0 0 8px; font-size: 15px; }
+        .team-col.blue { border-top: 3px solid #3b82f6; }
+        .team-col.red { border-top: 3px solid #ef4444; }
+        .soccer-player {
+            display: flex; justify-content: space-between; align-items: center; gap: 8px;
+            padding: 7px 10px; margin: 5px 0; border-radius: 6px; background: rgba(255,255,255,0.07);
+            cursor: pointer; font-size: 14px;
+        }
+        .soccer-player:hover { background: rgba(255,255,255,0.14); }
+        .soccer-player.striker { background: rgba(255,224,102,0.18); border: 1px solid rgba(255,224,102,0.5); }
+        .soccer-player .pick { font-size: 12px; opacity: .7; }
+        .soccer-score { font-size: 22px; font-weight: 800; font-family: Consolas, monospace; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -158,6 +188,13 @@
             </tbody>
         </table>
 
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="levels" onclick="switchTab('levels')">🎓 關卡 / Blockly</button>
+            <button class="tab-btn" data-tab="arena" onclick="switchTab('arena')">🏟️ 大亂鬥<span class="live-dot"></span></button>
+            <button class="tab-btn" data-tab="soccer" onclick="switchTab('soccer')">⚽ 足球<span class="live-dot"></span></button>
+        </div>
+
+        <div class="tab-panel active" id="panel-levels">
         <div class="actions">
             <h2>📡 老師控制</h2>
             <div class="btn-row">
@@ -183,7 +220,9 @@
                 <button class="btn" onclick="sendMessage()">📢 送出</button>
             </div>
         </div>
+        </div>
 
+        <div class="tab-panel" id="panel-arena">
         <div class="actions">
             <h2>🏟️ 大亂鬥（多人搶氣球）</h2>
             <p style="margin:4px 0 10px;opacity:.8;font-size:13px;">學生先點自己畫面右下角的「🏟️ 大亂鬥」進場，老師再按時長開始（全場一起倒數起跑）。</p>
@@ -223,6 +262,32 @@
                 <tbody id="arena-board"><tr><td colspan="3" class="empty">尚未開始</td></tr></tbody>
             </table>
         </div>
+        </div>
+
+        <div class="tab-panel" id="panel-soccer">
+        <div class="actions">
+            <h2>⚽ 足球賽（3v3 多人對戰）</h2>
+            <p style="margin:4px 0 10px;opacity:.8;font-size:13px;">學生先點自己畫面的「⚽ 足球對戰（多人）」進場 → 老師點某學生「設為前鋒」（每隊 1 名）→ 按開始。得分後該隊前鋒須過中線才能再得分。</p>
+            <div class="soccer-teams">
+                <div class="team-col blue"><h3>🔵 藍隊</h3><div id="soccer-blue"><div class="empty" style="padding:14px;">尚無人加入</div></div></div>
+                <div class="team-col red"><h3>🔴 紅隊</h3><div id="soccer-red"><div class="empty" style="padding:14px;">尚無人加入</div></div></div>
+            </div>
+            <div class="btn-row">
+                <label style="align-self:center;">局時長：
+                    <select id="soccer-dur">
+                        <option value="180">3 分鐘</option>
+                        <option value="120">2 分鐘</option>
+                        <option value="60">1 分鐘</option>
+                        <option value="30">30 秒（測試）</option>
+                    </select>
+                </label>
+                <button class="btn success" onclick="soccerStart()">▶ 開始足球賽</button>
+                <button class="btn" onclick="soccerReset(false)">🔄 重設賽局</button>
+                <button class="btn" onclick="soccerReset(true)">🆕 換新一輪（重新分隊）</button>
+            </div>
+            <div class="soccer-score" id="soccer-score">🔵 0 : 0 🔴 ｜ ⏳ 等待開始</div>
+        </div>
+        </div>
     </div>
 
     <script>
@@ -243,6 +308,7 @@
                 wsState.connected = true;
                 document.getElementById('ws-status').textContent = '🟢 已連線';
                 document.getElementById('ws-status').className = 'ws-connected';
+                try { wsState.ws.send(JSON.stringify({ type: 'soccer_state_req' })); } catch (e) {}
             };
             wsState.ws.onmessage = (ev) => {
                 try {
@@ -259,6 +325,17 @@
                     } else if (msg.type === 'arena_end') {
                         renderArena(msg.ranking || [], 'ended', 0, msg.mode);
                         showToast(msg.mode === 'tag' ? (msg.winner === 'ghosts' ? '👻 鬼勝！' : '🏃 人勝！') : '🏁 大亂鬥結束', false);
+                    } else if (msg.type === 'soccer_state') {
+                        renderSoccerRoster(msg.players || []);
+                        updateSoccerScore(msg.scores, msg.status, msg.endTime);
+                    } else if (msg.type === 'soccer_scores') {
+                        updateSoccerScore(msg.scores, msg.status, msg.endTime);
+                    } else if (msg.type === 'soccer_goal_ok') {
+                        updateSoccerScore(msg.scores, 'running');
+                        showToast(`⚽ ${msg.byName || ''} 進球！（${msg.team === 'blue' ? '藍' : '紅'}隊）`, false);
+                    } else if (msg.type === 'soccer_end') {
+                        updateSoccerScore(msg.scores, 'done');
+                        showToast(msg.winner === 'blue' ? '🔵 藍隊勝！' : (msg.winner === 'red' ? '🔴 紅隊勝！' : '🤝 平手'), false);
                     }
                 } catch (e) {}
             };
@@ -291,6 +368,7 @@
         }
         let arenaClockTimer = null;
         function renderArena(scores, status, endTime, mode) {
+            setTabLive('arena', status === 'running' || status === 'countdown');
             const tb = document.getElementById('arena-board');
             const tag = mode === 'tag';
             tb.innerHTML = (scores && scores.length)
@@ -371,6 +449,59 @@
                     <td>${time}</td>
                 </tr>`;
             }).join('');
+        }
+
+        // ===== T-506 教材分頁 =====
+        function switchTab(name) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === name));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+        }
+        function setTabLive(tab, on) {
+            const b = document.querySelector(`.tab-btn[data-tab="${tab}"]`);
+            if (b) b.classList.toggle('live', !!on);
+        }
+
+        // ===== T-504 足球控制 =====
+        let soccerClockTimer = null;
+        function soccerStart() {
+            if (!wsState.connected) { showToast('尚未連線到 server', true); return; }
+            const dur = parseInt(document.getElementById('soccer-dur').value, 10) || 180;
+            wsState.ws.send(JSON.stringify({ type: 'soccer_start', durationSec: dur }));
+            showToast(`⚽ 足球賽開始（${dur} 秒）`, false);
+        }
+        function soccerReset(clearTeams) {
+            if (!wsState.connected) return;
+            if (clearTeams && !confirm('換新一輪？會清掉目前分隊與前鋒、重新平均分隊。')) return;
+            wsState.ws.send(JSON.stringify({ type: 'soccer_reset', clearTeams: !!clearTeams }));
+            showToast(clearTeams ? '🆕 換新一輪（重新分隊）' : '🔄 重設賽局', false);
+        }
+        function soccerSetStriker(id) {
+            if (!wsState.connected) return;
+            wsState.ws.send(JSON.stringify({ type: 'soccer_set_striker', studentId: id }));
+        }
+        function renderSoccerRoster(players) {
+            ['blue', 'red'].forEach(team => {
+                const el = document.getElementById('soccer-' + team);
+                const list = (players || []).filter(p => p.team === team);
+                el.innerHTML = list.length ? list.map(p =>
+                    `<div class="soccer-player ${p.striker ? 'striker' : ''}" onclick="soccerSetStriker('${p.id}')">
+                        <span>${p.emoji || ''}${p.name || '?'} ${p.striker ? '🎀前鋒' : ''}</span>
+                        <span class="pick">${p.striker ? '前鋒' : '設為前鋒'}</span>
+                    </div>`).join('') : '<div class="empty" style="padding:14px;">尚無人加入</div>';
+            });
+        }
+        function updateSoccerScore(scores, status, endTime) {
+            const s = scores || { blue: 0, red: 0 };
+            const el = document.getElementById('soccer-score');
+            setTabLive('soccer', status === 'running' || status === 'countdown');
+            if (soccerClockTimer) { clearInterval(soccerClockTimer); soccerClockTimer = null; }
+            const draw = (t) => { el.textContent = `🔵 ${s.blue} : ${s.red} 🔴 ｜ ${t}`; };
+            if (status === 'running' && endTime) {
+                const upd = () => { const rem = Math.max(0, Math.ceil((endTime - Date.now()) / 1000)); draw(`⏱ ${Math.floor(rem / 60)}:${String(rem % 60).padStart(2, '0')}`); if (rem <= 0 && soccerClockTimer) { clearInterval(soccerClockTimer); soccerClockTimer = null; } };
+                upd(); soccerClockTimer = setInterval(upd, 500);
+            } else if (status === 'done') draw('🏁 結束');
+            else if (status === 'countdown') draw('3-2-1…');
+            else draw('⏳ 等待開始');
         }
 
         function showToast(text, isError) {

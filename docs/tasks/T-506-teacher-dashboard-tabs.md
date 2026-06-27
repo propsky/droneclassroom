@@ -8,7 +8,7 @@
 | **估時** | 0.5 天 |
 | **負責** | drone-coder |
 | **測試** | drone-reviewer + Sam |
-| **狀態** | pending |
+| **狀態** | ✅ 完成（`teacher.html`，與 T-504 同 `validate-t504.js` 8/8 PASS）|
 | **來源** | Sam：「老師端要做成 tab 模式，可以切換不同教材，才不會上下拉、不知道要看哪邊」|
 
 ---
