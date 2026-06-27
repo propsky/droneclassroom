@@ -8,7 +8,7 @@
 | **估時** | 0.5 天 |
 | **負責** | drone-reviewer |
 | **測試** | drone-reviewer + Sam |
-| **狀態** | pending |
+| **狀態** | ✅ 完成（`validate-t505.js` 10/10 PASS，報告 `docs/reports/T-505-soccer-mvp.json`）|
 | **設計依據** | `docs/drone-soccer-design.md` §5 階段 1 |
 
 ---

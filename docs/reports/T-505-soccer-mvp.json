@@ -1,0 +1,59 @@
+{
+  "task": "T-505",
+  "total": 10,
+  "pass": 10,
+  "fail": 0,
+  "results": [
+    {
+      "n": "A1 分隊 3v3（藍3 紅3）",
+      "ok": true,
+      "d": "藍3 紅3"
+    },
+    {
+      "n": "A2 每隊恰 1 前鋒",
+      "ok": true,
+      "d": "藍前鋒1 紅前鋒1"
+    },
+    {
+      "n": "A3 開賽 running（teacher 收 soccer_scores running）",
+      "ok": true,
+      "d": "status=running"
+    },
+    {
+      "n": "A4 進球 + 半場重置（藍 2 : 紅 1）",
+      "ok": true,
+      "d": "2:1"
+    },
+    {
+      "n": "A5 時間到結束 + 比分判勝（藍勝 2:1）",
+      "ok": true,
+      "d": "winner=blue 2:1"
+    },
+    {
+      "n": "A6 重設賽局（idle + 比分歸零 + 前鋒清空）",
+      "ok": true,
+      "d": "status=idle"
+    },
+    {
+      "n": "B1 迴歸：大亂鬥 Arena 並存（arena_state 正常回應）",
+      "ok": true,
+      "d": "arena_state=true"
+    },
+    {
+      "n": "C1 真實頁進多人足球（console 進場 log）",
+      "ok": true,
+      "d": "enter log"
+    },
+    {
+      "n": "C2 截圖已存（人工檢視）",
+      "ok": true,
+      "d": "552754B"
+    },
+    {
+      "n": "C3 客戶端 0 console error",
+      "ok": true,
+      "d": "0"
+    }
+  ],
+  "screenshot": "C:\\github\\droneclassroom\\screenshots\\validate-t505-match.png"
+}
