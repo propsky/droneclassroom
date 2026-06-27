@@ -1,0 +1,218 @@
+{
+  "version": "v1.5",
+  "commits": {
+    "t104": "ba96c61",
+    "pre_fixes": "3109637"
+  },
+  "date": "2026-06-26T08:39:21.651Z",
+  "chromeVersion": "149.0.7827.116",
+  "purpose": "T-104 review — 12 cases (6 levels x 2 modes)",
+  "summary": {
+    "total": 16,
+    "pass": 16,
+    "fail": 0,
+    "totalErrors": 0,
+    "totalWarn": 0,
+    "b101001Hits": 0
+  },
+  "tests": [
+    {
+      "name": "T-104 CASE 1-0 manual",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-manual",
+        "mission=\"undefined\"",
+        "blockly=none rings=0",
+        "shot=203324B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-0 program",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-program",
+        "blockly=flex",
+        "starterBlocks=1",
+        "shot=199755B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-1 manual",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-manual",
+        "mission=\"undefined\"",
+        "blockly=none rings=0",
+        "shot=202875B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-1 program",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-program",
+        "blockly=flex",
+        "starterBlocks=1",
+        "shot=194491B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-2 manual",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-manual",
+        "mission=\"undefined\"",
+        "blockly=none rings=0",
+        "shot=198734B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-2 program",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-program",
+        "blockly=flex",
+        "starterBlocks=1",
+        "shot=198428B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-3 manual",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-manual",
+        "mission=\"undefined\"",
+        "blockly=none rings=0",
+        "shot=203874B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-3 program",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-program",
+        "blockly=flex",
+        "starterBlocks=1",
+        "shot=203968B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-4 manual",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-manual",
+        "mission=\"undefined\"",
+        "blockly=none rings=0",
+        "shot=198224B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-4 program",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-program",
+        "blockly=flex",
+        "starterBlocks=1",
+        "shot=197247B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-5 manual",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-manual",
+        "mission=\"undefined\"",
+        "blockly=none rings=0",
+        "shot=203055B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 CASE 1-5 program",
+      "pass": true,
+      "notes": [
+        "active=undefined mode=mode-program",
+        "blockly=flex",
+        "starterBlocks=1",
+        "shot=207112B",
+        "FAIL"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 AC#4 timer preserved across mode switch",
+      "pass": true,
+      "notes": [
+        "before switch: ⏱ 0.0s",
+        "after manual→program: ⏱ 0.0s",
+        "back to manual: ⏱ 0.0s"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 AC#5 WebSocket connection check",
+      "pass": true,
+      "notes": [
+        "WS exists=false",
+        "WS state=no-ws (0=connecting, 1=open, 2=closing, 3=closed)",
+        "WS url=null"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 AC#7 6-level sequential no crash",
+      "pass": true,
+      "notes": [
+        "after 6 levels x 2 mode toggles: heap=27MB",
+        "Blockly alive=true, drone alive=true"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-104 1-4 has 3 rings (per 6/22 fix 3109637)",
+      "pass": true,
+      "notes": [
+        "1-4 ringCount=3",
+        "1-4 intro=\"🎯 鑽第一個圈\n\n1. 升到 3m 高度（跟圈一樣高）\n2. 慢慢前進穿過紅圈 1\n3. 繼續前進穿過紅圈 2\n4. ...\""
+      ],
+      "errors": [],
+      "warns": []
+    }
+  ]
+}

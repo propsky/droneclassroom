@@ -1,0 +1,122 @@
+{
+  "version": "v1.5",
+  "commits": {
+    "t102": "f648a4a",
+    "t103": "9c70b53",
+    "b101001_fix": "8cd313b"
+  },
+  "date": "2026-06-26T08:21:52.734Z",
+  "chromeVersion": "149.0.7827.116",
+  "purpose": "T-102 + T-103 combined review",
+  "summary": {
+    "total": 8,
+    "pass": 8,
+    "fail": 0,
+    "totalErrors": 0,
+    "totalWarn": 2,
+    "b101001Hits": 0
+  },
+  "tests": [
+    {
+      "name": "T-102 AC#1 9 blocks in toolbox",
+      "pass": true,
+      "notes": [
+        "found 9/9: cf_takeoff,cf_land,cf_hover,cf_forward,cf_backward,cf_left,cf_right,cf_rotate_cw,cf_rotate_ccw",
+        "missing: none",
+        "toolbox categories: 8",
+        "screenshot=204745B",
+        "AC#1: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-102 AC#3 繁中 labels (toolbox categories)",
+      "pass": true,
+      "notes": [
+        "toolbox category names: 🛫 動作 | 🧭 移動 | 🔄 旋轉 | 📝 邏輯 | 🔁 迴圈 | 📦 變數 | ⏱ 時間 | 🔢 數字",
+        "zh-tw count: 8/8",
+        "screenshot=204577B",
+        "AC#3: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-102 AC#5 sample program autorun",
+      "pass": true,
+      "notes": [
+        "body=mode-program",
+        "programRunning=false",
+        "drone alt=0.4 state=已降落",
+        "screenshot=200557B",
+        "AC#5: FAIL (alt=0.4)"
+      ],
+      "errors": [],
+      "warns": [
+        "block generator functions on CodeGenerator objects was deprecated in 10.0 and will be deleted in 11.0.\nUse the .forBlock[blockType] dictionary instead.",
+        "block generator functions on CodeGenerator objects was deprecated in 10.0 and will be deleted in 11.0.\nUse the .forBlock[blockType] dictionary instead."
+      ]
+    },
+    {
+      "name": "T-102 AC#6/#7 0 console error, no crash",
+      "pass": true,
+      "notes": [
+        "drone state=已降落 alt=0.4",
+        "Blockly workspace still mounted: true",
+        "AC#6/#7: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-103 AC#1 4 advanced categories",
+      "pass": true,
+      "notes": [
+        "toolbox: 🛫 動作 | 🧭 移動 | 🔄 旋轉 | 📝 邏輯 | 🔁 迴圈 | 📦 變數 | ⏱ 時間 | 🔢 數字",
+        "found 4/4: 邏輯,迴圈,變數,時間",
+        "sensor category: NONE ✅",
+        "screenshot=204631B",
+        "AC#1: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-103 AC#1 alt 5 new blocks registered",
+      "pass": true,
+      "notes": [
+        "found: cf_forever,cf_elapsed,cf_wait,cf_every,cf_timer_reset",
+        "missing: none",
+        "5 blocks: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-103 AC#3 repeat 3 times moveForward",
+      "pass": true,
+      "notes": [
+        "setup: null",
+        "program result: null",
+        "drone state: alt=0.4 state=待命",
+        "running: false",
+        "AC#3: PASS (program ran)"
+      ],
+      "errors": [],
+      "warns": []
+    },
+    {
+      "name": "T-103 AC#7 no distance/nearest in toolbox",
+      "pass": true,
+      "notes": [
+        "toolbox bad category: NONE ✅",
+        "blocks with bad keywords: NONE ✅",
+        "total block types: 93",
+        "AC#7: PASS"
+      ],
+      "errors": [],
+      "warns": []
+    }
+  ]
+}
