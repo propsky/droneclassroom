@@ -280,10 +280,10 @@ let levelCountdownActive = false; // 3-2-1 倒數中：鎖住操控、不判定�
 let passZoneMeshes = [];
 let passZoneProgress = [];
 
-// v1.4 T-104：6 個關卡各有對應 Blockly starter XML
-// loadLevel 載入時會清掉 Blockly 工作區並塞入對應 starter
-// 學生可自由編輯（不影響計時/drone 位置）
-const LEVEL_STARTERS = {
+// ⚠️ 已停用（不再給學生）：原本每關預載的完整解答。
+// 現在學生只拿到「起飛」一塊（見下方 loadLevelStarter）；解答移到老師 /lesson 投影頁（lessons-data.js）。
+// 此物件保留僅供參考，main.js 不再引用。
+const LEVEL_STARTERS_DEPRECATED = {
     '1-0': '<xml xmlns="https://developers.google.com/blockly/xml"><block type="cf_takeoff" x="50" y="50"><value name="HEIGHT"><block type="math_number"><field name="NUM">1</field></block></value><next><block type="cf_land"></block></next></block></xml>',
     '1-1': '<xml xmlns="https://developers.google.com/blockly/xml"><block type="cf_takeoff" x="50" y="50"><value name="HEIGHT"><block type="math_number"><field name="NUM">3</field></block></value><next><block type="cf_hover"><value name="SEC"><block type="math_number"><field name="NUM">2</field></block></value><next><block type="cf_land"></block></next></block></next></block></xml>',
     '1-2': '<xml xmlns="https://developers.google.com/blockly/xml"><block type="cf_takeoff" x="50" y="50"><value name="HEIGHT"><block type="math_number"><field name="NUM">2</field></block></value><next><block type="cf_forward"><value name="DIST"><block type="math_number"><field name="NUM">3</field></block></value><next><block type="cf_backward"><value name="DIST"><block type="math_number"><field name="NUM">3</field></block></value><next><block type="cf_right"><value name="DIST"><block type="math_number"><field name="NUM">3</field></block></value><next><block type="cf_left"><value name="DIST"><block type="math_number"><field name="NUM">3</field></block></value><next><block type="cf_land"></block></next></block></next></block></next></block></next></block></next></block></xml>',
@@ -292,16 +292,18 @@ const LEVEL_STARTERS = {
     '1-5': '<xml xmlns="https://developers.google.com/blockly/xml"><block type="cf_takeoff" x="50" y="50"><value name="HEIGHT"><block type="math_number"><field name="NUM">3</field></block></value><next><block type="cf_rotate_cw"><value name="ANGLE"><block type="math_number"><field name="NUM">90</field></block></value><next><block type="cf_forward"><value name="DIST"><block type="math_number"><field name="NUM">5</field></block></value><next><block type="cf_forward"><value name="DIST"><block type="math_number"><field name="NUM">5</field></block></value><next><block type="cf_rotate_cw"><value name="ANGLE"><block type="math_number"><field name="NUM">90</field></block></value><next><block type="cf_forward"><value name="DIST"><block type="math_number"><field name="NUM">5</field></block></value><next><block type="cf_rotate_cw"><value name="ANGLE"><block type="math_number"><field name="NUM">90</field></block></value><next><block type="cf_forward"><value name="DIST"><block type="math_number"><field name="NUM">5</field></block></value><next><block type="cf_rotate_cw"><value name="ANGLE"><block type="math_number"><field name="NUM">90</field></block></value><next><block type="cf_backward"><value name="DIST"><block type="math_number"><field name="NUM">5</field></block></value><next><block type="cf_land"></block></next></block></next></block></next></block></next></block></next></block></next></block></xml>',
 };
 
+// 學生模式：進關卡只放「起飛」一塊當引導，不再預載解答。
+// （LEVEL_STARTERS 的完整解答已移作老師專用 /lesson 投影教學頁，見 lessons-data.js）
+const STUDENT_STARTER_XML = '<xml xmlns="https://developers.google.com/blockly/xml"><block type="cf_takeoff" x="50" y="50"><value name="HEIGHT"><block type="math_number"><field name="NUM">1</field></block></value></block></xml>';
 function loadLevelStarter(levelId) {
-    const xml = LEVEL_STARTERS[levelId];
-    if (!xml || typeof workspace === 'undefined' || !workspace) return;
+    if (typeof workspace === 'undefined' || !workspace) return;
     try {
         workspace.clear();
-        const dom = Blockly.utils.xml.textToDom(xml);
+        const dom = Blockly.utils.xml.textToDom(STUDENT_STARTER_XML);
         Blockly.Xml.domToWorkspace(dom, workspace);
-        console.log(`[T-104] Loaded starter for level ${levelId}`);
+        console.log(`[student] 關卡 ${levelId}：只給起飛積木（不含解答）`);
     } catch (e) {
-        console.warn(`[T-104] Failed to load starter for ${levelId}: ${e.message || e}`);
+        console.warn(`[student] starter 載入失敗 ${levelId}: ${e.message || e}`);
     }
 }
 // 自由活動：氣球收集（球體，靠近即戳破，任意順序、不計時）

@@ -13,6 +13,9 @@ const server = http.createServer((req, res) => {
     if (urlPath === '/teacher' || urlPath === '/teacher/') {
         filePath = './teacher.html';
     }
+    if (urlPath === '/lesson' || urlPath === '/lesson/') {
+        filePath = './lesson.html';   // 老師專用解答投影頁（通關碼保護）
+    }
 
     // 🎮 搖桿測試頁（controllertestweb/）— 整個目錄掛在 /gamepad/ 下，相對路徑才能正確解析
     if (urlPath === '/gamepad') {
