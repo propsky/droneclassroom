@@ -1147,13 +1147,12 @@ window.addEventListener('keyup', e => {
     if (e.key === ' ') keys[' '] = false;
 });
 
-// v1.3 空白鍵 = 起飛（地面）/ 緊急停止（空中）/ 恢復（凍結中）
+// 空白鍵 = 緊急停止（空中）。升降/起飛改用方向鍵 ↑/↓，空白鍵不再控制升降。
 window.addEventListener('keydown', e => {
     if (e.key !== ' ' || e.repeat) return;
     e.preventDefault();
     if (droneState.isGrounded) {
-        // 起飛：交給 applyManualControls 處理（用 wantsTakeoff）
-        // 這裡什麼都不做
+        // 地面：空白鍵不做事（起飛改用 ↑）
     } else if (droneState.returning) {
         // 回家中不處理
     } else if (droneState.isFlying) {
@@ -1172,7 +1171,8 @@ function isControlInputActive() {
         (joystick.throttle !== 0 || joystick.yaw !== 0 ||
          joystick.roll !== 0 || joystick.pitch !== 0)) return true;
     if (keys['w'] || keys['a'] || keys['s'] || keys['d'] ||
-        keys['shift'] || keys[' '] || keys['arrowup'] || keys['arrowdown']) return true;
+        keys['arrowup'] || keys['arrowdown'] ||
+        keys['arrowleft'] || keys['arrowright']) return true;
     if (gamepadState && gamepadState.connected) {
         const a = gamepadState.axes;
         if (a && a.some(v => Math.abs(v) > 0.3)) return true;
@@ -1750,16 +1750,16 @@ function applyManualControls() {
     const spd = (arena.active && arena.mode === 'tag' && arena.myRole === 'ghost' && !arena.eaten) ? GHOST_SPEED : 1;
     const TH = THRUST * spd, LIFT = MANUAL_LIFT * spd;
 
-    // 起飛：按 Space 或左桿往上推
-    const wantsTakeoff = keys[' '] || joystick.throttle < -0.3;
+    // 起飛：按 ↑ 或左桿往上推
+    const wantsTakeoff = keys['arrowup'] || joystick.throttle < -0.3;
     if (wantsTakeoff && droneState.isGrounded) {
         droneState.isGrounded = false;
         droneState.isFlying = true;
     }
 
-    // 上升下降（鍵盤 + 搖桿可同時）：Space/↑ 上升，Shift/↓ 下降
-    if (keys[' '] || keys['arrowup']) droneState.velocity.y += LIFT;
-    if (keys['shift'] || keys['arrowdown']) droneState.velocity.y -= LIFT;
+    // 上升下降（鍵盤 + 搖桿可同時）：↑ 上升，↓ 下降（不再使用 Space/Shift）
+    if (keys['arrowup']) droneState.velocity.y += LIFT;
+    if (keys['arrowdown']) droneState.velocity.y -= LIFT;
     if (joystick.throttle !== 0) droneState.velocity.y += -joystick.throttle * LIFT;
 
     // 水平移動（以機頭方向為準）
