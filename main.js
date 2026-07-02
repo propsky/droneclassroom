@@ -13,6 +13,10 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
+// 畫畫教室：粗墨水線（LineBasicMaterial 的 linewidth 在 WebGL 多半無效，改用 fat line）
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 // =============================================================================
 // 1. Three.js scene 初始化
@@ -295,13 +299,27 @@ const LEVEL_STARTERS_DEPRECATED = {
 // 學生模式：進關卡只放「起飛」一塊當引導，不再預載解答。
 // （LEVEL_STARTERS 的完整解答已移作老師專用 /lesson 投影教學頁，見 lessons-data.js）
 const STUDENT_STARTER_XML = '<xml xmlns="https://developers.google.com/blockly/xml"><block type="cf_takeoff" x="50" y="50"><value name="HEIGHT"><block type="math_number"><field name="NUM">1</field></block></value></block></xml>';
+// 畫畫教室 starter：起飛到繪圖高度 + 下筆（搭好鷹架，形狀（迴圈）留給學生自己拼）
+function drawStarterXml(height) {
+    return `<xml xmlns="https://developers.google.com/blockly/xml">
+      <block type="cf_takeoff" x="50" y="50">
+        <value name="HEIGHT"><block type="math_number"><field name="NUM">${height}</field></block></value>
+        <next><block type="cf_pen_down"></block></next>
+      </block></xml>`;
+}
+
 function loadLevelStarter(levelId) {
     if (typeof workspace === 'undefined' || !workspace) return;
     try {
         workspace.clear();
-        const dom = Blockly.utils.xml.textToDom(STUDENT_STARTER_XML);
+        // 畫畫教室關卡給專屬鷹架（起飛到 drawHeight + 下筆）；其餘關卡維持「只給起飛」
+        const lvl = chapterData && chapterData.levels.find(l => l.id === levelId);
+        const xml = (lvl && lvl.draw)
+            ? drawStarterXml(lvl.drawHeight || 3)
+            : STUDENT_STARTER_XML;
+        const dom = Blockly.utils.xml.textToDom(xml);
         Blockly.Xml.domToWorkspace(dom, workspace);
-        console.log(`[student] 關卡 ${levelId}：只給起飛積木（不含解答）`);
+        console.log(`[student] 關卡 ${levelId}：${(lvl && lvl.draw) ? '畫畫鷹架（起飛+下筆）' : '只給起飛積木'}`);
     } catch (e) {
         console.warn(`[student] starter 載入失敗 ${levelId}: ${e.message || e}`);
     }
@@ -316,11 +334,13 @@ const arena = {
     status: 'idle',          // idle | countdown | running | ended
     mode: 'balloon',         // balloon | tag（鬼抓人）
     myRole: 'runner',        // runner | ghost
-    eaten: false,            // 鬼抓人：我是否已被吃掉
+    stunned: false,          // 鬼抓人：我是否正暈眩中（暫時，不淘汰）
+    stunUntil: 0,            // 暈眩解除時間戳（Date.now() 比較）
+    invincibleUntil: 0,      // 鬼抓人：無敵解除時間戳（涵蓋暈眩＋復活後的跑走時間，鬼抓不到）
     endTime: 0,
     balloonMeshes: new Map(), // id -> mesh
     pendingPop: new Set(),    // 已送出 pop、等 server 確認的 balloon id
-    others: new Map(),        // playerId -> { group, target, role, eaten }
+    others: new Map(),        // playerId -> { group, target, role, stunned, invincible }
     obstacles: [],
     posTimer: null,
     playgroundOn: false,      // 視覺：playground 模型是否顯示中
@@ -457,15 +477,26 @@ function buildBVHFromMeshes(meshes) {
 }
 const BALLOON_COLORS = [0xff4d6d, 0xffd166, 0x4dd0e1, 0x9b5de5, 0x4ade80, 0xff9f1c];
 
-// 載入 chapter1.json
-fetch('levels/chapter1.json')
-    .then(r => r.json())
-    .then(data => {
-        chapterData = data;
-        console.log(`%c[v1.3 Chapter 1] 載入 ${data.levels.length} 個關卡`, 'color:#4ade80;font-weight:bold');
-        loadLevel('1-0');
+// 載入 chapter1.json + chapter2.json（畫畫教室），合併成單一 levels 清單
+// chapter2 載入失敗也不影響 chapter1 正常運作
+// chapter2 = 畫畫教室（2D）、chapter3 = 立體繪圖（3D）；任一載入失敗都不影響其餘
+const fetchChapter = (n) => fetch(`levels/chapter${n}.json`).then(r => r.json()).catch(e => {
+    console.warn(`載入 chapter${n}.json 失敗：`, e);
+    return { levels: [] };
+});
+Promise.all([
+    fetch('levels/chapter1.json').then(r => r.json()),
+    fetchChapter(2),
+    fetchChapter(3),
+])
+    .then(([c1, c2, c3]) => {
+        chapterData = { ...c1, levels: [...c1.levels, ...(c2.levels || []), ...(c3.levels || [])] };
+        console.log(`%c[Chapter] 載入 ${c1.levels.length} + ${(c2.levels || []).length} + ${(c3.levels || []).length} 個關卡`, 'color:#4ade80;font-weight:bold');
+        // URL ?level= 指定起始關（chapterData 就緒後才套用，避免時序競態）
+        const lp = new URLSearchParams(location.search).get('level');
+        loadLevel(/^[123]-[0-6]$/.test(lp || '') ? lp : '1-0');
     })
-    .catch(e => console.warn('載入 chapter1.json 失敗：', e));
+    .catch(e => console.warn('載入關卡資料失敗：', e));
 
 const ringColors = {
     red: 0xff4444,
@@ -474,26 +505,43 @@ const ringColors = {
     blue: 0x3b82f6,
 };
 
+// 釋放 Object3D（含子物件）的 geometry / material / texture，避免多人連線分身、關卡物件反覆
+// 建立又只用 scene.remove() 移除時，GPU 資源不會真的釋放 → 切換關卡/大亂鬥/足球次數多了會漸漸掉幀、
+// 飛機物理沒有依 deltaTime 縮放，掉幀會直接讓飛機「看起來變慢」，要重新整理頁面才會恢復。
+function disposeObject3D(obj) {
+    if (!obj || !obj.traverse) return;
+    obj.traverse(m => {
+        if (m.geometry) m.geometry.dispose();
+        if (m.material) {
+            const mats = Array.isArray(m.material) ? m.material : [m.material];
+            mats.forEach(mat => { if (mat.map) mat.map.dispose(); mat.dispose(); });
+        }
+    });
+}
 function clearLevelObjects() {
     // 移除所有現有圈
-    rings.forEach(r => scene.remove(r));
+    rings.forEach(r => { scene.remove(r); disposeObject3D(r); });
     rings = [];
     missionRings = [];
     // 移除所有障礙物
-    obstacles.forEach(o => scene.remove(o));
+    obstacles.forEach(o => { scene.remove(o); disposeObject3D(o); });
     obstacles = [];
     // 移除所有 pass zone discs
-    passZoneMeshes.forEach(m => scene.remove(m));
+    passZoneMeshes.forEach(m => { scene.remove(m); disposeObject3D(m); });
     passZoneMeshes = [];
     passZoneProgress = [];
     // 移除所有氣球
-    balloons.forEach(b => scene.remove(b.mesh));
+    balloons.forEach(b => { scene.remove(b.mesh); disposeObject3D(b.mesh); });
     balloons = [];
     balloonState = { collected: 0, total: 0, done: false };
     // 隱藏 progress bar
     const bar = document.getElementById('progress-bar');
     if (bar) bar.style.display = 'none';
+    // 畫畫教室：移除範本輪廓 + 清掉墨水
+    if (guideLine) { scene.remove(guideLine); guideLine.geometry.dispose(); guideLine.material.dispose(); guideLine = null; }
+    if (typeof clearInk === 'function') clearInk();
 }
+let guideLine = null;
 
 function loadLevel(levelId) {
     if (!chapterData) return;
@@ -626,6 +674,27 @@ function loadLevel(levelId) {
         });
         balloonState = { collected: 0, total: balloons.length, done: false };
         updateBalloonHUD();
+    }
+
+    // 畫畫教室：俯視 + 程式驅動，鍵盤操作說明 HUD 反而擋住畫面 → 該關隱藏
+    const helpHud = document.getElementById('help-hud');
+    if (helpHud) helpHud.style.display = level.draw ? 'none' : '';
+    // 畫畫教室：隱藏淡藍飛行軌跡線，只留彩色墨水
+    if (typeof trailLine !== 'undefined' && trailLine) trailLine.visible = !level.draw;
+
+    // 畫畫教室：畫出淡色範本輪廓（折線），高度與繪圖高度同層 → 俯視時與墨水線對齊
+    if (level.draw && Array.isArray(level.guide) && level.guide.length >= 2) {
+        const gy = (level.drawHeight || 3) + 0.02;
+        const pts = level.guide.map(p => new THREE.Vector3(p[0], gy, p[1]));
+        const gGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        const gMat = new THREE.LineDashedMaterial({
+            color: 0xffffff, transparent: true, opacity: 0.35,
+            dashSize: 0.4, gapSize: 0.3,
+        });
+        guideLine = new THREE.Line(gGeo, gMat);
+        guideLine.computeLineDistances();   // dashed 必須
+        guideLine.renderOrder = 2;
+        scene.add(guideLine);
     }
 
     // HUD 顯示切換：有圈才顯示鑽圈 HUD、有氣球才顯示氣球 HUD
@@ -866,6 +935,116 @@ function clearTrail() {
     trailPoints = [];
     trailGeometry.setDrawRange(0, 0);
     trailGeometry.attributes.position.needsUpdate = true;
+}
+
+// =============================================================================
+// 畫畫教室：持久粗墨水線（fat line / Line2，不滾動、可多段、可換色、可隨機色）
+//   - inkStrokes：每段一條 Line2（換筆色 / 抬筆後重新下筆 → 新的一段）
+//   - penState.down 控制是否留下筆跡；繪圖關卡載入時預設下筆
+//   - 取樣在 animate 迴圈裡（程式 tween 與手動飛行共用同一條路徑）
+//   - fat line 需要 resolution（畫布像素）才會有正確線寬 → INK_RES，resize 時更新
+// =============================================================================
+const INK_STROKE_MAX = 1500;          // 單段上限，超過自動接續新段
+const INK_WIDTH = 6;                  // 線寬（像素）
+const INK_DEFAULT_COLOR = 0x1565c0;
+// 隨機色盤（畫彩色星星用）— 鮮豔好分辨
+const INK_PALETTE = [0xff5252, 0xff9800, 0xffd54f, 0x66bb6a, 0x29b6f6, 0x42a5f5, 0xab47bc, 0xec407a];
+const INK_RES = new THREE.Vector2(
+    sceneCanvas.clientWidth || window.innerWidth,
+    sceneCanvas.clientHeight || window.innerHeight
+);
+const penState = { down: false, color: INK_DEFAULT_COLOR };
+let inkStrokes = [];                  // { line, geometry, material, pts:[x,y,z,...] }
+let currentStroke = null;
+let inkLastSample = 0;
+let inkLastPoint = null;              // 換段時用來銜接，避免斷線
+
+function updateInkResolution() {
+    INK_RES.set(sceneCanvas.clientWidth || window.innerWidth, sceneCanvas.clientHeight || window.innerHeight);
+    inkStrokes.forEach(s => s.material.resolution.copy(INK_RES));
+}
+
+function startInkStroke(seedPoint) {
+    const geometry = new LineGeometry();
+    const material = new LineMaterial({ color: penState.color, linewidth: INK_WIDTH });
+    material.resolution.copy(INK_RES);
+    const line = new Line2(geometry, material);
+    line.renderOrder = 3;
+    line.frustumCulled = false;        // 動態成長，避免被誤判出畫面而不畫
+    scene.add(line);
+    const stroke = { line, geometry, material, pts: [] };
+    inkStrokes.push(stroke);
+    currentStroke = stroke;
+    if (seedPoint) inkPushVertex(seedPoint);   // 從上一段末端起頭，銜接不斷線
+    return stroke;
+}
+
+function inkPushVertex(pos) {
+    if (!currentStroke) return;
+    if (currentStroke.pts.length / 3 >= INK_STROKE_MAX) {
+        startInkStroke(inkLastPoint);  // 這段滿了 → 開新段，用最後一點銜接
+    }
+    const s = currentStroke;
+    s.pts.push(pos.x, pos.y, pos.z);
+    if (s.pts.length >= 6) {            // Line2 至少要 2 點才畫得出來
+        // 重點：成長中的 LineGeometry 不能就地 setPositions（renderer 只認第一段），
+        // 必須換一顆全新的幾何，整條線才會更新。每段點數不多，重建成本低。
+        const geo = new LineGeometry();
+        geo.setPositions(s.pts);
+        s.line.geometry.dispose();
+        s.line.geometry = geo;
+        s.geometry = geo;
+    }
+    inkLastPoint = pos.clone();
+}
+
+// 每幀取樣：繪圖關卡 + 飛行中 + 下筆，才留墨水（移動夠遠才記，避免原地堆點）
+function sampleInk(now) {
+    if (!currentLevel || !currentLevel.draw || !droneState.isFlying) return;
+    // 手動飛行（沒有跑程式）時自動下筆 → 自由畫布 D-5 直接飛就能畫
+    if (!programState.running && !penState.down) inkPenDown();
+    if (!penState.down) return;
+    if (now - inkLastSample < 60) return;
+    inkLastSample = now;
+    if (!currentStroke) startInkStroke(null);
+    if (inkLastPoint && inkLastPoint.distanceTo(droneState.position) < 0.05) return;
+    inkPushVertex(droneState.position);
+}
+
+function inkPenDown() {
+    if (penState.down) return;
+    penState.down = true;
+    // 從「現在的位置」起頭（不是抬筆當下的位置）→ 抬筆移動的那段不會被連線
+    startInkStroke(droneState.position.clone());
+}
+function inkPenUp() {
+    penState.down = false;
+    currentStroke = null;           // 結束目前這段；下次下筆開新段
+}
+function inkApplyColor(c) {
+    if (Number.isNaN(c)) return;
+    penState.color = c;
+    // 下筆中換色：從現在位置起新的彩色段，與前一段相連不留縫
+    if (penState.down) startInkStroke(droneState.position.clone());
+}
+function inkSetColor(hex) {
+    if (hex === 'random' || hex === 'rainbow') return inkRandomColor();
+    inkApplyColor((typeof hex === 'string') ? parseInt(hex.replace('#', ''), 16) : hex);
+}
+// 隨機換色：挑一個跟現在不同的顏色（彩色星星用）
+function inkRandomColor() {
+    let c = penState.color, guard = 0;
+    while (c === penState.color && guard++ < 8) c = INK_PALETTE[Math.floor(Math.random() * INK_PALETTE.length)];
+    inkApplyColor(c);
+}
+
+function clearInk() {
+    inkStrokes.forEach(s => { scene.remove(s.line); s.geometry.dispose(); s.material.dispose(); });
+    inkStrokes = [];
+    currentStroke = null;
+    inkLastPoint = null;
+    penState.down = false;
+    penState.color = INK_DEFAULT_COLOR;
 }
 
 // =============================================================================
@@ -1341,6 +1520,7 @@ let isProgramRunning = false;
 function isManualLocked() {
     // 手動鎖定條件：程式執行中、程式模式、3-2-1 倒數中、大亂鬥倒數中、足球倒數中
     if (arena.active && arena.status === 'countdown') return true;
+    if (arena.active && arena.mode === 'tag' && arena.stunUntil && Date.now() < arena.stunUntil) return true;  // 鬼抓人：暈眩中鎖定操作，時間到自動解除
     if (SOCCER.active && SOCCER.status === 'countdown') return true;
     if (soccerNet.active && soccerNet.status === 'countdown') return true;
     return isProgramRunning || currentMode !== MODE.MANUAL || levelCountdownActive;
@@ -1390,13 +1570,7 @@ if (_modeParam === 'program' || _modeParam === 'manual') {
 }
 
 // v1.4 T-104: ?level=1-0..1-5 URL 參數（headless 驗收 / 老師深連結用）
-const _levelParam = new URLSearchParams(location.search).get('level');
-if (_levelParam && /^1-[0-5]$/.test(_levelParam)) {
-    // 等 chapterData 載入完成後切關
-    setTimeout(() => {
-        if (typeof loadLevel === 'function') loadLevel(_levelParam);
-    }, 300);
-}
+// 註：URL ?level= 的套用已移到 chapterData 載入完成的 .then 裡（避免時序競態）。
 // v1.4 B-101-001 fix: 攔截 Blockly.Extensions.register
 // 1. Set 標記已見過的 extension 名稱（即使 Blockly 內部 throw 也不重複警告）
 // 2. try/catch 包 orig()，把 throw 降級為 warn
@@ -1747,7 +1921,7 @@ function applyManualControls() {
     applyBleControls();      // pyController 藍牙搖桿（連線後覆寫 joystick）
 
     // 鬼抓人：鬼飛比較快
-    const spd = (arena.active && arena.mode === 'tag' && arena.myRole === 'ghost' && !arena.eaten) ? GHOST_SPEED : 1;
+    const spd = (arena.active && arena.mode === 'tag' && arena.myRole === 'ghost' && !arena.stunned) ? GHOST_SPEED : 1;
     const TH = THRUST * spd, LIFT = MANUAL_LIFT * spd;
 
     // 起飛：按 ↑ 或左桿往上推
@@ -1865,6 +2039,8 @@ async function cf_takeoff(height = 8) {
     droneState.isFlying = true;
     setStateHUD('起飛中...');
     await tween(from, to, 1500, v => droneState.position.y = v);
+    // 繪圖關卡：起飛即自動下筆（學生不放 🖊️下筆 也能畫；抬筆/下筆積木仍可調整）
+    if (currentLevel && currentLevel.draw) inkPenDown();
     setStateHUD('飛行中');
 }
 
@@ -1923,6 +2099,25 @@ async function cf_right(distance = 2) {
     setStateHUD('飛行中');
 }
 
+// 3D 立體繪圖：垂直升降（邊飛邊留墨）。水平海龜(前進/轉) + 垂直(上升/下降) = 一層層的立體
+async function cf_up(distance = 1) {
+    ensureRunning();
+    const startPt = droneState.position.clone();
+    const target = startPt.clone();
+    target.y += distance;
+    droneState.isGrounded = false;
+    droneState.isFlying = true;
+    setStateHUD(distance >= 0 ? `上升 ${distance}m` : `下降 ${-distance}m`);
+    const duration = Math.max(250, Math.abs(distance) * 600);
+    await tween(0, 1, duration, t => {
+        droneState.position.lerpVectors(startPt, target, t);
+    });
+    setStateHUD('飛行中');
+}
+async function cf_down(distance = 1) {
+    return cf_up(-Math.abs(distance));
+}
+
 async function cf_hover(seconds = 1) {
     ensureRunning();
     setStateHUD(`懸停 ${seconds}s`);
@@ -1953,6 +2148,12 @@ async function cf_rotateCounterClockwise(angle = 90) {
 function cf_log(msg) {
     console.log('[CREAFLY]', msg);
 }
+
+// 畫畫教室：畫筆動作（只在 draw 關卡有意義；非 draw 關卡呼叫不影響飛行）
+function cf_penDown() { ensureRunning(); inkPenDown(); setStateHUD('🖊️ 下筆'); }
+function cf_penUp()   { ensureRunning(); inkPenUp();   setStateHUD('✋ 抬筆'); }
+function cf_penColor(c) { ensureRunning(); inkSetColor(c); setStateHUD('🎨 換色'); }
+function cf_penRandom() { ensureRunning(); inkRandomColor(); setStateHUD('🎲 隨機換色'); }
 
 // v1.4 T-103: 時間型計時 API
 // 從程式開始到現在的秒數（float），可用於「if elapsed > 5」這類條件
@@ -1989,8 +2190,14 @@ window.CREAFLY = {
     backward: cf_backward,
     left: cf_left,
     right: cf_right,
+    up: cf_up,
+    down: cf_down,
     rotateClockwise: cf_rotateClockwise,
     rotateCounterClockwise: cf_rotateCounterClockwise,
+    penDown: cf_penDown,
+    penUp: cf_penUp,
+    penColor: cf_penColor,
+    penRandom: cf_penRandom,
     elapsed: cf_elapsed,
     timerReset: cf_timerReset,
     log: cf_log,
@@ -2076,11 +2283,15 @@ function defineCreaFlyBlocks() {
     makeMoveBlock('cf_backward', '⬇', '後退');
     makeMoveBlock('cf_left',     '⬅', '左移');
     makeMoveBlock('cf_right',    '➡', '右移');
+    makeMoveBlock('cf_up',       '🔼', '上升');   // 3D：垂直爬升
+    makeMoveBlock('cf_down',     '🔽', '下降');   // 3D：垂直下降
 
     Blockly.JavaScript['cf_forward']  = (b) => `await CREAFLY.forward(${num(b, 'DIST', 2)});\n`;
     Blockly.JavaScript['cf_backward'] = (b) => `await CREAFLY.backward(${num(b, 'DIST', 2)});\n`;
     Blockly.JavaScript['cf_left']     = (b) => `await CREAFLY.left(${num(b, 'DIST', 2)});\n`;
     Blockly.JavaScript['cf_right']    = (b) => `await CREAFLY.right(${num(b, 'DIST', 2)});\n`;
+    Blockly.JavaScript['cf_up']       = (b) => `await CREAFLY.up(${num(b, 'DIST', 1)});\n`;
+    Blockly.JavaScript['cf_down']     = (b) => `await CREAFLY.down(${num(b, 'DIST', 1)});\n`;
 
     // ========== 旋轉分類（顏色 20 橘）==========
     function makeRotateBlock(name, icon, label) {
@@ -2104,6 +2315,53 @@ function defineCreaFlyBlocks() {
 
     Blockly.JavaScript['cf_rotate_cw']  = (b) => `await CREAFLY.rotateClockwise(${num(b, 'ANGLE', 90)});\n`;
     Blockly.JavaScript['cf_rotate_ccw'] = (b) => `await CREAFLY.rotateCounterClockwise(${num(b, 'ANGLE', 90)});\n`;
+
+    // ========== 畫筆分類（顏色 285 紫，畫畫教室用）==========
+    Blockly.Blocks['cf_pen_down'] = {
+        init: function() {
+            this.appendDummyInput().appendField('🖊️ 下筆（開始畫）');
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(285);
+            this.setTooltip('放下畫筆，之後的移動會留下墨水線');
+        }
+    };
+    Blockly.Blocks['cf_pen_up'] = {
+        init: function() {
+            this.appendDummyInput().appendField('✋ 抬筆（停止畫）');
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(285);
+            this.setTooltip('抬起畫筆，之後的移動不會留下線（可移到別處再下筆）');
+        }
+    };
+    Blockly.Blocks['cf_pen_color'] = {
+        init: function() {
+            this.appendDummyInput()
+                .appendField('🎨 換筆色')
+                .appendField(new Blockly.FieldDropdown([
+                    ['紅', '#ff5252'], ['藍', '#42a5f5'], ['綠', '#66bb6a'],
+                    ['黃', '#ffd54f'], ['紫', '#ab47bc'], ['深藍', '#1565c0'],
+                ]), 'COLOR');
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(285);
+            this.setTooltip('換一個畫筆顏色，之後畫的線就是新顏色');
+        }
+    };
+    Blockly.Blocks['cf_pen_random'] = {
+        init: function() {
+            this.appendDummyInput().appendField('🎲 隨機換筆色');
+            this.setPreviousStatement(true, null);
+            this.setNextStatement(true, null);
+            this.setColour(285);
+            this.setTooltip('隨機挑一個顏色 — 放進迴圈就能畫出彩色星星！');
+        }
+    };
+    Blockly.JavaScript['cf_pen_down']   = () => `await CREAFLY.penDown();\n`;
+    Blockly.JavaScript['cf_pen_up']     = () => `await CREAFLY.penUp();\n`;
+    Blockly.JavaScript['cf_pen_color']  = (b) => `await CREAFLY.penColor('${b.getFieldValue('COLOR')}');\n`;
+    Blockly.JavaScript['cf_pen_random'] = () => `await CREAFLY.penRandom();\n`;
 
     // ========== v1.4 T-103 進階積木 ==========
     // 邏輯 / 迴圈 / 變數 / 時間型計時（4 大類）
@@ -2261,6 +2519,16 @@ function injectBlockly() {
         <block type="math_number"><field name="NUM">2</field></block>
       </value>
     </block>
+    <block type="cf_up">
+      <value name="DIST">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+    </block>
+    <block type="cf_down">
+      <value name="DIST">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+    </block>
   </category>
   <category name="🔄 旋轉" colour="20">
     <block type="cf_rotate_cw">
@@ -2273,6 +2541,12 @@ function injectBlockly() {
         <block type="math_number"><field name="NUM">90</field></block>
       </value>
     </block>
+  </category>
+  <category name="🖊️ 畫筆" colour="285">
+    <block type="cf_pen_down"></block>
+    <block type="cf_pen_up"></block>
+    <block type="cf_pen_color"></block>
+    <block type="cf_pen_random"></block>
   </category>
   <category name="📝 邏輯" colour="200">
     <block type="controls_if"></block>
@@ -2472,6 +2746,7 @@ function resetDrone() {
     rings.forEach((r, i) => { r.visible = true; r.material.opacity = 1; });
     programState.ringsCollected = 0;
     if (typeof clearTrail === 'function') clearTrail();
+    if (typeof clearInk === 'function') clearInk();
     updateRingHUD();
     setStateHUD('待命');
 }
@@ -3120,13 +3395,16 @@ function animate() {
     // v1.3 飛行軌跡：drone 飛過的路徑線（每 0.1s 採樣一次，或移動超過 0.3m）
     if (droneState.isFlying && !droneState.frozen && !droneState.returning) {
         const now = performance.now();
-        if (now - trailLastSample > 100) {
+        // 畫畫教室不畫淡藍飛行軌跡（會跟彩色墨水線打架），只留墨水
+        if (!(currentLevel && currentLevel.draw) && now - trailLastSample > 100) {
             const last = trailPoints[trailPoints.length - 1];
             if (!last || last.distanceTo(droneState.position) > 0.3) {
                 pushTrailPoint(droneState.position);
                 trailLastSample = now;
             }
         }
+        // 畫畫教室：留下持久墨水線（程式 tween 與手動飛行共用）
+        sampleInk(now);
     }
 
     // 螺旋槳旋轉
@@ -3169,6 +3447,21 @@ function animate() {
         camera.position.copy(eye);
         camera.lookAt(eye.clone().add(fwd.multiplyScalar(10)).add(new THREE.Vector3(0, -1.2, 0)));
         if (droneModel.visible) droneModel.visible = false;  // FPV 不顯示自己的機身擋鏡頭
+    } else if (currentLevel && currentLevel.draw && currentLevel.view === 'topdown') {
+        // 畫畫教室：俯視鏡頭（固定框住畫布、近乎正上方，圖才看得出來；不跟著機身轉）
+        // 圖形重心約 (1.5, -2.8)、範圍約 7×6，相機壓低到 ~18 讓圖夠大、留邊
+        if (!droneModel.visible) droneModel.visible = true;
+        camera.position.set(1.5, 21, 3);
+        camera.lookAt(1.5, 0, -2.4);
+    } else if (currentLevel && currentLevel.draw && currentLevel.view === 'orbit3d') {
+        // 3D 立體繪圖：環繞鏡頭（慢慢繞著作品轉，立體感才出得來，像展示台）
+        if (!droneModel.visible) droneModel.visible = true;
+        const o = currentLevel.orbit || {};
+        const c = o.center || [0, 4, 0];
+        const R = o.radius || 13, H = o.height || 9;
+        const ang = performance.now() * 0.00025;   // 慢速繞行
+        camera.position.set(c[0] + Math.cos(ang) * R, c[1] + H, c[2] + Math.sin(ang) * R);
+        camera.lookAt(c[0], c[1], c[2]);
     } else {
         // 第三人稱（跟隨）
         if (!droneModel.visible) droneModel.visible = true;
@@ -3193,6 +3486,7 @@ function resize() {
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    if (typeof updateInkResolution === 'function') updateInkResolution();  // 粗墨水線線寬隨畫布更新
 }
 window.addEventListener('resize', resize);
 new ResizeObserver(resize).observe(sceneCanvas);
@@ -3886,12 +4180,12 @@ function makeGhostDrone(id, name, emoji) {
     scene.add(g);
     return g;
 }
-// 依角色 / 被吃狀態調整其他玩家分身外觀：鬼=紅色+變大、被吃=變暗
+// 依角色 / 暈眩狀態調整其他玩家分身外觀：鬼=紅色+變大、暈眩中=變暗（暫時，不是淘汰）
 function styleOtherDrone(o) {
     const g = o.group, body = g.userData.body;
     if (o.role === 'ghost') { g.scale.setScalar(1.6); if (body) body.material.color.setHex(0xff2d55); if (body) body.material.emissive.setHex(0xff2d55); }
     else { g.scale.setScalar(1); if (body && g.userData.baseColor) { body.material.color.copy(g.userData.baseColor); body.material.emissive.copy(g.userData.baseColor); } }
-    const op = o.eaten ? 0.25 : 1;
+    const op = o.stunned ? 0.25 : 1;
     g.traverse(m => { if (m.material && 'opacity' in m.material) { m.material.transparent = true; m.material.opacity = op; } });
 }
 // 鬼的「抓捕範圍」半透明紅色光球（半徑 = 抓捕距離），進到裡面就會被吃
@@ -3940,7 +4234,7 @@ function handleArenaMessage(msg) {
             arena.status = msg.status; arena.endTime = msg.endTime || 0;
             if (msg.mode) arena.mode = msg.mode;
             if (msg.field) setArenaField(msg.field);   // 場地全場同步
-            arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
+            arena.balloonMeshes.forEach(m => { scene.remove(m); disposeObject3D(m); }); arena.balloonMeshes.clear(); arena.pendingPop.clear();
             (msg.balloons || []).forEach(b => arena.balloonMeshes.set(b.id, makeArenaBalloon(b)));
             updateArenaScoreboard(msg.players || []);
             // 倒數開始時，移到自己的出生點（避免大家疊在原點）
@@ -3956,7 +4250,7 @@ function handleArenaMessage(msg) {
                 else arena.balloonMeshes.set(msg.id, makeArenaBalloon(msg));
             } else {
                 const m = arena.balloonMeshes.get(msg.id);
-                if (m) { scene.remove(m); arena.balloonMeshes.delete(msg.id); }
+                if (m) { scene.remove(m); disposeObject3D(m); arena.balloonMeshes.delete(msg.id); }
                 // 是「我」戳破的（在 pendingPop 裡）→ 播音效
                 if (arena.pendingPop.has(msg.id) && typeof playRingSound === 'function') playRingSound();
             }
@@ -3971,26 +4265,35 @@ function handleArenaMessage(msg) {
             if (msg.field) setArenaField(msg.field);
             if (msg.spawns) applyMySpawn(msg.spawns);  // 後備：確保開賽時在自己出生點
             // 套用自己的角色（鬼抓人）
-            if (msg.players) { const me = msg.players.find(p => p.id === wsState.myId); if (me) setMyRole(me.role || 'runner', !!me.eaten); updateArenaPlayers(msg.players); }
+            if (msg.players) { const me = msg.players.find(p => p.id === wsState.myId); if (me) setMyRole(me.role || 'runner', !!me.stunned); updateArenaPlayers(msg.players); }
             if (arena.mode === 'tag') {
                 showCountdownNumber(arena.myRole === 'ghost' ? 'GO' : 'GO');
-                if (arena.myRole === 'ghost') { setStateHUD('👻 你是鬼！去抓人！'); showToast('👻 你是鬼！追上去撞掉所有人！', 'error'); }
-                else { setStateHUD('🏃 快逃！別被鬼撞到'); showToast('🏃 你是逃跑者！撐到時間到就贏！', 'success'); }
+                if (arena.myRole === 'ghost') { setStateHUD('👻 你是鬼！去抓人！'); showToast('👻 你是鬼！撞到跑者就能抓到，抓越多分越高！', 'error'); }
+                else { setStateHUD('🏃 快逃！被抓到只會暈眩一下，很快能繼續飛'); showToast('🏃 你是逃跑者！被抓到不會出局，暈幾秒後自動復活～', 'success'); }
             } else {
                 showCountdownNumber('GO'); setStateHUD('🏟️ 開搶！'); showToast('🏟️ 開始搶氣球！', 'success');
             }
             break;
-        case 'arena_eaten':
-            // 有人被吃掉
+        case 'arena_caught':
+            // 有人被抓到（暫時暈眩，不是淘汰）
             if (msg.id === wsState.myId) {
                 setMyRole(arena.myRole, true);
-                setStateHUD('💀 你被抓到了！觀戰中…');
-                showToast(`💀 被 ${msg.byName || '鬼'} 抓到了！`, 'error');
+                setStateHUD('😵 被抓到了！暈眩中，馬上復活…');
+                showToast(`😵 被 ${msg.byName || '鬼'} 抓到了！`, 'error');
                 if (typeof playBumpSound === 'function') playBumpSound();
             } else {
                 const o = arena.others.get(msg.id);
-                if (o) { o.eaten = true; styleOtherDrone(o); }
+                if (o) { o.stunned = true; styleOtherDrone(o); }
             }
+            break;
+        case 'arena_respawn':
+            // 只有被抓到的自己會收到：暈眩鎖定操作＋傳送回出生點，時間到自動解除（見 isManualLocked）
+            // 暈眩結束後還有一段無敵時間（見 arenaTick 閃爍效果），讓他來得及跑走再被抓
+            arena.stunUntil = Date.now() + (msg.stunMs || 0);
+            arena.invincibleUntil = Date.now() + (msg.stunMs || 0) + (msg.invincibleMs || 0);
+            droneState.position.set(msg.x, HOME_POSITION.y, msg.z);
+            droneState.velocity.set(0, 0, 0);
+            droneState.isGrounded = true; droneState.isFlying = false;
             break;
         case 'arena_scores':
             if (msg.status) arena.status = msg.status;
@@ -4009,29 +4312,30 @@ function updateArenaPlayers(list) {
     const seen = new Set();
     list.forEach(p => {
         if (p.id === wsState.myId) {
-            // 更新自己的角色 / 被吃狀態
-            if (p.role !== undefined) setMyRole(p.role, !!p.eaten);
+            // 更新自己的角色 / 暈眩狀態
+            if (p.role !== undefined) setMyRole(p.role, !!p.stunned);
             return;
         }
         seen.add(p.id);
         let o = arena.others.get(p.id);
-        if (!o) { o = { group: makeGhostDrone(p.id, p.name, p.emoji), target: {}, role: 'runner', eaten: false }; arena.others.set(p.id, o); }
+        if (!o) { o = { group: makeGhostDrone(p.id, p.name, p.emoji), target: {}, role: 'runner', stunned: false, invincible: false }; arena.others.set(p.id, o); }
         o.target = { x: p.x, y: p.y, z: p.z, yaw: p.yaw };
-        const role = p.role || 'runner', eaten = !!p.eaten;
-        if (o.role !== role || o.eaten !== eaten) { o.role = role; o.eaten = eaten; styleOtherDrone(o); }
+        o.invincible = !!p.invincible;  // 無敵中不需要離散的外觀切換，交給 arenaTick 逐幀閃爍
+        const role = p.role || 'runner', stunned = !!p.stunned;
+        if (o.role !== role || o.stunned !== stunned) { o.role = role; o.stunned = stunned; styleOtherDrone(o); }
     });
     for (const [id, o] of arena.others) {
-        if (!seen.has(id)) { scene.remove(o.group); if (o.aura) scene.remove(o.aura); arena.others.delete(id); }
+        if (!seen.has(id)) { scene.remove(o.group); disposeObject3D(o.group); if (o.aura) { scene.remove(o.aura); disposeObject3D(o.aura); } arena.others.delete(id); }
     }
 }
-// 設定自己的角色：套用機體外觀（鬼=放大+紅、被吃=變暗）
-function setMyRole(role, eaten) {
-    const changed = arena.myRole !== role || arena.eaten !== eaten;
-    arena.myRole = role; arena.eaten = eaten;
+// 設定自己的角色：套用機體外觀（鬼=放大+紅、暈眩中=變暗，暫時效果、不是淘汰）
+function setMyRole(role, stunned) {
+    const changed = arena.myRole !== role || arena.stunned !== stunned;
+    arena.myRole = role; arena.stunned = stunned;
     if (!changed) return;
     if (typeof droneModel !== 'undefined' && droneModel) {
         droneModel.scale.setScalar(role === 'ghost' ? 1.6 : 1);
-        droneModel.traverse(m => { if (m.material && 'opacity' in m.material) { m.material.transparent = true; m.material.opacity = eaten ? 0.3 : 1; } });
+        droneModel.traverse(m => { if (m.material && 'opacity' in m.material) { m.material.transparent = true; m.material.opacity = stunned ? 0.3 : 1; } });
     }
 }
 function updateArenaScoreboard(scores) {
@@ -4039,14 +4343,11 @@ function updateArenaScoreboard(scores) {
     if (!el) return;
     if (!scores || !scores.length) { el.innerHTML = '<div class="arena-row">等待玩家加入…</div>'; return; }
     if (arena.mode === 'tag') {
-        // 鬼抓人：用 arena.others + 自己組出角色/存活狀態（scores 沒帶 role，改用名次列表名稱對應）
+        // 鬼抓人：鬼比抓捕數、跑者比被抓次數（越少越厲害）—— role/stunned/caughtCount 都由伺服器直接給
         const rows = scores.slice(0, 10).map(s => {
-            // 從 others / 自己 取得 role+eaten
-            let role = 'runner', eaten = false;
-            if (s.id === wsState.myId) { role = arena.myRole; eaten = arena.eaten; }
-            else { const o = arena.others.get(s.id); if (o) { role = o.role; eaten = o.eaten; } }
-            const tag = role === 'ghost' ? '👻' : (eaten ? '💀' : '🏃');
-            return `<div class="arena-row${s.id === wsState.myId ? ' me' : ''}"><span>${tag} ${s.emoji || ''}${(s.name || '?')}</span><b>${role === 'ghost' ? (s.score || 0) : (eaten ? '出局' : '存活')}</b></div>`;
+            const tag = s.role === 'ghost' ? '👻' : (s.stunned ? '😵' : '🏃');
+            const stat = s.role === 'ghost' ? `抓到 ${s.score || 0}` : `被抓 ${s.caughtCount || 0}`;
+            return `<div class="arena-row${s.id === wsState.myId ? ' me' : ''}"><span>${tag} ${s.emoji || ''}${(s.name || '?')}</span><b>${stat}</b></div>`;
         });
         el.innerHTML = rows.join('');
     } else {
@@ -4056,8 +4357,17 @@ function updateArenaScoreboard(scores) {
 function showArenaResult(msg) {
     setStateHUD('🏁 大亂鬥結束！');
     if (msg && msg.mode === 'tag') {
-        if (msg.winner === 'ghosts') showToast('👻 鬼勝！所有人都被抓光了！', 'error');
-        else showToast('🏃 人勝！有人撐到最後，鬼輸了！', 'success');
+        // 隊伍勝負：鬼隊總抓捕數有沒有達門檻（見 server.js ARENA_TAG_WIN_MULT）
+        if (msg.winner === 'ghosts') showToast('👻 鬼隊獲勝！抓到超多人～', 'error');
+        else showToast('🏃 跑者隊獲勝！成功撐過鬼的追擊！', 'success');
+        // 個人榮譽：抓鬼王（抓最多的鬼）＋逃脫達人（被抓最少的跑者），跟隊伍輸贏無關
+        const ranking = msg.ranking || [];
+        const topGhost = ranking.filter(r => r.role === 'ghost').sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+        const topRunner = ranking.filter(r => r.role === 'runner').sort((a, b) => (a.caughtCount || 0) - (b.caughtCount || 0))[0];
+        const parts = [];
+        if (topGhost) parts.push(`👻 抓鬼王：${topGhost.emoji || ''}${topGhost.name}（抓到 ${topGhost.score || 0} 次）`);
+        if (topRunner) parts.push(`🏃 逃脫達人：${topRunner.emoji || ''}${topRunner.name}（只被抓 ${topRunner.caughtCount || 0} 次）`);
+        if (parts.length) setTimeout(() => showToast(parts.join('｜'), 'success'), 1800);
     } else {
         const top = (msg && msg.ranking && msg.ranking[0]);
         showToast(top ? `🏆 冠軍：${top.emoji || ''}${top.name}（${top.score} 顆）` : '🏁 結束', 'success');
@@ -4080,11 +4390,29 @@ function sendArenaPos() {
         z: +droneState.position.z.toFixed(2), yaw: +droneState.rotation.y.toFixed(3)
     }));
 }
+// 無敵中（暈眩結束、剛傳送回出生點的一小段時間）逐幀閃爍，提醒「這時候鬼抓不到」
+function applyInvincibleBlink(root) {
+    const op = 0.35 + 0.55 * (Math.sin(performance.now() / 90) * 0.5 + 0.5);
+    root.traverse(m => { if (m.material && 'opacity' in m.material) { m.material.transparent = true; m.material.opacity = op; } });
+}
 function arenaTick() {
     clampArenaBounds();   // 階段 1：飛不出場地邊界
     if (arena.field === 'playground') resolvePlaygroundCollision();  // 階段 2：不能穿過 playground 結構(場地由伺服器決定)
     const tagRunning = arena.mode === 'tag' && arena.status === 'running';
-    // 第一輪：內插其他玩家位置，並收集「存活逃跑者」的位置（給光環危險度用）
+    const myInvincibleNow = tagRunning && !arena.stunned && arena.invincibleUntil > Date.now();
+    if (tagRunning && arena.myRole === 'runner' && typeof droneModel !== 'undefined' && droneModel) {
+        if (myInvincibleNow) applyInvincibleBlink(droneModel);
+        else if (arena._wasInvincible) { droneModel.traverse(m => { if (m.material && 'opacity' in m.material) m.material.opacity = 1; }); }
+    }
+    arena._wasInvincible = myInvincibleNow;
+    // 其他玩家：無敵中閃爍；無敵剛結束則交回 styleOtherDrone 恢復正常外觀
+    arena.others.forEach(o => {
+        if (o.role !== 'runner' || o.stunned) { o.wasInvincible = false; return; }
+        if (o.invincible) applyInvincibleBlink(o.group);
+        else if (o.wasInvincible) styleOtherDrone(o);
+        o.wasInvincible = o.invincible;
+    });
+    // 第一輪：內插其他玩家位置，並收集「可被抓的逃跑者」位置（無敵中不算，給光環危險度用）
     const runnerPos = [];
     arena.others.forEach(o => {
         if (o.target.x !== undefined) {
@@ -4093,17 +4421,17 @@ function arenaTick() {
             o.group.position.z += (o.target.z - o.group.position.z) * 0.25;
             o.group.rotation.y = o.target.yaw || 0;
         }
-        if (o.role === 'runner' && !o.eaten) runnerPos.push(o.group.position);
+        if (o.role === 'runner' && !o.stunned && !o.invincible) runnerPos.push(o.group.position);
     });
-    if (arena.myRole === 'runner' && !arena.eaten) runnerPos.push(droneState.position);
+    if (arena.myRole === 'runner' && !arena.stunned && !myInvincibleNow) runnerPos.push(droneState.position);
     // 第二輪：鬼的抓捕光環（跟著鬼；接近逃跑者時脈動 + 變鮮紅）
     arena.others.forEach(o => {
-        const showAura = tagRunning && o.role === 'ghost' && !o.eaten;
+        const showAura = tagRunning && o.role === 'ghost' && !o.stunned;
         if (showAura) { if (!o.aura) o.aura = makeCatchAura(); o.aura.visible = true; o.aura.position.copy(o.group.position); applyAuraDanger(o.aura, o.group.position, runnerPos); }
         else if (o.aura) o.aura.visible = false;
     });
     // 自己是鬼 → 顯示自己的抓捕光環
-    const meGhost = tagRunning && arena.myRole === 'ghost' && !arena.eaten;
+    const meGhost = tagRunning && arena.myRole === 'ghost' && !arena.stunned;
     if (meGhost) { if (!myCatchAura) myCatchAura = makeCatchAura(); myCatchAura.visible = true; myCatchAura.position.copy(droneState.position); applyAuraDanger(myCatchAura, droneState.position, runnerPos); }
     else if (myCatchAura) myCatchAura.visible = false;
     // 搶氣球（撞到 → 回報 server 仲裁）
@@ -4126,10 +4454,10 @@ function arenaTick() {
         } else if (arena.status === 'ended') t = '🏁 結束';
         else t = '⏳ 等待開始';
         if (arena.mode === 'tag' && arena.status === 'running') {
-            let alive = 0; arena.others.forEach(o => { if (o.role === 'runner' && !o.eaten) alive++; });
-            if (arena.myRole === 'runner' && !arena.eaten) alive++;
-            const me = arena.eaten ? '💀觀戰' : (arena.myRole === 'ghost' ? '👻鬼' : '🏃逃');
-            t += ` ｜ 🏃存活 ${alive} ｜ ${me}`;
+            let active = 0; arena.others.forEach(o => { if (o.role === 'runner' && !o.stunned) active++; });
+            if (arena.myRole === 'runner' && !arena.stunned) active++;
+            const me = arena.stunned ? '😵暈眩中' : (myInvincibleNow ? '✨無敵中' : (arena.myRole === 'ghost' ? '👻鬼' : '🏃逃'));
+            t += ` ｜ 🏃場上 ${active} ｜ ${me}`;
         }
         tEl.textContent = t;
     }
@@ -4226,10 +4554,10 @@ function exitArena() {
     arena.active = false;
     if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'arena_leave' }));
     if (arena.posTimer) { clearInterval(arena.posTimer); arena.posTimer = null; }
-    arena.balloonMeshes.forEach(m => scene.remove(m)); arena.balloonMeshes.clear(); arena.pendingPop.clear();
-    arena.others.forEach(o => { scene.remove(o.group); if (o.aura) scene.remove(o.aura); }); arena.others.clear();
-    if (myCatchAura) { scene.remove(myCatchAura); myCatchAura = null; }
-    arena.obstacles.forEach(o => scene.remove(o)); arena.obstacles = [];
+    arena.balloonMeshes.forEach(m => { scene.remove(m); disposeObject3D(m); }); arena.balloonMeshes.clear(); arena.pendingPop.clear();
+    arena.others.forEach(o => { scene.remove(o.group); disposeObject3D(o.group); if (o.aura) { scene.remove(o.aura); disposeObject3D(o.aura); } }); arena.others.clear();
+    if (myCatchAura) { scene.remove(myCatchAura); disposeObject3D(myCatchAura); myCatchAura = null; }
+    arena.obstacles.forEach(o => { scene.remove(o); disposeObject3D(o); }); arena.obstacles = [];
     obstacles = obstacles.filter(o => !(o.userData && o.userData.arena));
     // 還原格線地面給一般關卡用（playground 物件留著快取、僅隱藏）
     groundGrid.visible = true; ground.visible = true;
@@ -4272,7 +4600,7 @@ function makeGoalRing(z, color) {
     return ring;
 }
 function clearSoccerField() {
-    SOCCER.objs.forEach(o => scene.remove(o));
+    SOCCER.objs.forEach(o => { scene.remove(o); disposeObject3D(o); });
     SOCCER.objs = [];
     obstacles = obstacles.filter(o => !(o.userData && o.userData.soccer));
     SOCCER.goalNear = SOCCER.goalFar = null;
@@ -4360,8 +4688,8 @@ function exitSoccer() {
 function startDrill(idx) {
     const d = SOCCER_DRILLS[idx]; if (!d || !SOCCER.active) return;
     SOCCER.drill = d; SOCCER.count = 0; SOCCER.shuttleReturned = true;
-    obstacles = obstacles.filter(o => !(o.userData && o.userData.soccerDummy && (scene.remove(o), true)));
-    if (d.dummies) { obstacles.filter(o => o.userData && o.userData.soccerDummy).forEach(o => scene.remove(o)); soccerSpawnDummiesTagged(); }
+    obstacles = obstacles.filter(o => !(o.userData && o.userData.soccerDummy && (scene.remove(o), disposeObject3D(o), true)));
+    if (d.dummies) { obstacles.filter(o => o.userData && o.userData.soccerDummy).forEach(o => { scene.remove(o); disposeObject3D(o); }); soccerSpawnDummiesTagged(); }
     soccerResetDronePos();
     if (d.type === 'free') { SOCCER.status = 'running'; SOCCER.startTime = Date.now(); setStateHUD('⚽ ' + d.name); showToast(d.desc, ''); updateSoccerHud(); return; }
     SOCCER.status = 'countdown';
@@ -4487,7 +4815,7 @@ function makeMatchGoal(z, color) {
     return ring;
 }
 function clearSoccerMatchField() {
-    soccerNet.objs.forEach(o => scene.remove(o));
+    soccerNet.objs.forEach(o => { scene.remove(o); disposeObject3D(o); });
     soccerNet.objs = [];
     soccerNet.goalBlue = soccerNet.goalRed = null;
 }
@@ -4556,7 +4884,7 @@ function updateSoccerPlayers(list) {
         }
     });
     for (const [id, o] of soccerNet.others) {
-        if (!seen.has(id)) { scene.remove(o.group); soccerNet.others.delete(id); }
+        if (!seen.has(id)) { scene.remove(o.group); disposeObject3D(o.group); soccerNet.others.delete(id); }
     }
 }
 function applyMySoccerSpawn(spawns) {
@@ -4719,9 +5047,9 @@ function exitSoccerMatch() {
     soccerNet.active = false;
     if (wsState.ws && wsState.ws.readyState === WebSocket.OPEN) wsState.ws.send(JSON.stringify({ type: 'soccer_leave' }));
     if (soccerNet.posTimer) { clearInterval(soccerNet.posTimer); soccerNet.posTimer = null; }
-    soccerNet.others.forEach(o => scene.remove(o.group)); soccerNet.others.clear();
+    soccerNet.others.forEach(o => { scene.remove(o.group); disposeObject3D(o.group); }); soccerNet.others.clear();
     clearSoccerMatchField();
-    if (soccerNet.ball && soccerNet.ball.parent) soccerNet.ball.parent.remove(soccerNet.ball);
+    if (soccerNet.ball && soccerNet.ball.parent) { soccerNet.ball.parent.remove(soccerNet.ball); disposeObject3D(soccerNet.ball); }
     if (_myRibbon) { _myRibbon.visible = false; }
     droneModel.scale.setScalar(1);
     groundGrid.visible = true; ground.visible = true;
@@ -4877,6 +5205,9 @@ window._creafly = {
     get missionRings() { return missionRings; },   // getter：missionRings 會被 loadLevel 重新指派
     get rings() { return rings; },
     get currentLevel() { return currentLevel; },
+    get passZoneProgress() { return passZoneProgress; },   // 畫畫教室驗證用
+    get inkStrokes() { return inkStrokes; },               // 畫畫教室驗證用
+    CREAFLY,
     get playgroundBVHReady() { return !!_playgroundBVH; },
     get playgroundGeo() { return _playgroundGeo; },
     get soccerBVHReady() { return !!_soccerBVH; },

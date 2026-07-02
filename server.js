@@ -107,6 +107,11 @@ const ARENA_BALLOON_COUNT = 50;
 const ARENA_BOUNDS = { x: 22, z: 22, ymin: 1.5, ymax: 10 };
 const ARENA_RESPAWN_MS = 2500;
 const ARENA_CATCH_DIST = 2.2;  // 鬼抓人：鬼撞到逃跑者的距離（鬼較大）
+const ARENA_STUN_MS = 3000;        // 鬼抓人：被抓後暈眩＋傳送回出生點的時間，時間到自動復活（不淘汰，可以一直玩）
+const ARENA_INVINCIBLE_MS = 2000;  // 鬼抓人：暈眩結束、傳送回出生點之後，額外的無敵時間（可以動，但鬼抓不到），讓他有機會跑走
+const ARENA_TAG_WIN_MULT = 3;      // 鬼隊勝利門檻：全場總抓捕數 >= 跑者人數 × 此倍數才算鬼隊贏，否則跑者隊贏
+function isStunned(s) { return !!(s.stunnedUntil && Date.now() < s.stunnedUntil); }
+function isInvincible(s) { return !!(s.invincibleUntil && Date.now() < s.invincibleUntil); }  // 暈眩中也算無敵（涵蓋整段抓不到的時間）
 
 function arenaRandPos() {
     return {
@@ -127,7 +132,7 @@ function broadcastArena(msg) {
     for (const s of arenaPlayers()) s.ws.send(data);
 }
 function arenaRanking() {
-    return arenaPlayers().map(s => ({ id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0, role: s.role || 'runner', eaten: !!s.eaten }))
+    return arenaPlayers().map(s => ({ id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0, role: s.role || 'runner', stunned: isStunned(s), invincible: isInvincible(s), caughtCount: s.caughtCount || 0 }))
         .sort((a, b) => b.score - a.score);
 }
 // 把所有大亂鬥玩家平均散佈在一個圓上，避免 16 台疊在同一個出生點
@@ -145,7 +150,7 @@ function arenaSpawns() {
     return arenaPlayers().map(s => ({ id: s.id, x: s.spawnX || 0, z: s.spawnZ || 0 }));
 }
 function arenaPlayerInfo(s) {
-    return { id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0, role: s.role || 'runner', eaten: !!s.eaten };
+    return { id: s.id, name: s.name, emoji: s.emoji, score: s.score || 0, role: s.role || 'runner', stunned: isStunned(s), invincible: isInvincible(s), caughtCount: s.caughtCount || 0 };
 }
 function arenaSnapshot() {
     return {
@@ -169,9 +174,8 @@ function assignArenaRoles() {
     const idx = players.map((_, i) => i);
     for (let i = idx.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [idx[i], idx[j]] = [idx[j], idx[i]]; }
     const ghostSet = new Set(idx.slice(0, gc));
-    players.forEach((s, i) => { s.role = ghostSet.has(i) ? 'ghost' : 'runner'; s.eaten = false; });
+    players.forEach((s, i) => { s.role = ghostSet.has(i) ? 'ghost' : 'runner'; s.stunnedUntil = 0; s.invincibleUntil = 0; s.caughtCount = 0; });
 }
-function arenaAliveRunners() { return arenaPlayers().filter(s => s.role === 'runner' && !s.eaten); }
 function broadcastArenaScores() {
     const msg = { type: 'arena_scores', scores: arenaRanking(), status: ARENA.status, endTime: ARENA.endTime, mode: ARENA.mode, field: ARENA.field };
     broadcastArena(msg);
@@ -183,7 +187,7 @@ function arenaStart(durationSec, mode, ghostCount, field) {
     ARENA.field = (field === 'playground') ? 'playground' : 'grid';
     ARENA.ghostCount = ghostCount || 1;
     ARENA.winner = null;
-    for (const s of students.values()) if (s.arena) { s.score = 0; s.role = 'runner'; s.eaten = false; }
+    for (const s of students.values()) if (s.arena) { s.score = 0; s.role = 'runner'; s.stunnedUntil = 0; s.invincibleUntil = 0; s.caughtCount = 0; }
     arenaInitBalloons();
     assignArenaSpawns();   // 指派各玩家的出生點（散佈在圓上）
     ARENA.status = 'countdown';
@@ -263,6 +267,18 @@ function setStriker(studentId) {
     const s = soccerPlayers().find(p => p.id === studentId);
     if (!s || !s.team) return false;
     soccerTeam(s.team).forEach(p => { p.striker = (p === s); });
+    return true;
+}
+// 老師指定隊伍（藍/紅）：手動分隊，取代自動平均分隊；換隊時原隊 / 新隊都要重新確保前鋒恰 1 名
+function setTeam(studentId, team) {
+    if (team !== 'blue' && team !== 'red') return false;
+    const s = soccerPlayers().find(p => p.id === studentId);
+    if (!s || s.team === team) return false;
+    const oldTeam = s.team;
+    s.team = team;
+    s.striker = false;
+    if (oldTeam) ensureStriker(oldTeam);
+    ensureStriker(team);
     return true;
 }
 // 出生點：前鋒站中間（x≈0），防守沿 x 兩側排開；皆在自隊站位端、略內縮
@@ -384,30 +400,37 @@ setInterval(() => {
             }
             if (now >= ARENA.endTime) arenaEnd('time');
         } else if (ARENA.mode === 'tag') {
-            // 鬼抓人：鬼撞到逃跑者 → 逃跑者被吃掉
+            // 鬼抓人：鬼撞到逃跑者 → 暈眩＋傳送回出生點，不淘汰、時間到自動復活繼續玩
             const ps = arenaPlayers();
             const ghosts = ps.filter(s => s.role === 'ghost');
-            for (const r of ps) {
-                if (r.role !== 'runner' || r.eaten) continue;
+            const runners = ps.filter(s => s.role === 'runner');
+            for (const r of runners) {
+                if (isInvincible(r)) continue;  // 暈眩中或剛復活的無敵時間內，都抓不到
                 for (const g of ghosts) {
                     const dx = (r.ax || 0) - (g.ax || 0), dy = (r.ay || 0) - (g.ay || 0), dz = (r.az || 0) - (g.az || 0);
                     if (dx * dx + dy * dy + dz * dz < ARENA_CATCH_DIST * ARENA_CATCH_DIST) {
-                        r.eaten = true;
+                        r.stunnedUntil = now + ARENA_STUN_MS;
+                        r.invincibleUntil = now + ARENA_STUN_MS + ARENA_INVINCIBLE_MS;
+                        r.caughtCount = (r.caughtCount || 0) + 1;
                         g.score = (g.score || 0) + 1;  // 鬼的抓捕數
-                        broadcastArena({ type: 'arena_eaten', id: r.id, by: g.id, byName: g.name });
+                        broadcastArena({ type: 'arena_caught', id: r.id, by: g.id, byName: g.name, stunMs: ARENA_STUN_MS });
+                        if (r.ws.readyState === 1) r.ws.send(JSON.stringify({ type: 'arena_respawn', x: r.spawnX || 0, z: r.spawnZ || 0, stunMs: ARENA_STUN_MS, invincibleMs: ARENA_INVINCIBLE_MS }));
                         broadcastArenaScores();
                         break;
                     }
                 }
             }
-            // 勝負
-            if (arenaAliveRunners().length === 0) arenaEnd('ghosts');   // 全被吃 → 鬼勝
-            else if (now >= ARENA.endTime) arenaEnd('runners');         // 時間到還有人活 → 人勝
+            // 勝負：時間到才判定 —— 鬼隊總抓捕數達門檻（跑者人數 × 倍數）算鬼隊贏，否則跑者隊贏
+            if (now >= ARENA.endTime) {
+                const totalCatches = ghosts.reduce((sum, g) => sum + (g.score || 0), 0);
+                const target = Math.max(1, runners.length * ARENA_TAG_WIN_MULT);
+                arenaEnd(totalCatches >= target ? 'ghosts' : 'runners');
+            }
         }
     }
     const players = arenaPlayers();
     if (players.length) {
-        broadcastArena({ type: 'arena_players', players: players.map(s => ({ id: s.id, name: s.name, emoji: s.emoji, role: s.role || 'runner', eaten: !!s.eaten, x: s.ax || 0, y: s.ay || 0.4, z: s.az || 0, yaw: s.ayaw || 0 })) });
+        broadcastArena({ type: 'arena_players', players: players.map(s => ({ id: s.id, name: s.name, emoji: s.emoji, role: s.role || 'runner', stunned: isStunned(s), invincible: isInvincible(s), x: s.ax || 0, y: s.ay || 0.4, z: s.az || 0, yaw: s.ayaw || 0 })) });
     }
     // ⚽ 足球 tick：半場重置 + 時間到判勝 + 廣播所有足球玩家位置（隊色/前鋒分身用）
     if (SOCCER.status === 'running') {
@@ -451,6 +474,8 @@ wss.on('connection', (ws, req) => {
                     ws.send(JSON.stringify(soccerSnapshot()));
                 } else if (msg.type === 'soccer_set_striker') {
                     if (setStriker(msg.studentId)) broadcastSoccerState();
+                } else if (msg.type === 'soccer_set_team') {
+                    if (setTeam(msg.studentId, msg.team)) broadcastSoccerState();
                 } else if (msg.type === 'soccer_reset') {
                     soccerReset(!!msg.clearTeams);
                 }

@@ -256,7 +256,7 @@
                 <button class="btn" style="background:#ff6b6b;color:#fff;" onclick="arenaStart(420,'tag')">👻 7 分鐘</button>
                 <span id="arena-clock" style="align-self:center;font-family:Consolas,monospace;"></span>
             </div>
-            <p style="margin:6px 0;opacity:.75;font-size:12px;">鬼抓人：倒數後隨機變身成鬼（紅色、較大、較快），鬼撞到人就吃掉；時間到還有人活著＝人勝，全被吃光＝鬼勝。</p>
+            <p style="margin:6px 0;opacity:.75;font-size:12px;">鬼抓人：倒數後隨機變身成鬼（紅色、較大、較快），鬼撞到人＝暈眩幾秒＋傳送回出生點，復活後還有一小段無敵時間（閃爍）讓他跑走，不會出局，很快就能繼續玩；時間到看鬼隊總抓捕數有沒有達門檻（跑者人數×3）＝鬼隊勝，沒達到＝跑者隊勝。</p>
             <table style="width:100%;border-collapse:collapse;margin-top:8px;">
                 <thead><tr><th style="text-align:left;">排名</th><th style="text-align:left;">玩家</th><th style="text-align:right;">狀態</th></tr></thead>
                 <tbody id="arena-board"><tr><td colspan="3" class="empty">尚未開始</td></tr></tbody>
@@ -267,7 +267,7 @@
         <div class="tab-panel" id="panel-soccer">
         <div class="actions">
             <h2>⚽ 足球賽（3v3 多人對戰）</h2>
-            <p style="margin:4px 0 10px;opacity:.8;font-size:13px;">學生先點自己畫面的「⚽ 足球對戰（多人）」進場 → 老師點某學生「設為前鋒」（每隊 1 名）→ 按開始。得分後該隊前鋒須過中線才能再得分。</p>
+            <p style="margin:4px 0 10px;opacity:.8;font-size:13px;">學生先點自己畫面的「⚽ 足球對戰（多人）」進場（預設自動平均分隊）→ 老師可點「⇄ 換隊」把學生調到對面、點「設為前鋒」指定前鋒（每隊 1 名，換隊後系統會自動補位）→ 按開始。得分後該隊前鋒須過中線才能再得分。</p>
             <div class="soccer-teams">
                 <div class="team-col blue"><h3>🔵 藍隊</h3><div id="soccer-blue"><div class="empty" style="padding:14px;">尚無人加入</div></div></div>
                 <div class="team-col red"><h3>🔴 紅隊</h3><div id="soccer-red"><div class="empty" style="padding:14px;">尚無人加入</div></div></div>
@@ -374,7 +374,7 @@
             tb.innerHTML = (scores && scores.length)
                 ? scores.map((s, i) => {
                     const st = tag
-                        ? (s.role === 'ghost' ? `👻 鬼（抓 ${s.score || 0}）` : (s.eaten ? '💀 出局' : '🏃 存活'))
+                        ? (s.role === 'ghost' ? `👻 鬼（抓 ${s.score || 0}）` : (s.stunned ? '😵 暈眩中' : `🏃 被抓 ${s.caughtCount || 0} 次`))
                         : `<b>${s.score || 0}</b>`;
                     return `<tr><td>${tag ? '' : (i + 1)}</td><td>${s.emoji || ''}${s.name || '?'}</td><td style="text-align:right;">${st}</td></tr>`;
                 }).join('')
@@ -479,14 +479,20 @@
             if (!wsState.connected) return;
             wsState.ws.send(JSON.stringify({ type: 'soccer_set_striker', studentId: id }));
         }
+        function soccerSetTeam(id, team) {
+            if (!wsState.connected) return;
+            wsState.ws.send(JSON.stringify({ type: 'soccer_set_team', studentId: id, team }));
+        }
         function renderSoccerRoster(players) {
             ['blue', 'red'].forEach(team => {
+                const other = team === 'blue' ? 'red' : 'blue';
                 const el = document.getElementById('soccer-' + team);
                 const list = (players || []).filter(p => p.team === team);
                 el.innerHTML = list.length ? list.map(p =>
-                    `<div class="soccer-player ${p.striker ? 'striker' : ''}" onclick="soccerSetStriker('${p.id}')">
-                        <span>${p.emoji || ''}${p.name || '?'} ${p.striker ? '🎀前鋒' : ''}</span>
-                        <span class="pick">${p.striker ? '前鋒' : '設為前鋒'}</span>
+                    `<div class="soccer-player ${p.striker ? 'striker' : ''}">
+                        <span onclick="soccerSetStriker('${p.id}')" style="cursor:pointer;">${p.emoji || ''}${p.name || '?'} ${p.striker ? '🎀前鋒' : ''}</span>
+                        <span class="pick" onclick="soccerSetStriker('${p.id}')" style="cursor:pointer;">${p.striker ? '前鋒' : '設為前鋒'}</span>
+                        <span class="pick" onclick="soccerSetTeam('${p.id}','${other}')" style="cursor:pointer;margin-left:6px;">⇄ 換到${other === 'blue' ? '🔵' : '🔴'}</span>
                     </div>`).join('') : '<div class="empty" style="padding:14px;">尚無人加入</div>';
             });
         }
