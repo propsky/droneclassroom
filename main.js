@@ -2173,6 +2173,14 @@ async function cf_wait(seconds = 1) {
     return cf_hover(seconds);
 }
 
+// 隨機整數 A~B（含頭尾），A > B 時自動對調
+function cf_random(a, b) {
+    a = Math.round(Number(a));
+    b = Math.round(Number(b));
+    if (a > b) { const t = a; a = b; b = t; }
+    return Math.floor(Math.random() * (b - a + 1)) + a;
+}
+
 function ensureRunning() {
     if (!programState.running) throw new Error('程式未執行');
     if (programState.abort) throw new Error('使用者中斷');
@@ -2200,6 +2208,7 @@ window.CREAFLY = {
     penRandom: cf_penRandom,
     elapsed: cf_elapsed,
     timerReset: cf_timerReset,
+    random: cf_random,
     log: cf_log,
 };
 
@@ -2475,6 +2484,23 @@ function defineCreaFlyBlocks() {
         return 'CREAFLY.timerReset();\n';
     };
 
+    // ===== 數字（隨機數） =====
+    Blockly.Blocks['cf_random'] = {
+        init: function() {
+            this.appendValueInput('A').setCheck('Number').appendField('🎲 隨機整數');
+            this.appendValueInput('B').setCheck('Number').appendField('到');
+            this.setInputsInline(true);
+            this.setOutput(true, 'Number');
+            this.setColour(230);
+            this.setTooltip('在 A 到 B 之間隨機取一個整數（含 A、B 本身），例如 1 到 6 模擬骰子');
+        }
+    };
+    Blockly.JavaScript['cf_random'] = function(block) {
+        const a = num(block, 'A', 1);
+        const b = num(block, 'B', 10);
+        return [`CREAFLY.random(${a}, ${b})`, Blockly.JavaScript.ORDER_FUNCTION_CALL];
+    };
+
     function num(block, name, fallback) {
         return Blockly.JavaScript.valueToCode(block, name,
             Blockly.JavaScript.ORDER_ATOMIC) || String(fallback);
@@ -2589,6 +2615,14 @@ function injectBlockly() {
   <category name="🔢 數字" colour="230">
     <block type="math_number"><field name="NUM">0</field></block>
     <block type="math_arithmetic"></block>
+    <block type="cf_random">
+      <value name="A">
+        <block type="math_number"><field name="NUM">1</field></block>
+      </value>
+      <value name="B">
+        <block type="math_number"><field name="NUM">10</field></block>
+      </value>
+    </block>
   </category>
 </xml>`;
 
