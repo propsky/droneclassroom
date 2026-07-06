@@ -1,0 +1,76 @@
+{
+  "chapter": 3,
+  "name": "立體繪圖教室",
+  "description": "程式模式：水平海龜(前進/轉) + 垂直(上升/下降) = 一層層的 3D。用迴圈畫出螺旋、塔、金字塔",
+  "levels": [
+    {
+      "id": "3-1",
+      "name": "螺旋上升",
+      "draw": true,
+      "drawHeight": 1,
+      "view": "orbit3d",
+      "orbit": { "center": [2.3, 6, -0.8], "radius": 13, "height": 9 },
+      "intro": "🌀 螺旋上升\n\n把「前進 + 轉彎 + 上升」放進同一個迴圈，就會邊轉邊爬 = 螺旋！\n\n先 🛫 起飛到 1m、🖊️ 下筆，再用「🔁 重複 20 次」包住：\n  ⬆️ 前進 1.5m\n  ↻ 順時針轉 36°\n  🔼 上升 0.5m\n\n鏡頭會自動繞著你的作品轉 — 從側面看就是一座旋轉塔！",
+      "hud": "重複 20 次〔前進 1.5、右轉 36°、上升 0.5〕",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": 0, "label": "起飛離地", "type": "altitude", "minY": 1.0},
+        {"x": 4.6, "z": 0, "label": "螺旋半途（半圈）", "type": "position", "minX": 3.1, "maxX": 6.1, "minZ": -1.5, "maxZ": 1.5, "minY": 3.5, "maxY": 5.5},
+        {"x": 4.6, "z": 0, "label": "螺旋再爬一圈", "type": "position", "minX": 3.1, "maxX": 6.1, "minZ": -1.5, "maxZ": 1.5, "minY": 8.5, "maxY": 10.5},
+        {"x": 0, "z": 0, "label": "螺旋到頂", "type": "position", "minX": -1.5, "maxX": 1.5, "minZ": -1.5, "maxZ": 1.5, "minY": 10.5}
+      ]
+    },
+    {
+      "id": "3-2",
+      "name": "方形螺旋塔",
+      "draw": true,
+      "drawHeight": 1,
+      "view": "orbit3d",
+      "orbit": { "center": [1.5, 6, -1.5], "radius": 13, "height": 9 },
+      "intro": "🏢 方形螺旋塔\n\n跟螺旋一樣，但轉 90° → 變成方形的旋轉塔！\n\n🛫 起飛到 1m、🖊️ 下筆，再「🔁 重複 16 次」：\n  ⬆️ 前進 3m\n  ↻ 順時針轉 90°\n  🔼 上升 0.6m\n\n四步一圈、一圈一圈往上疊 → 一座方塔。",
+      "hud": "重複 16 次〔前進 3、右轉 90°、上升 0.6〕",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": 0, "label": "起飛離地", "type": "altitude", "minY": 1.0},
+        {"x": 3, "z": -3, "label": "塔角（第一圈）", "type": "position", "minX": 1.6, "maxX": 4.4, "minZ": -4.4, "maxZ": -1.6, "minY": 4.1, "maxY": 6.1},
+        {"x": 3, "z": -3, "label": "塔角（更高一圈）", "type": "position", "minX": 1.6, "maxX": 4.4, "minZ": -4.4, "maxZ": -1.6, "minY": 8.9, "maxY": 10.9},
+        {"x": 0, "z": 0, "label": "蓋到塔頂", "type": "position", "minX": -1.5, "maxX": 1.5, "minZ": -1.5, "maxZ": 1.5, "minY": 10.5}
+      ]
+    },
+    {
+      "id": "3-3",
+      "name": "螺旋金字塔",
+      "draw": true,
+      "drawHeight": 1,
+      "view": "orbit3d",
+      "orbit": { "center": [2.5, 4, -1.5], "radius": 14, "height": 8 },
+      "intro": "🔺 螺旋金字塔（迴圈 + 變數）\n\n金字塔要愈往上愈小 → 讓「前進的距離」每一圈變短一點！\n\n用一個變數『邊』：\n  設 邊 = 2.2\n  🛫 起飛到 1m、🖊️ 下筆\n  🔁 重複 20 次：\n    ⬆️ 前進『邊』\n    ↻ 順時針轉 36°\n    🔼 上升 0.3m\n    把『邊』減 0.1   （← 關鍵！每圈變小）\n\n邊長愈來愈短 → 螺旋愈縮愈小 → 一座尖尖的塔！",
+      "hud": "迴圈裡讓『邊』每次 -0.1 → 螺旋金字塔",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": 0, "label": "起飛離地", "type": "altitude", "minY": 1.0},
+        {"x": 6, "z": -0.8, "label": "寬寬的塔基（繞外圈）", "type": "position", "minX": 4.6, "maxX": 7.2, "minZ": -2.2, "maxZ": 0.8, "minY": 2.3, "maxY": 4.5},
+        {"x": 4, "z": -2.6, "label": "往上收窄", "type": "position", "minX": 2.5, "maxX": 5.5, "minZ": -4.1, "maxZ": -1.1, "minY": 4.7, "maxY": 6.7},
+        {"x": 3, "z": -1, "label": "塔尖", "type": "position", "minX": 1.6, "maxX": 4.6, "minZ": -2.5, "maxZ": 0.5, "minY": 7.0}
+      ]
+    },
+    {
+      "id": "3-4",
+      "name": "立體自由創作",
+      "draw": true,
+      "drawHeight": 1,
+      "view": "orbit3d",
+      "orbit": { "center": [0, 4, 0], "radius": 14, "height": 9 },
+      "freeplay": true,
+      "penColors": ["#ff5252", "#42a5f5", "#66bb6a", "#ffd54f", "#ab47bc"],
+      "intro": "🎨 立體自由創作\n\n沒有題目！用 前進/轉彎/🔼上升/🔽下降 + 🖊️畫筆 + 🎲隨機換色，蓋出你自己的立體作品。\n\n試試看：螺旋、金字塔、彈簧、3D 星星塔…什麼都行！\n鏡頭會自動繞著轉，畫好截圖給老師看 📸",
+      "hud": "🎨 立體自由創作",
+      "rings": [],
+      "obstacles": [],
+      "passZones": []
+    }
+  ]
+}
