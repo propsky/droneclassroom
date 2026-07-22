@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CREAFLY 無人機模擬器</title>
+</head>
+<body class="mode-manual">
+<div id="app">
+    <!-- ===== Header：左（logo + 模式切換 segmented）／中空／右（工具按鈕群組） ===== -->
+    <header id="header">
+        <div class="header-left">
+            <div class="logo">CREAFLY<span class="accent">.</span></div>
+            <button id="mode-mp-toggle" class="mode-toggle" title="切換 手動 ↔ 程式 模式">
+                <span class="mode-seg mode-seg-manual">手動</span>
+                <span class="mode-seg mode-seg-program">程式</span>
+            </button>
+            <div class="subtitle">無人機教育模擬器 · Blockly 程式化飛行</div>
+        </div>
+        <div class="header-right">
+            <!-- 群組 1：關卡 / 回家 -->
+            <div class="header-group">
+                <div id="level-selector" class="level-selector">
+                    <button id="level-menu-toggle" class="header-btn" title="選擇關卡">
+                        <span class="btn-ic" data-icon="map"></span><span>關卡</span><span class="btn-ic chev" data-icon="chevron-down"></span>
+                    </button>
+                    <span class="header-timer"><span class="btn-ic" data-icon="timer"></span><span class="level-selector-timer" id="level-timer">0.0s</span></span>
+                    <div class="level-menu-panel">
+                        <div class="level-selector-title">選擇關卡</div>
+                        <div class="level-selector-btns" id="level-selector-btns"></div>
+                    </div>
+                </div>
+                <button id="home-btn" class="header-btn" title="一鍵飛回起飛墊"><span class="btn-ic" data-icon="home"></span><span>回家</span></button>
+            </div>
+            <span class="header-sep" aria-hidden="true"></span>
+            <!-- 群組 2：音效 / 音樂 / 視角 -->
+            <div class="header-group">
+                <button id="mute-btn" class="header-btn" title="開關音效"><span class="btn-ic" data-icon="volume"></span><span>音效</span></button>
+                <button id="music-btn" class="header-btn" title="開關背景音樂"><span class="btn-ic" data-icon="music"></span><span>音樂：關</span></button>
+                <button id="view-btn" class="header-btn" title="切換 第一視角 / 第三人稱（鍵盤 C）"><span class="btn-ic" data-icon="eye"></span><span>視角：第三人稱</span></button>
+            </div>
+            <span class="header-sep" aria-hidden="true"></span>
+            <!-- 群組 3：搖桿 / 校正 / 全螢幕 -->
+            <div class="header-group">
+                <button id="connect-gamepad-btn" class="header-btn" title="用藍牙連線 pyController 實體搖桿（需 HTTPS；iPad 請用 Bluefy）"><span class="btn-ic" data-icon="bluetooth"></span><span>連線搖桿</span></button>
+                <button id="calib-fab" class="header-btn header-btn-calib" title="搖桿校正精靈（偵測到搖桿才會亮起）"><span class="btn-ic" data-icon="settings"></span><span>校正</span></button>
+                <button id="fullscreen-btn" class="header-btn" title="全螢幕（iPad / 桌機）"><span class="btn-ic" data-icon="expand"></span><span>全螢幕</span></button>
+            </div>
+            <span class="header-sep" aria-hidden="true"></span>
+            <!-- 群組 4：帳號頭像（emoji 頭像屬內容層，保留） -->
+            <div id="player-hud" style="display:none;">
+                <button id="player-avatar" title="帳號"><span id="player-avatar-emoji">🙂</span></button>
+                <div id="player-dropdown">
+                    <span id="player-name-display"></span>
+                    <button id="player-rename" title="改名"><span class="btn-ic" data-icon="pencil"></span><span>改名</span></button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ===== Blockly 面板 ===== -->
+    <div id="blockly-panel">
+        <div id="blockly-div">
+            <div id="blockly-placeholder">積木編輯器建置中…<br>（cf_* 飛行 API 已就緒）</div>
+        </div>
+        <div id="blockly-toolbar">
+            <button class="btn-run" id="btn-run"><span class="btn-ic" data-icon="play"></span><span>執行程式</span></button>
+            <button class="btn-stop" id="btn-stop" disabled><span class="btn-ic" data-icon="square"></span><span>停止</span></button>
+            <button class="btn-reset" id="btn-reset" title="重置無人機位置"><span class="btn-ic" data-icon="rotate-ccw"></span></button>
+        </div>
+    </div>
+
+    <!-- ===== 3D 場景 ===== -->
+    <div id="scene-panel">
+        <canvas id="scene-canvas"></canvas>
+        <div id="joystick-layer">
+            <div id="joystick-left" class="joystick-zone">
+                <div class="joystick-label">⬆ 升降 / ↔ 旋轉</div>
+            </div>
+            <div id="joystick-right" class="joystick-zone">
+                <div class="joystick-label">⬆ 前後 / ↔ 左右</div>
+            </div>
+        </div>
+        <div id="scene-overlay">
+            <!-- 左上：飛行狀態卡 -->
+            <div id="status-hud" class="hud">
+                <div class="hud-title">飛行狀態</div>
+                <div class="stat-rows">
+                    <div class="row"><span class="label">高度</span><span class="value mono"><span id="hud-alt">0.0</span><span class="unit">m</span></span></div>
+                    <div class="row"><span class="label">速度</span><span class="value mono"><span id="hud-spd">0.0</span><span class="unit">m/s</span></span></div>
+                    <div class="row"><span class="label">機頭</span><span class="value mono" id="hud-heading">前 ↑</span></div>
+                    <div class="row"><span class="label">狀態</span><span class="value" id="hud-state">待命</span></div>
+                    <div class="row"><span class="label">模式</span><span class="value" id="hud-mode">手動</span></div>
+                </div>
+            </div>
+            <!-- 右上：任務卡堆疊（同角多卡 --sp-3 垂直堆疊，禁止重疊） -->
+            <div class="hud-stack hud-stack-tr">
+                <div id="mission-hud" class="hud" style="display:none;">
+                    <div class="hud-title">關卡進度</div>
+                    <div class="hud-line">已穿過 <span class="mono" id="rings-passed">0</span> / <span class="mono" id="rings-total">3</span> 個圈</div>
+                    <div class="ring-status" id="ring-dots"></div>
+                    <div id="returnhome-step" class="rh-step" style="display:none;"></div>
+                </div>
+                <div id="progress-bar" class="hud" style="display:none;">
+                    <div class="hud-title">過關步驟 <span class="progress-text mono" id="progress-text">0/0</span></div>
+                    <div class="steps" id="progress-steps"></div>
+                </div>
+                <div id="balloon-hud" class="hud" style="display:none;">
+                    <div class="hud-title">氣球 <span class="mono" id="balloon-count">0/0</span></div>
+                    <div class="hud-note">任意順序 · 不計時 · 全戳破就完成</div>
+                </div>
+            </div>
+            <!-- 左下：控制說明 / 筆色（與右下遊戲入口分欄，不重疊） -->
+            <div class="hud-stack hud-stack-bl">
+                <!-- 操作說明卡（§5.2）：kbd 鍵帽 + 兩欄格線 + 分組小標；卡頭可收合（localStorage 記憶）。
+                     三套說明變體以 body class 切換（純 CSS，見 style.css）：
+                     gamepad-connected > touch-device / joystick-forced > 鍵盤（預設） -->
+                <div id="help-hud" class="hud">
+                    <button id="help-hud-toggle" class="hud-title help-toggle" type="button" aria-expanded="true" aria-controls="help-body">
+                        <span>操作說明</span><span class="btn-ic chev" data-icon="chevron-down"></span>
+                    </button>
+                    <div id="help-body" class="help-body">
+                        <!-- 鍵盤（預設） -->
+                        <div id="help-keyboard" class="help-variant">
+                            <div class="help-group-title">移動</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>W</kbd><kbd>S</kbd></span><span class="help-desc">前進 / 後退</span>
+                                <span class="help-keys"><kbd>A</kbd><kbd>D</kbd></span><span class="help-desc">左飛 / 右飛</span>
+                            </div>
+                            <div class="help-group-title">升降・旋轉</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="help-desc">上升 / 下降（地面 ↑ 起飛）</span>
+                                <span class="help-keys"><kbd>←</kbd><kbd>→</kbd></span><span class="help-desc">旋轉機頭</span>
+                            </div>
+                            <div class="help-group-title">其他</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>Space</kbd></span><span class="help-desc">緊急停止</span>
+                                <span class="help-keys"><kbd>C</kbd></span><span class="help-desc">切換視角</span>
+                            </div>
+                        </div>
+                        <!-- 觸控虛擬搖桿（body.touch-device / body.joystick-forced） -->
+                        <div id="help-joystick" class="help-variant">
+                            <div class="help-group-title">移動</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>右桿 ↕</kbd></span><span class="help-desc">前進 / 後退</span>
+                                <span class="help-keys"><kbd>右桿 ↔</kbd></span><span class="help-desc">左飛 / 右飛</span>
+                            </div>
+                            <div class="help-group-title">升降・旋轉</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>左桿 ↕</kbd></span><span class="help-desc">上升 / 下降（推上起飛）</span>
+                                <span class="help-keys"><kbd>左桿 ↔</kbd></span><span class="help-desc">旋轉機頭</span>
+                            </div>
+                        </div>
+                        <!-- 實體搖桿（body.gamepad-connected 優先） -->
+                        <div id="help-gamepad" class="help-variant">
+                            <div class="help-group-title">移動</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>右桿 ↕</kbd></span><span class="help-desc">前進 / 後退</span>
+                                <span class="help-keys"><kbd>右桿 ↔</kbd></span><span class="help-desc">左飛 / 右飛</span>
+                            </div>
+                            <div class="help-group-title">升降・旋轉</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>左桿 ↕</kbd></span><span class="help-desc">上升 / 下降</span>
+                                <span class="help-keys"><kbd>左桿 ↔</kbd></span><span class="help-desc">旋轉機頭</span>
+                            </div>
+                            <div class="help-group-title">其他</div>
+                            <div class="help-grid">
+                                <span class="help-keys"><kbd>A</kbd></span><span class="help-desc">起飛</span>
+                                <span class="help-keys"><kbd>B</kbd></span><span class="help-desc">降落</span>
+                                <span class="help-keys"><kbd>X</kbd></span><span class="help-desc">重置</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- 畫畫教室：筆色選擇列（關卡 JSON 有 penColors 才顯示；手動飛行也能換色畫） -->
+                <div id="pen-bar" class="hud" style="display:none;">
+                    <div class="hud-title">筆色</div>
+                    <div id="pen-swatches"></div>
+                </div>
+            </div>
+            <div id="heading-hud" style="display:none;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== 全域 overlay ===== -->
+<div id="toast"></div>
+<div id="countdown-overlay"></div>
+
+<!-- 關卡教學提示 -->
+<div id="level-intro" class="modal-overlay">
+    <div class="modal-card">
+        <div class="level-intro-title">關卡載入中…</div>
+        <div class="level-intro-body"></div>
+        <button id="level-intro-start" class="modal-btn">開始</button>
+    </div>
+</div>
+
+<!-- 學生登入 -->
+<div id="login-modal" class="modal-overlay">
+    <div class="modal-card">
+        <div class="level-intro-title">歡迎來到 CREAFLY</div>
+        <div class="level-intro-body">
+            你的名字（給老師跟同學看）：<br>
+            <input id="login-name" type="text" maxlength="10" placeholder="例：小翔">
+            <br>選一個代表你的動物：<br>
+            <div id="emoji-picker">
+                <button class="emoji-btn" data-emoji="🐯">🐯</button>
+                <button class="emoji-btn" data-emoji="🦁">🦁</button>
+                <button class="emoji-btn" data-emoji="🐰">🐰</button>
+                <button class="emoji-btn" data-emoji="🐻">🐻</button>
+                <button class="emoji-btn" data-emoji="🐼">🐼</button>
+                <button class="emoji-btn" data-emoji="🐨">🐨</button>
+                <button class="emoji-btn" data-emoji="🐸">🐸</button>
+                <button class="emoji-btn" data-emoji="🐵">🐵</button>
+                <button class="emoji-btn" data-emoji="🦊">🦊</button>
+                <button class="emoji-btn" data-emoji="🐺">🐺</button>
+                <button class="emoji-btn" data-emoji="🦄">🦄</button>
+                <button class="emoji-btn" data-emoji="🐢">🐢</button>
+            </div>
+        </div>
+        <button id="login-start" class="modal-btn">開始飛行</button>
+    </div>
+</div>
+
+<!-- 遊戲入口按鈕群（右下直排；與左下控制說明分欄） -->
+<div id="entry-group">
+    <button id="soccer-mp-btn" class="entry-btn entry-soccer-mp" title="多人足球對戰：3v3 前鋒穿門得分"><span class="btn-ic" data-icon="flag"></span><span>足球對戰</span></button>
+    <button id="soccer-btn" class="entry-btn entry-soccer" title="足球單人練習：7 個穿門練習關"><span class="btn-ic" data-icon="target"></span><span>足球練習</span></button>
+    <button id="arena-btn" class="entry-btn entry-arena" title="多人大亂鬥：全班一起搶氣球 / 鬼抓人"><span class="btn-ic" data-icon="users"></span><span>大亂鬥</span></button>
+</div>
+
+<!-- 足球單人練習 HUD（右上：drill 清單 + 狀態） -->
+<div id="soccer-hud" class="hud hud-fixed">
+    <div class="hud-title soccer-title"><span class="btn-ic" data-icon="target"></span>足球單人練習</div>
+    <div id="soccer-status" class="hud-note">選一個練習開始</div>
+    <div id="soccer-drills"></div>
+</div>
+
+<!-- 大亂鬥 HUD（右上：倒數計時 + 場地 + 即時排行） -->
+<div id="arena-hud" class="hud hud-fixed">
+    <div class="hud-title arena-title"><span class="btn-ic" data-icon="users"></span>大亂鬥 <span id="arena-timer" class="mono">等待老師開始</span></div>
+    <div id="arena-field-label" class="hud-note"></div>
+    <div id="arena-scoreboard"><div class="arena-row">等待玩家加入…</div></div>
+</div>
+
+<!-- 搖桿校正精靈（8 步驟；狀態機在 src/input/calibration.ts、渲染在 src/ui/calibrationOverlay.ts） -->
+<div id="calib-overlay">
+    <div class="calib-card">
+        <h2><span class="btn-ic" data-icon="gamepad" data-icon-size="20"></span>搖桿校正精靈</h2>
+        <div class="calib-subtitle">花 30 秒告訴程式你的搖桿怎麼對應，之後永遠不用再調</div>
+        <div class="calib-step" id="calib-step-label">準備中…</div>
+        <div class="calib-hint" id="calib-hint">請插上搖桿後開始</div>
+        <div class="calib-progress" id="calib-progress"></div>
+        <div class="calib-timer-wrap" id="calib-timer-wrap" style="display:none;">
+            <div class="calib-timer-text" id="calib-timer-text">5s</div>
+            <div class="calib-timer-bar"><div class="calib-timer-fill" id="calib-timer-fill"></div></div>
+        </div>
+        <div class="calib-live">
+            <div class="calib-axes" id="calib-axes">axes: 0.00 | 0.00 | 0.00 | 0.00</div>
+            <div class="calib-btns" id="calib-btns"></div>
+        </div>
+        <div class="calib-result" id="calib-result" style="display:none;"></div>
+        <div class="calib-actions">
+            <button class="btn-skip" id="calib-skip">跳過此步</button>
+            <button class="btn-cancel" id="calib-cancel">取消</button>
+            <button class="btn-save" id="calib-save" style="display:none;">儲存並套用</button>
+        </div>
+    </div>
+</div>
+
+<!-- 背景音樂（Magenta Metropolis by |e s c p|, CC BY 4.0） -->
+<audio id="bg-music" loop preload="none" src="/assets/music/magenta-metropolis.mp3"></audio>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

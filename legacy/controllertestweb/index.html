@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pyController 連線測試</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; }
+  button { font-size: 16px; padding: 10px 18px; margin-right: 8px; }
+  #status { margin: 12px 0; color: #555; min-height: 1.4em; }
+  .axis { margin: 10px 0; }
+  .axis label { display: inline-block; width: 80px; font-weight: 600; }
+  .bar { display: inline-block; width: 200px; height: 14px; background: #eee; vertical-align: middle; position: relative; border-radius: 7px; }
+  .bar > i { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; background: #06c; transform: translateX(-50%); }
+  .val { display: inline-block; width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  #buttons span, #dpad span { display: inline-block; padding: 4px 8px; margin: 2px; border-radius: 6px; background: #eee; font-size: 13px; }
+  #buttons span.on, #dpad span.on { background: #06c; color: #fff; }
+  #dpad { margin-top: 8px; }
+  .note { font-size: 13px; color: #888; margin-top: 24px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <h1>pyController 連線測試</h1>
+  <button id="connect">連線手把</button>
+  <button id="disconnect">斷線</button>
+  <div id="status">尚未連線</div>
+
+  <div class="axis"><label>油門</label><span class="bar"><i id="bar-throttle"></i></span><span class="val" id="val-throttle">0.00</span></div>
+  <div class="axis"><label>偏航</label><span class="bar"><i id="bar-yaw"></i></span><span class="val" id="val-yaw">0.00</span></div>
+  <div class="axis"><label>俯仰</label><span class="bar"><i id="bar-pitch"></i></span><span class="val" id="val-pitch">0.00</span></div>
+  <div class="axis"><label>翻滾</label><span class="bar"><i id="bar-roll"></i></span><span class="val" id="val-roll">0.00</span></div>
+
+  <div id="dpad"></div>
+  <div id="buttons"></div>
+
+  <p class="note">
+    說明：點「連線手把」後，在跳出的視窗中選擇<strong>與手把螢幕相同名稱的那台</strong>
+    (例如 <code>pyCtrl-05</code>，編號由各手把上的 <code>id.txt</code> 決定)。<br>
+    僅支援 Chrome / Edge (Windows、Android)。iPad / iPhone 請改用免費的
+    <strong>Bluefy</strong> 瀏覽器 App。
+  </p>
+
+  <script src="drone-controller.js"></script>
+  <script>
+    const ctrl = new DroneController();
+    const statusEl = document.getElementById('status');
+    const btnNames = ['Y','B','A','X','Back','Start','RStick','LStick'];
+
+    ctrl.onStatus = (t) => { statusEl.textContent = t; };
+
+    function setAxis(name, v) {
+      document.getElementById('val-' + name).textContent = v.toFixed(2);
+      // 把 -1..1 對到條的 0..100%，中點 50%
+      document.getElementById('bar-' + name).style.left = (50 + v * 50) + '%';
+    }
+
+    const dpadDirs = [['up','上'],['down','下'],['left','左'],['right','右']];
+
+    ctrl.onData = (s) => {
+      setAxis('throttle', s.throttle);
+      setAxis('yaw', s.yaw);
+      setAxis('pitch', s.pitch);
+      setAxis('roll', s.roll);
+      document.getElementById('dpad').innerHTML = dpadDirs
+        .map(([k, label]) => `<span class="${s.dpad[k] ? 'on' : ''}">十字${label}</span>`)
+        .join('');
+      const box = document.getElementById('buttons');
+      box.innerHTML = btnNames
+        .map(n => `<span class="${s.buttons[n] ? 'on' : ''}">${n}</span>`)
+        .join('');
+    };
+
+    document.getElementById('connect').onclick = () => ctrl.connect();
+    document.getElementById('disconnect').onclick = () => ctrl.disconnect();
+  </script>
+</body>
+</html>

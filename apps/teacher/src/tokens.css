@@ -1,0 +1,59 @@
+/* Design Tokens — 依 docs/design-system.md §2（simulator / teacher 共用定義）。
+   鐵律：介面一律引用這裡的變數，不准在規則裡隨手寫色碼 / 字級 / 間距 / 圓角。 */
+:root {
+  /* 色彩 — 品牌 */
+  --brand:        #00A3E0;  /* CREAFLY 青（不變） */
+  --brand-strong: #0284C7;
+  --accent:       #1B998B;  /* 綠（成功/過關） */
+  --warn:         #FFCE00;  /* 黃（提示/計時） */
+  --danger:       #F43F5E;  /* 紅（停止/錯誤/鬼） */
+
+  /* 色彩 — 深色介面階梯（背景到前景，一律用階梯） */
+  --bg-0: #0B1220;   /* 頁面底 */
+  --bg-1: #101A2C;   /* 面板 */
+  --bg-2: #16233A;   /* 卡片 */
+  --bg-3: #1E2F4D;   /* 懸浮/hover */
+  --line:   rgba(148, 163, 184, 0.16);  /* 邊線（可見但不搶） */
+  --text-1: #F1F5F9;  /* 主文字 */
+  --text-2: #94A3B8;  /* 次要文字 */
+  --text-3: #64748B;  /* 弱化/標籤 */
+
+  /* 字體 — 系統 CJK 堆疊（零 CDN；教室斷網也一致） */
+  --font: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei",
+          -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, monospace; /* 數字/座標/計時 */
+
+  /* 字級（五級制，不准出現制度外字級） */
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 15px; --fs-lg: 18px; --fs-xl: 24px;
+
+  /* 間距（4px 基準制：4/8/12/16/24/32） */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+
+  /* 圓角（兩級制 + 圓） */
+  --r-sm: 8px;   /* 控件：按鈕/輸入框/tag */
+  --r-md: 12px;  /* 容器：卡片/modal/HUD */
+  --r-full: 999px;
+
+  /* 陰影（兩級制） */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+
+  /* z-index 制度 */
+  --z-hud: 10; --z-overlay-btn: 20; --z-modal: 100; --z-toast: 200;
+
+  /* ── 元件層 tokens（教師後台，引用上方階梯；不另造散值） ── */
+  --ctl-h: 40px;      /* 控件高度（§5.1：控件同列同高 40） */
+  --ctl-h-sm: 32px;   /* 小號控件（卡頭停止鈕 / topbar 元件；§1 控件高度制度 32/40/48） */
+  --ctl-h-lg: 48px;   /* 大號控件（登入 PIN 輸入） */
+  --row-h: 44px;      /* 表格列高 44（右欄排行榜） */
+  --row-h-sm: 40px;   /* 名冊緊湊表格列高（§5.1 左欄緊湊表格） */
+
+  /* 名次色條（金/銀/銅 — 只做左側 3px 色條，不整列上色） */
+  --rank-gold:   #FFD700;
+  --rank-silver: #C0C0C0;
+  --rank-bronze: #CD7F32;
+
+  /* 隊伍色（足球藍/紅隊） */
+  --team-blue: #3B82F6;
+  --team-red:  #EF4444;
+}

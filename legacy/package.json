@@ -1,0 +1,17 @@
+{
+  "name": "creafly-drone-simulator",
+  "version": "0.1.0",
+  "description": "CREAFLY 教育用無人機程式化飛行模擬器 — 整合 Three.js 場景 + Google Blockly 視覺化程式編輯",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "CREAFLY (forked from eccc20984/drone-simulator, MIT)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  }
+}

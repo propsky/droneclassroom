@@ -1,17 +1,18 @@
 {
-  "name": "creafly-drone-simulator",
-  "version": "0.1.0",
-  "description": "CREAFLY 教育用無人機程式化飛行模擬器 — 整合 Three.js 場景 + Google Blockly 視覺化程式編輯",
-  "main": "server.js",
+  "name": "creafly-droneclassroom",
+  "private": true,
+  "version": "2.0.0",
+  "description": "CREAFLY 教室版無人機模擬器（Babylon.js + TypeScript monorepo）",
   "scripts": {
-    "start": "node server.js"
+    "dev": "pnpm --parallel --filter @creafly/simulator --filter @creafly/teacher --filter @creafly/api dev",
+    "dev:sim": "pnpm --filter @creafly/simulator dev",
+    "dev:api": "pnpm --filter @creafly/api dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "legacy": "node legacy/server.js"
   },
-  "author": "CREAFLY (forked from eccc20984/drone-simulator, MIT)",
-  "license": "MIT",
-  "engines": {
-    "node": ">=18"
+  "devDependencies": {
+    "typescript": "^5.5.0"
   },
-  "dependencies": {
-    "ws": "^8.21.0"
-  }
+  "packageManager": "pnpm@10.32.0"
 }

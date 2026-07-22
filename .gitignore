@@ -4,7 +4,9 @@ node_modules/
 shot-*.png
 screenshot-*.png
 .DS_Store
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 *.swp
 *~
@@ -31,3 +33,14 @@ extract-balloons.js
 screenshot-*.js
 pack-zip.*
 .chrome-*
+
+# v2 monorepo
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python (apps/api)
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

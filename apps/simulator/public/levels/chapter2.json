@@ -1,0 +1,91 @@
+{
+  "chapter": 2,
+  "name": "畫畫教室",
+  "description": "程式模式：用無人機當畫筆，靠迴圈畫出圖形（像 Python 海龜繪圖）",
+  "levels": [
+    {
+      "id": "2-1",
+      "name": "畫一條直線",
+      "draw": true,
+      "drawHeight": 3,
+      "view": "topdown",
+      "guide": [[0, 0], [0, -6]],
+      "intro": "✏️ 畫一條直線\n\n認識畫筆！把積木拼成：\n1. 🛫 起飛到 3m\n2. 🖊️ 下筆\n3. ⬆️ 前進 6m\n\n按執行，看看無人機在地上留下的藍色墨水線 🖌️",
+      "hud": "下筆 → 前進，畫出第一條線",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": 0, "label": "起飛離地", "type": "altitude", "minY": 1.5},
+        {"x": 0, "z": -6, "label": "畫到線的另一端", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -7.4, "maxZ": -4.6, "minY": 2}
+      ]
+    },
+    {
+      "id": "2-2",
+      "name": "畫正方形",
+      "draw": true,
+      "drawHeight": 3,
+      "view": "topdown",
+      "guide": [[0, 0], [0, -5], [5, -5], [5, 0], [0, 0]],
+      "intro": "⬛ 畫正方形\n\n正方形 = 同一組動作重複 4 次！用「🔁 重複 4 次」包住：\n  ⬆️ 前進 5m\n  ↻ 順時針轉 90°\n\n別忘了先 🛫 起飛 + 🖊️ 下筆。這就是迴圈的威力 💪",
+      "hud": "重複 4 次〔前進 5m，右轉 90°〕",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": -5, "label": "第 1 個角", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -6.4, "maxZ": -3.6, "minY": 2},
+        {"x": 5, "z": -5, "label": "第 2 個角", "type": "position", "minX": 3.6, "maxX": 6.4, "minZ": -6.4, "maxZ": -3.6, "minY": 2},
+        {"x": 5, "z": 0, "label": "第 3 個角", "type": "position", "minX": 3.6, "maxX": 6.4, "minZ": -1.4, "maxZ": 1.4, "minY": 2},
+        {"x": 0, "z": 0, "label": "收尾回原點", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -1.4, "maxZ": 1.4, "minY": 2}
+      ]
+    },
+    {
+      "id": "2-3",
+      "name": "畫三角形",
+      "draw": true,
+      "drawHeight": 3,
+      "view": "topdown",
+      "guide": [[0, 0], [0, -6], [5.2, -3], [0, 0]],
+      "intro": "🔺 畫正三角形\n\n三角形要轉幾度？外角 = 120°！\n用「🔁 重複 3 次」包住：\n  ⬆️ 前進 6m\n  ↻ 順時針轉 120°\n\n想想看：為什麼是 120 而不是 60？",
+      "hud": "重複 3 次〔前進 6m，右轉 120°〕",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": -6, "label": "第 1 個角", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -7.4, "maxZ": -4.6, "minY": 2},
+        {"x": 5.2, "z": -3, "label": "第 2 個角", "type": "position", "minX": 3.8, "maxX": 6.6, "minZ": -4.4, "maxZ": -1.6, "minY": 2},
+        {"x": 0, "z": 0, "label": "收尾回原點", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -1.4, "maxZ": 1.4, "minY": 2}
+      ]
+    },
+    {
+      "id": "2-4",
+      "name": "畫五角星",
+      "draw": true,
+      "drawHeight": 3,
+      "view": "topdown",
+      "guide": [[0, 0], [0, -6], [3.53, -1.15], [-2.18, -3.0], [3.53, -4.85], [0, 0]],
+      "intro": "⭐ 畫五角星\n\n星星的祕密：每個尖角轉 144°！\n用「🔁 重複 5 次」包住：\n  ⬆️ 前進 6m\n  ↻ 順時針轉 144°\n\n線會交叉成一顆星 — 試試看！\n\n🌈 進階：在迴圈裡再加一塊「🎲 隨機換筆色」，每一邊就會變不同顏色 → 彩色星星！",
+      "hud": "重複 5 次〔前進 6m，右轉 144°〕",
+      "rings": [],
+      "obstacles": [],
+      "passZones": [
+        {"x": 0, "z": -6, "label": "尖角 1", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -7.4, "maxZ": -4.6, "minY": 2},
+        {"x": 3.53, "z": -1.15, "label": "尖角 2", "type": "position", "minX": 2.1, "maxX": 4.9, "minZ": -2.55, "maxZ": 0.25, "minY": 2},
+        {"x": -2.18, "z": -3.0, "label": "尖角 3", "type": "position", "minX": -3.6, "maxX": -0.8, "minZ": -4.4, "maxZ": -1.6, "minY": 2},
+        {"x": 3.53, "z": -4.85, "label": "尖角 4", "type": "position", "minX": 2.1, "maxX": 4.9, "minZ": -6.25, "maxZ": -3.45, "minY": 2},
+        {"x": 0, "z": 0, "label": "收尾回原點", "type": "position", "minX": -1.4, "maxX": 1.4, "minZ": -1.4, "maxZ": 1.4, "minY": 2}
+      ]
+    },
+    {
+      "id": "2-5",
+      "name": "自由畫布（創作）",
+      "draw": true,
+      "drawHeight": 3,
+      "view": "topdown",
+      "freeplay": true,
+      "penColors": ["#ff5252", "#42a5f5", "#66bb6a", "#ffd54f", "#ab47bc"],
+      "intro": "🎨 自由畫布\n\n沒有題目！用 🖊️下筆 / ✋抬筆 / 🎨換色，想畫什麼畫什麼。\n• 抬筆移動到別處 → 分開的圖案\n• 換顏色畫彩色作品\n\n畫好截圖給老師看 📸",
+      "hud": "🎨 自由創作：畫出你的作品",
+      "rings": [],
+      "obstacles": [],
+      "passZones": []
+    }
+  ]
+}

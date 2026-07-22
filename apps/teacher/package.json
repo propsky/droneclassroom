@@ -1,0 +1,19 @@
+{
+  "name": "@creafly/teacher",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CREAFLY 老師後台 — Vite + TypeScript（無 UI 框架）",
+  "scripts": {
+    "dev": "vite --port 5174 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@creafly/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

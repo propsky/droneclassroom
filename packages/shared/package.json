@@ -1,0 +1,16 @@
+{
+  "name": "@creafly/shared",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "關卡 schema / WS 協定 / 純函數 — 零 runtime 依賴",
+  "exports": {
+    ".": "./src/index.ts",
+    "./levels": "./src/levels.ts",
+    "./protocol": "./src/protocol.ts",
+    "./math": "./src/math.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

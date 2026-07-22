@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "vite: 前端 dev server (:5173)",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["dev:sim"],
+      "isBackground": true,
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "panel": "dedicated", "reveal": "silent" },
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "(Local|ready in)"
+        }
+      }
+    },
+    {
+      "label": "停止所有 dev server",
+      "type": "shell",
+      "command": "lsof -ti:3000,5173 | xargs kill 2>/dev/null; echo done",
+      "problemMatcher": []
+    }
+  ]
+}

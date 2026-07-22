@@ -1,0 +1,12 @@
+{
+  "name": "@creafly/api",
+  "version": "2.0.0",
+  "private": true,
+  "description": "FastAPI 後端的 pnpm 薄殼 — 只提供 scripts 讓根目錄 pnpm dev 能一起帶起，Python 依賴由 uv 管理",
+  "scripts": {
+    "dev": "uv run uvicorn app.main:app --port 3000 --reload",
+    "start": "uv run creafly-api",
+    "typecheck": "uv run ruff check .",
+    "test": "uv run pytest -q"
+  }
+}

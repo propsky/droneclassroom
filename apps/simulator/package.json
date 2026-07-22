@@ -1,0 +1,25 @@
+{
+  "name": "@creafly/simulator",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CREAFLY 學生端模擬器 — Babylon.js + TypeScript",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^8.0.0",
+    "@babylonjs/havok": "^1.3.13",
+    "@babylonjs/loaders": "^8.56.2",
+    "@creafly/shared": "workspace:*",
+    "blockly": "^11.2.0",
+    "nipplejs": "^0.10.2"
+  },
+  "devDependencies": {
+    "babylonjs-gltf2interface": "^8.56.2",
+    "vite": "^6.0.0"
+  }
+}

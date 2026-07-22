@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- 加到主畫面後以全螢幕獨立模式開啟 (iPhone/iPad/Bluefy 最可靠的全螢幕方式) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Drone Sim">
+<title>pyController Gamepad 測試 (Route A)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 24px auto; padding: 0 16px; }
+  h1 { font-size: 20px; }
+  #status { margin: 12px 0; color: #555; min-height: 1.4em; }
+  .axis { margin: 10px 0; }
+  .axis label { display: inline-block; width: 80px; font-weight: 600; }
+  .bar { display: inline-block; width: 200px; height: 14px; background: #eee; vertical-align: middle; position: relative; border-radius: 7px; }
+  .bar > i { position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; background: #06c; transform: translateX(-50%); }
+  .val { display: inline-block; width: 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  pre { background: #f4f4f4; padding: 8px; border-radius: 6px; font-size: 13px; }
+  .note { font-size: 13px; color: #888; margin-top: 24px; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <h1>pyController Gamepad 測試 (Route A / HID)</h1>
+  <button id="fs">全螢幕</button>
+  <div id="status">尚未偵測到搖桿</div>
+
+  <div class="axis"><label>油門</label><span class="bar"><i id="bar-throttle"></i></span><span class="val" id="val-throttle">0.00</span></div>
+  <div class="axis"><label>偏航</label><span class="bar"><i id="bar-yaw"></i></span><span class="val" id="val-yaw">0.00</span></div>
+  <div class="axis"><label>俯仰</label><span class="bar"><i id="bar-pitch"></i></span><span class="val" id="val-pitch">0.00</span></div>
+  <div class="axis"><label>翻滾</label><span class="bar"><i id="bar-roll"></i></span><span class="val" id="val-roll">0.00</span></div>
+
+  <p>原始 axes（除錯用，確認軸順序）：</p>
+  <pre id="raw">[ ]</pre>
+
+  <p class="note">
+    手把已透過系統藍牙配對成 HID 搖桿後，打開此頁，<strong>點一下頁面</strong>讓它取得焦點，
+    再<strong>推一下搖桿</strong>，數值就會跳動。<br>
+    若「原始 axes」的順序跟油門/偏航/俯仰/翻滾對不上，把
+    <code>gamepad-input.js</code> 的 decode() 內 <code>ax[0..3]</code> 索引調一下即可。
+  </p>
+
+  <script src="fullscreen.js"></script>
+  <script src="gamepad-input.js"></script>
+  <script>
+    Fullscreen.wireButton(document.getElementById('fs'));
+
+    const pad = new GamepadInput();
+    const statusEl = document.getElementById('status');
+    pad.onStatus = (t) => { statusEl.textContent = t; };
+
+    function setAxis(name, v) {
+      document.getElementById('val-' + name).textContent = v.toFixed(2);
+      document.getElementById('bar-' + name).style.left = (50 + v * 50) + '%';
+    }
+
+    pad.onData = (s) => {
+      setAxis('throttle', s.throttle);
+      setAxis('yaw', s.yaw);
+      setAxis('pitch', s.pitch);
+      setAxis('roll', s.roll);
+      document.getElementById('raw').textContent =
+        '[' + s.rawAxes.map((v) => v.toFixed(2)).join(', ') + ']';
+    };
+
+    pad.start();
+  </script>
+</body>
+</html>

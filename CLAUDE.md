@@ -4,57 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-CREAFLY 教室版無人機模擬器 — a browser-based drone flight simulator for Taiwan K-12 programming education. Students fly a 3D drone either by manual stick/keyboard/gamepad control or by composing Blockly programs; a teacher dashboard tracks the class over WebSocket. Forked from `eccc20984/drone-simulator` (MIT).
+CREAFLY 教室版無人機模擬器 — a browser-based drone flight simulator for Taiwan K-12 programming education. Students fly a 3D drone either by manual stick/keyboard/gamepad control or by composing Blockly programs; a teacher dashboard tracks the class over WebSocket. Originally forked from `eccc20984/drone-simulator` (MIT).
 
-Versions map to lessons: v1.3 = 6/22 first lesson (manual only), v1.4 = 6/29 second lesson (adds Blockly program mode). v1.5 = feature release on top of the 1.4 baseline (drone soccer / arena 大亂鬥 / balloon levels / movement tilt visuals).
+**Rewrite (current codebase)** on branch `rewrite/babylon-monorepo`: Three.js → **Babylon.js + TypeScript**, restructured as a **pnpm workspaces monorepo**. The full plan and architecture decisions live in `docs/rewrite-plan.md` — read it before making structural changes. The old single-file version is preserved intact in `legacy/` and serves as the behavior/visual parity baseline.
 
 ## Commands
 
 ```bash
-npm install            # installs ws (the only npm dependency)
-node server.js         # dev server on :3000 (student) + :3000/teacher + ws://:8080
+pnpm install            # install all workspace deps
+pnpm dev                # simulator (:5173) + teacher (:5174) + api (:3000) in parallel
+pnpm dev:sim            # student client only
+pnpm typecheck          # tsc --noEmit across all packages (must stay clean)
+pnpm build              # production build → apps/simulator/dist (zero CDN deps)
+pnpm legacy             # run the old Three.js version (node legacy/server.js, :3000)
 ```
 
-No build step, no bundler, no TypeScript, no test framework. Three.js, Blockly, and nipplejs are loaded from CDN in `index.html` — there is nothing to compile. Edit a file, reload the browser (server sends `no-store` headers so reloads are always fresh).
+No test framework yet; core logic in `apps/simulator/src/core/` is pure TS designed to be testable (Vitest planned). Visual verification is headless-Chrome screenshots — on macOS pass `--use-angle=swiftshader --enable-unsafe-swiftshader` for WebGL.
 
-- Student UI: `http://localhost:3000/`
-- Teacher dashboard: `http://localhost:3000/teacher` (served from `teacher.html`)
+## Monorepo layout
 
-### Visual "tests" (screenshots, not assertions)
+| Path | Package | Notes |
+|---|---|---|
+| `apps/simulator` | `@creafly/simulator` | Student client: Babylon.js 8 + Vite + TS |
+| `apps/api` | `@creafly/api` | FastAPI + uv backend; wire-compatible with legacy protocol; in-memory, no DB by design |
+| `packages/shared` | `@creafly/shared` | Level schema, WS protocol types, pure math — **zero runtime deps, keep it that way** |
+| `legacy/` | — | Old Three.js single-file app, still runnable; do not evolve it, only fix critical classroom bugs |
 
-There is no unit test suite. Verification is done by headless-Chrome screenshots and DOM dumps. Pattern (see `screenshot-622.js`, `review-622.js`, `validate-b101001.js`): spawn `C:\Program Files\Google\Chrome\Application\chrome.exe --headless --screenshot=...` against `localhost:3000`, write PNGs into `screenshots/`. The server must already be running. These scripts are throwaway per-task validators named after the task (`screenshot-t102.js`, `review-t101.js`) — write a new one for the task at hand rather than forcing an old one to fit.
+pnpm's strict `node_modules` enforces package isolation: an app may only import what its own `package.json` declares. Frontend deps live only in `apps/simulator`, backend (Python) deps managed by uv in `apps/api`.
 
-### Packaging a release
+## Architecture rules
 
-`node pack-zip.js` produces `creafly-drone-simulator-v1.5.zip` from `git ls-files` (tracked files only), excluding scratch files (`.pm-*`, `dom-snapshot`, `server.log/err`, old `shot-*`). Update the `ZIP_OUT` version and the `exclude` regex when cutting a new version.
-
-## Architecture
-
-Three files hold essentially everything; `main.js` is the bulk (~3000 lines, organized into numbered `// =====` sections).
-
-### `main.js` — the entire client
-
-Single global script (no modules). Section map:
-- **§1–4** Three.js scene: drone model, lighting, environment (ground grid, clouds, rings).
-- **§5** `droneState` — the physics/orientation source of truth. `player` (login/display name), `audioState` (Web Audio generated SFX), `wsState` (student WebSocket client).
-- **§6** Input: keyboard, nipplejs virtual joystick, **and** the Web Gamepad API (`gamepadState`) for USB/Bluetooth controllers. §6c is a stick **calibration wizard**.
-- **§T-101 mode switch** `MODE = { MANUAL, PROGRAM }` — the central UI bifurcation. Manual mode = sticks drive `droneState` directly; program mode = Blockly program drives it via the action API.
-- **§7–8 Action API**: `cf_takeoff / cf_land / cf_forward / cf_backward / cf_left / cf_right / cf_hover / cf_rotateClockwise / cf_rotateCounterClockwise / cf_wait / cf_log / cf_elapsed / cf_timerReset`. These are `async` and animate `droneState` over time — **this is the contract between generated Blockly code and the simulator.** Any new block must map to a `cf_*` function.
-- **§9 Blockly**: `defineCreaFlyBlocks()` registers custom blocks in categories (動作/移動/旋轉 + advanced 邏輯/迴圈/變數/時間). Block generators emit JS calling the `cf_*` API.
-- **§10** `runProgram(workspace)` — generates JS from the workspace and executes it.
-- **§12** Physics + animation main loop, including `checkRingCollisions()` and pass-zone checks.
-
-### Level system
-
-Levels are **data, not code**. `main.js` does `fetch('levels/chapter1.json')` on load, then `loadLevel('1-0')`. A level defines `rings` (fly-through targets) and/or `passZones` (step-by-step goal detection). Pass-zone types: `altitude` (`minY`/`maxY`), `position` (`minX/maxX/minZ/maxZ`), `heading` (`targetYaw` + `tolerance`). Completing all zones/rings = level passed, drives the HUD progress bar. **To change a level's tasks, edit `chapter1.json` — do not touch `main.js`.**
-
-### Server (`server.js`)
-
-Plain Node `http` static file server (no framework) + a `ws` WebSocketServer on **:8080**. Two roles distinguished by WS path: `/teacher` connections join `teachers`, everything else is a student in the `students` map. Students send `register` / `progress` / `complete_level`; the server fans out `student_list` / `student_update` to teachers, and relays teacher `broadcast` messages (load_level / reset_all / race_start / show_message) down to all students. State is in-memory only.
+- **`apps/simulator/src/core/` is framework-agnostic pure TS**: no `@babylonjs/core` imports, no DOM access. It owns `droneState`, the 60Hz fixed-timestep physics, level logic, and the `cf_*` program API. It communicates outward via the typed event bus (`core/events.ts`). `render/` (Babylon) and `ui/` (DOM) are subscribers.
+- **Physics is fixed-timestep 60Hz** (accumulator + render interpolation). Feel constants (`THRUST=0.012`, `LIFT=0.015`, `DRAG=0.92`) are per-tick and intentionally identical to legacy per-frame values. Never tie simulation to rAF frame rate.
+- **Coordinate convention**: Babylon runs with `useRightHandedSystem = true`; nose faces -Z, positive yaw = turn left. Level JSONs are shared with legacy unchanged — never re-author level coordinates.
+- **`cf_*` Action API is the contract** between Blockly-generated code and the simulator (same semantics as legacy). Generated code runs via `new Function('CREAFLY', …)` injection — never `eval`. Any new block must map to a `cf_*` function in `core/program.ts`.
+- **Levels are data, not code**: `apps/simulator/public/levels/chapter*.json` (schema types in `@creafly/shared`). To change level tasks, edit JSON only.
+- **WS protocol** is typed in `packages/shared/src/protocol.ts` and stays wire-compatible with `legacy/server.js` during the transition; the FastAPI server validates all inbound messages (Pydantic, `apps/api/app/ws.py`).
+- Phase roadmap (draw levels ch2/3, calibration wizard, arena/soccer multiplayer, Havok, React/Vue decision) is tracked in `docs/rewrite-plan.md` §4 — check the phase list before implementing "missing" features.
 
 ## Working conventions
 
-- **All UI text, comments, level intros, and commit messages are in Traditional Chinese (zh-Hant).** Match this — including in commit messages (see git log: `v1.4: T-101 ...`).
-- Work is dispatched as tasks under `docs/tasks/T-NNN-*.md` with reviews in `docs/reports/`. `.pm-dispatch-*.md` are PM hand-off notes (team is drone-pm / drone-coder / drone-reviewer). These coordination files are gitignored-style scratch — excluded from release zips.
-- The server is often left running on a LAN address (e.g. `192.168.1.201:3000`) for live device testing; prefer reloading over restarting unless a `server.js` change requires it.
-- Don't add a build tool, framework, or TS — the "no build step" constraint is intentional (runs from a static host / zip).
+- **All UI text, comments, level intros, and commit messages are in Traditional Chinese (zh-Hant).**
+- The server is often left running on a LAN address for live device testing; prefer reloading over restarting unless a server change requires it.
+- Don't add a UI framework yet (React/Vue decision is deliberately deferred; `ui/` is plain TS + DOM behind the event bus).
+- `docs/tasks/T-NNN-*.md` + `docs/reports/` are the legacy task-dispatch convention; rewrite work is tracked in `docs/rewrite-plan.md`.

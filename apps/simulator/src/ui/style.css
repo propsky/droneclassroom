@@ -1,0 +1,1418 @@
+/* CREAFLY 模擬器 — 視覺重構（docs/design-system.md）
+ * 規則：所有色彩 / 字級 / 間距 / 圓角 / 陰影 / z-index 一律引用 tokens.css；
+ * 色彩淡化（tint）一律 color-mix 疊 token，不出現制度外色碼。
+ * hover 只變色 / 邊 / 陰影，不位移不縮放（§5）。 */
+@import './tokens.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  background: var(--bg-0);
+  color: var(--text-1);
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s, box-shadow 0.18s;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* 圖標容器（icons.ts 的 SVG 掛載點；動態改字的按鈕會直接注入 svg.ic） */
+.btn-ic {
+  display: inline-flex;
+  flex: none;
+}
+.btn-ic svg,
+svg.ic {
+  display: block;
+  flex: none;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 56px 1fr;
+  height: 100vh;
+}
+
+/* 程式模式：左欄 Blockly panel、場景在右欄 */
+body.mode-manual #app {
+  grid-template-columns: 1fr;
+}
+body.mode-program #app {
+  grid-template-columns: 420px 1fr;
+}
+@media (max-width: 1100px), (pointer: coarse) {
+  body.mode-program #app {
+    grid-template-columns: 320px 1fr;
+  }
+}
+
+/* =============================================================================
+ * Header — 左（logo + 模式切換）/ 中空 / 右（工具群組，分隔線分組）
+ * ========================================================================== */
+#header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+#header .logo {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+#header .logo .accent {
+  color: var(--brand);
+}
+.version-tag {
+  background: color-mix(in srgb, var(--brand) 16%, transparent);
+  color: var(--brand);
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-full);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 20px;
+}
+#header .subtitle {
+  font-size: var(--fs-sm);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+@media (max-width: 1440px) {
+  #header .subtitle {
+    display: none;
+  }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+}
+.header-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.header-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+  flex: none;
+}
+
+/* ghost 工具按鈕 — 統一高度 36 */
+.header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.header-btn .btn-ic,
+.header-btn > svg.ic {
+  color: var(--text-2);
+}
+.header-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--line);
+}
+.header-btn.active {
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+  border-color: var(--brand);
+}
+.header-btn.active .btn-ic,
+.header-btn.active > svg.ic {
+  color: var(--brand);
+}
+/* 窄螢幕：工具按鈕收成 icon-only（36×36） */
+@media (max-width: 1180px) {
+  .header-btn > span:not(.btn-ic) {
+    display: none;
+  }
+  .header-btn {
+    width: 36px;
+    justify-content: center;
+    padding: 0;
+  }
+}
+
+/* 模式切換 segmented（手動 ↔ 程式；active 段由 body.mode-* 驅動） */
+.mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: var(--sp-1);
+  gap: var(--sp-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.mode-seg {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--sp-3);
+  border-radius: calc(var(--r-sm) - 2px);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-3);
+  transition: background-color 0.18s, color 0.18s;
+}
+body.mode-manual .mode-seg-manual,
+body.mode-program .mode-seg-program {
+  background: var(--brand);
+  color: #fff;
+}
+body.program-running #mode-mp-toggle {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 校正按鈕：偵測到搖桿才顯示；黃色 accent 提示（不做漸層） */
+.header-btn-calib .btn-ic,
+.header-btn-calib > svg.ic {
+  color: var(--warn);
+}
+.header-btn-calib {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+body:not(.gamepad-connected) .header-btn-calib {
+  display: none;
+}
+/* BLE 連線鈕：已連線時亮起（成功綠） */
+#connect-gamepad-btn.active {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+}
+#connect-gamepad-btn.active .btn-ic,
+#connect-gamepad-btn.active > svg.ic {
+  color: var(--accent);
+}
+
+/* 帳號頭像 + 下拉 */
+#player-hud {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+#player-avatar {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--r-full);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#player-avatar:hover {
+  background: var(--bg-3);
+  border-color: var(--brand);
+}
+#player-dropdown {
+  display: none;
+  position: fixed;
+  top: 52px;
+  right: var(--sp-4);
+  z-index: var(--z-modal);
+  flex-direction: column;
+  gap: var(--sp-2);
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  min-width: 150px;
+  box-shadow: var(--shadow-2);
+}
+#player-hud.open #player-dropdown {
+  display: flex;
+}
+#player-dropdown #player-name-display {
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+#player-dropdown #player-rename {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: transparent;
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-3);
+  height: 32px;
+  font-size: var(--fs-sm);
+}
+#player-dropdown #player-rename:hover {
+  background: var(--bg-3);
+}
+
+/* =============================================================================
+ * 關卡選單（header 內下拉）＋計時
+ * ========================================================================== */
+.level-selector {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.level-selector .chev {
+  color: var(--text-3);
+}
+.level-selector.open #level-menu-toggle {
+  background: var(--bg-3);
+}
+.header-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-3);
+  max-width: 320px;
+  overflow: hidden;
+}
+.level-selector-timer {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.level-menu-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  left: 0;
+  z-index: var(--z-modal);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-4);
+  min-width: 300px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.level-selector.open .level-menu-panel {
+  display: block;
+}
+.level-selector-title {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+  margin-bottom: var(--sp-2);
+}
+.level-selector-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  max-width: 72vw;
+}
+.level-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+.level-btn .btn-ic,
+.level-btn > svg.ic {
+  color: var(--warn);
+}
+.level-btn:hover {
+  background: var(--bg-3);
+}
+.level-btn.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.level-btn.active .btn-ic,
+.level-btn.active > svg.ic {
+  color: #fff;
+}
+
+/* =============================================================================
+ * Blockly 面板 + 工具列（執行 = primary / 停止 = danger / 重置 = ghost）
+ * ========================================================================== */
+#blockly-panel {
+  display: none;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+  flex-direction: column;
+  overflow: hidden;
+}
+body.mode-program #blockly-panel {
+  display: flex;
+  animation: blockly-slide-in 0.25s ease;
+}
+@keyframes blockly-slide-in {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+#blockly-div {
+  flex: 1;
+  min-height: 0;
+}
+#blockly-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: var(--sp-5);
+  line-height: 1.8;
+}
+#blockly-toolbar {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+#blockly-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: 40px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.btn-run {
+  flex: 1;
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  color: #fff;
+}
+.btn-run:hover:not(:disabled) {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+.btn-stop {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.btn-stop:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+.btn-reset {
+  flex: none;
+  width: 40px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-1);
+}
+.btn-reset:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+
+/* =============================================================================
+ * 3D 場景 + HUD 卡片（§3：--bg-1 92% + blur、--r-md、四角 --sp-4 安全邊距）
+ * ========================================================================== */
+#scene-panel {
+  position: relative;
+  background: var(--bg-0);
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+#scene-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+}
+#scene-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* HUD 卡片基底（視覺語言統一：狀態 / 任務 / 計分板 / 機頭指示同一套） */
+.hud {
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+  box-shadow: var(--shadow-1);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  pointer-events: auto;
+  z-index: var(--z-hud);
+}
+.hud-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin-bottom: var(--sp-2);
+}
+.hud-title .btn-ic {
+  color: var(--text-3);
+}
+.hud-title .mono,
+.hud-title .progress-text {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  letter-spacing: 0;
+}
+.hud-note {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.hud-line {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+}
+.hud-line .mono {
+  color: var(--warn);
+}
+
+/* 同角多卡片：--sp-3 垂直堆疊，禁止重疊 */
+.hud-stack {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  pointer-events: none;
+}
+.hud-stack > .hud {
+  pointer-events: auto;
+}
+.hud-stack-tr {
+  top: var(--sp-4);
+  right: var(--sp-4);
+  align-items: flex-end;
+}
+.hud-stack-tr > .hud {
+  min-width: 190px;
+}
+.hud-stack-bl {
+  bottom: var(--sp-4);
+  left: var(--sp-4);
+  align-items: flex-start;
+}
+/* 觸控裝置：左下卡片抬過虛擬搖桿區（170px 搖桿 + 上方標籤），禁止重疊（§3） */
+body.touch-device .hud-stack-bl,
+body.joystick-forced .hud-stack-bl {
+  bottom: calc(var(--sp-5) + 170px + var(--sp-5));
+}
+
+/* 左上：飛行狀態卡（數值 mono） */
+#status-hud {
+  position: absolute;
+  top: var(--sp-4);
+  left: var(--sp-4);
+  min-width: 190px;
+}
+.stat-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.stat-rows .row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.stat-rows .label {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.stat-rows .value {
+  font-size: var(--fs-sm);
+  color: var(--text-1);
+  text-align: right;
+  max-width: 220px;
+}
+.stat-rows .value.mono {
+  font-size: var(--fs-lg);
+}
+.stat-rows .unit {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-left: var(--sp-1);
+}
+
+/* 任務圈進度 */
+.ring-status {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.ring-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-1) 18%, transparent);
+  transition: background-color 0.3s, box-shadow 0.3s;
+}
+.ring-dot.done {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.ring-dot.current {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+.rh-step {
+  margin-top: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+  display: none;
+}
+.rh-step.active {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-weight: 700;
+}
+.rh-step.done {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* passZone 步驟清單 */
+#progress-bar .steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+#progress-bar .step {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+#progress-bar .step.active {
+  background: color-mix(in srgb, var(--warn) 18%, transparent);
+  color: var(--warn);
+  font-weight: 700;
+}
+#progress-bar .step.completed {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+#progress-bar .step.completed::before {
+  content: '✓ ';
+}
+
+/* =============================================================================
+ * 左下：操作說明卡（§5.2）— kbd 鍵帽 + 兩欄格線 + 分組小標 + 可收合卡頭
+ * ========================================================================== */
+#help-hud {
+  max-width: 300px;
+}
+/* 卡頭 = 收合按鈕（沿用 .hud-title 外觀，重設 button 預設樣式） */
+.help-toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.help-toggle .chev {
+  margin-left: auto;
+  display: inline-flex;
+  color: var(--text-3);
+}
+.help-toggle .chev svg {
+  transition: transform 0.18s ease;
+}
+#help-hud.collapsed .help-toggle {
+  margin-bottom: 0; /* 收成一行：只剩「操作說明」+ chevron */
+}
+#help-hud.collapsed .help-toggle .chev svg {
+  transform: rotate(-90deg);
+}
+#help-hud.collapsed .help-body {
+  display: none;
+}
+/* kbd 鍵帽元件（§5.2：--bg-3 底、1px --line、圓角 4px、mono --fs-xs、內距 2px 8px） */
+.help-body kbd {
+  display: inline-block;
+  min-width: 24px;
+  padding: 2px 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 4px; /* §5.2 指定 4px（鍵帽專用，非控件圓角） */
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  color: var(--text-1);
+  text-align: center;
+  white-space: nowrap;
+}
+/* 分組小標：移動｜升降・旋轉｜其他 */
+.help-group-title {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+  margin: var(--sp-2) 0 var(--sp-1);
+}
+.help-variant > .help-group-title:first-child {
+  margin-top: 0;
+}
+/* 兩欄格線：左鍵帽（右對齊、固定欄寬）→ 右動作說明 */
+.help-grid {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--sp-1) var(--sp-2);
+  align-items: center;
+}
+.help-keys {
+  display: flex;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+}
+.help-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+/* 三套說明變體切換（保留既有 body class 機制，純 CSS 分派）：
+   實體搖桿 > 觸控虛擬搖桿 > 鍵盤（與 legacy 優先序一致） */
+.help-variant {
+  display: none;
+}
+body:not(.gamepad-connected):not(.touch-device):not(.joystick-forced) #help-keyboard {
+  display: block;
+}
+body.touch-device:not(.gamepad-connected) #help-joystick,
+body.joystick-forced:not(.gamepad-connected) #help-joystick {
+  display: block;
+}
+body.gamepad-connected #help-gamepad {
+  display: block;
+}
+
+/* 畫畫教室：筆色選擇列 */
+#pen-swatches {
+  display: flex;
+  gap: var(--sp-2);
+}
+.pen-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-full);
+  border: 2px solid var(--line);
+  padding: 0;
+}
+.pen-swatch:hover {
+  border-color: var(--text-2);
+}
+.pen-swatch.active {
+  border-color: var(--text-1);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--text-1) 60%, transparent);
+}
+
+/* 機頭方向引導（上方置中） */
+#heading-hud {
+  position: absolute;
+  top: var(--sp-4);
+  left: 50%;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+  color: var(--text-1);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+  z-index: var(--z-hud);
+}
+#heading-hud .ok {
+  color: var(--accent);
+}
+#heading-hud .warn {
+  color: var(--warn);
+}
+
+/* =============================================================================
+ * 虛擬搖桿（觸控裝置 / ?joystick）
+ * ========================================================================== */
+#joystick-layer {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  z-index: var(--z-overlay-btn);
+}
+body.touch-device #joystick-layer,
+body.joystick-forced #joystick-layer {
+  display: block;
+}
+.joystick-zone {
+  position: absolute;
+  bottom: var(--sp-5);
+  width: 170px;
+  height: 170px;
+  pointer-events: auto;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg-0) 15%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--text-1) 40%, transparent);
+}
+#joystick-left {
+  left: var(--sp-6);
+}
+#joystick-right {
+  right: var(--sp-6);
+}
+.joystick-label {
+  position: absolute;
+  top: calc(-1 * var(--sp-5));
+  width: 100%;
+  text-align: center;
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  text-shadow: 0 1px 2px var(--bg-0);
+  pointer-events: none;
+}
+
+/* =============================================================================
+ * Toast（底部置中；狀態以 3px 左邊線著色 — 內容 emoji 允許）
+ * ========================================================================== */
+#toast {
+  position: fixed;
+  bottom: var(--sp-6);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--text-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  z-index: var(--z-toast);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+  max-width: 80vw;
+  text-align: left;
+}
+#toast.show {
+  opacity: 1;
+}
+#toast.success {
+  border-left-color: var(--accent);
+}
+#toast.error {
+  border-left-color: var(--danger);
+}
+#toast.warning {
+  border-left-color: var(--warn);
+}
+
+/* =============================================================================
+ * 3-2-1 倒數（遊戲事件回饋 — §5 保留，不受五級字級限制）
+ * ========================================================================== */
+#countdown-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 140px;
+  font-weight: 800;
+  color: var(--warn);
+  text-shadow: 0 4px 24px var(--scrim);
+  z-index: var(--z-modal);
+  pointer-events: none;
+  opacity: 0;
+}
+#countdown-overlay.show {
+  opacity: 1;
+  animation: count-pop 0.65s ease;
+}
+#countdown-overlay.go {
+  color: var(--accent);
+}
+@keyframes count-pop {
+  0% {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  30% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* =============================================================================
+ * 賽局結束倒數 chip（§5.3）— arena / soccer 剩 10 秒出現，頂部置中不擋視野。
+ * 遊戲事件回饋動效保留（§5）；reduced-motion 時只變色不縮放不脈衝。
+ * ========================================================================== */
+#end-countdown {
+  /* 掛在 #scene-overlay 內（見 ui/endCountdown.ts）→ 場景頂部置中，不壓 header */
+  position: absolute;
+  top: var(--sp-4);
+  left: 50%;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--bg-1) 85%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-1);
+  padding: var(--sp-1) var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--warn);
+  z-index: var(--z-toast);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, color 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+#end-countdown.show {
+  opacity: 1;
+  visibility: visible;
+}
+/* 剩 ≤3 秒：放大 1.4 倍 + 轉危險色 */
+#end-countdown.danger {
+  color: var(--danger);
+  transform: translateX(-50%) scale(1.4);
+}
+/* 每秒輕脈衝：scale 1.4 → 1.45 → 1.4（200ms；由 JS 每秒重觸發 .pulse） */
+#end-countdown.danger.pulse {
+  animation: ec-pulse 0.2s ease;
+}
+@keyframes ec-pulse {
+  0% { transform: translateX(-50%) scale(1.4); }
+  50% { transform: translateX(-50%) scale(1.45); }
+  100% { transform: translateX(-50%) scale(1.4); }
+}
+/* 每秒數字淡入替換（不彈跳） */
+#end-countdown .ec-num.ec-in {
+  animation: ec-num-in 0.18s ease;
+}
+@keyframes ec-num-in {
+  from { opacity: 0.2; }
+  to { opacity: 1; }
+}
+/* reduced-motion：只變色，不縮放不脈衝（animation/transition 已由全域規則關閉） */
+@media (prefers-reduced-motion: reduce) {
+  #end-countdown.danger {
+    transform: translateX(-50%);
+  }
+}
+
+/* =============================================================================
+ * Modal（intro / 登入）— --bg-1 實色、--r-md、--shadow-2、主按鈕靠右
+ * ========================================================================== */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: var(--z-modal);
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.show {
+  display: flex;
+}
+.modal-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  color: var(--text-1);
+  padding: var(--sp-5);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  width: min(480px, 92vw);
+  box-shadow: var(--shadow-2);
+}
+.level-intro-title {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  margin-bottom: var(--sp-4);
+  color: var(--text-1);
+}
+.level-intro-body {
+  font-size: var(--fs-md);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  text-align: left;
+  margin-bottom: var(--sp-5);
+  color: var(--text-2);
+}
+.modal-btn {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand);
+  color: #fff;
+  border: 1px solid var(--brand);
+  height: 40px;
+  padding: 0 var(--sp-6);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-md);
+  font-weight: 700;
+}
+.modal-btn:hover {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+#login-name {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--sp-3);
+  margin: var(--sp-2) 0;
+  font-size: var(--fs-md);
+  font-family: inherit;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--bg-0);
+  color: var(--text-1);
+}
+#login-name:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+#emoji-picker {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+  justify-content: center;
+}
+.emoji-btn {
+  background: var(--bg-2);
+  border: 2px solid transparent;
+  border-radius: var(--r-sm);
+  padding: var(--sp-1);
+  font-size: var(--fs-xl);
+  line-height: 1.2;
+}
+.emoji-btn:hover {
+  background: var(--bg-3);
+}
+.emoji-btn.selected {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 18%, transparent);
+}
+
+/* =============================================================================
+ * 遊戲入口按鈕群（右下直排；「色彩 + 圖標」表達，不做漸層）
+ * ========================================================================== */
+#entry-group {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: var(--z-overlay-btn);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+.entry-btn {
+  --entry-c: var(--brand);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 40px;
+  min-width: 132px;
+  padding: 0 var(--sp-4);
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  box-shadow: var(--shadow-1);
+}
+.entry-btn .btn-ic {
+  color: var(--entry-c);
+}
+.entry-btn:hover {
+  background: var(--bg-3);
+  border-color: color-mix(in srgb, var(--entry-c) 50%, transparent);
+}
+.entry-btn.active {
+  background: color-mix(in srgb, var(--entry-c) 20%, var(--bg-1));
+  border-color: var(--entry-c);
+}
+.entry-soccer-mp {
+  --entry-c: var(--brand);
+}
+.entry-soccer {
+  --entry-c: var(--accent);
+}
+.entry-arena {
+  --entry-c: var(--danger);
+}
+
+/* =============================================================================
+ * 大亂鬥 / 足球 HUD（右上固定卡；名次用左側 3px 色條，不整列上色）
+ * ========================================================================== */
+.hud-fixed {
+  position: fixed;
+  top: 72px; /* header 56 + --sp-4 */
+  right: var(--sp-4);
+  display: none;
+  min-width: 220px;
+  max-width: 260px;
+}
+.hud-fixed .hud-title .mono {
+  color: var(--warn);
+}
+#arena-field-label {
+  margin-bottom: var(--sp-1);
+}
+#arena-scoreboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+#arena-scoreboard .arena-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  border-left: 3px solid transparent;
+}
+#arena-scoreboard .arena-row b {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+#arena-scoreboard .arena-row.rank-1 {
+  border-left-color: var(--rank-1);
+}
+#arena-scoreboard .arena-row.rank-2 {
+  border-left-color: var(--rank-2);
+}
+#arena-scoreboard .arena-row.rank-3 {
+  border-left-color: var(--rank-3);
+}
+#arena-scoreboard .arena-row.me {
+  background: var(--bg-3);
+  font-weight: 700;
+}
+
+#soccer-status {
+  margin-bottom: var(--sp-2);
+}
+#soccer-drills {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.soccer-drill-btn {
+  background: color-mix(in srgb, var(--text-1) 6%, transparent);
+  border: 1px solid var(--line);
+  color: var(--text-1);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-xs);
+  text-align: left;
+}
+.soccer-drill-btn:hover {
+  background: var(--bg-3);
+}
+
+/* 觸控 / 手勢 */
+html,
+body,
+#app,
+#scene-panel,
+#scene-canvas {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#blockly-div {
+  touch-action: manipulation;
+}
+
+/* =============================================================================
+ * 搖桿校正精靈 overlay（modal 同語言）
+ * ========================================================================== */
+#calib-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  z-index: var(--z-modal);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-1);
+}
+#calib-overlay.show {
+  display: flex;
+}
+#calib-overlay .calib-card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--sp-5);
+  width: min(540px, 92vw);
+  box-shadow: var(--shadow-2);
+}
+#calib-overlay h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  color: var(--text-1);
+  font-size: var(--fs-xl);
+}
+#calib-overlay h2 .btn-ic {
+  color: var(--brand);
+}
+#calib-overlay .calib-subtitle {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--sp-5);
+}
+#calib-overlay .calib-step {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--warn);
+  margin: var(--sp-4) 0;
+  min-height: 40px;
+  text-align: center;
+}
+#calib-overlay .calib-hint {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  text-align: center;
+  margin-bottom: var(--sp-4);
+}
+#calib-overlay .calib-progress {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: center;
+  margin: var(--sp-4) 0;
+}
+#calib-overlay .calib-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-1) 18%, transparent);
+  transition: background-color 0.3s, box-shadow 0.3s;
+}
+#calib-overlay .calib-dot.active {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+#calib-overlay .calib-dot.current {
+  background: var(--warn);
+  box-shadow: 0 0 12px var(--warn);
+}
+#calib-overlay .calib-live {
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3) var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  margin: var(--sp-4) 0;
+}
+#calib-overlay .calib-axes {
+  color: var(--brand);
+  margin-bottom: var(--sp-2);
+  white-space: pre;
+}
+#calib-overlay .calib-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+#calib-overlay .calib-btn {
+  min-width: 28px;
+  padding: var(--sp-1) var(--sp-2);
+  background: color-mix(in srgb, var(--text-1) 8%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+#calib-overlay .calib-btn.on {
+  background: var(--accent);
+  color: var(--bg-0);
+  border-color: var(--accent);
+}
+#calib-overlay .calib-actions {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+  margin-top: var(--sp-5);
+}
+#calib-overlay .calib-actions button {
+  height: 40px;
+  padding: 0 var(--sp-5);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+#calib-overlay .btn-skip {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-1);
+}
+#calib-overlay .btn-skip:hover {
+  background: var(--bg-3);
+}
+#calib-overlay .btn-cancel {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+#calib-overlay .btn-cancel:hover {
+  background: var(--danger);
+  color: #fff;
+}
+#calib-overlay .btn-save {
+  background: var(--brand);
+  border: 1px solid var(--brand);
+  color: #fff;
+}
+#calib-overlay .btn-save:hover {
+  background: var(--brand-strong);
+  border-color: var(--brand-strong);
+}
+#calib-overlay .calib-result {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-left: 3px solid var(--accent);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  margin-top: var(--sp-4);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+#calib-overlay .calib-result b {
+  color: var(--warn);
+}
+#calib-overlay .calib-timer-wrap {
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+#calib-overlay .calib-timer-text {
+  font-size: var(--fs-sm);
+  color: var(--warn);
+  font-weight: 700;
+  margin-bottom: var(--sp-2);
+  font-family: var(--font-mono);
+}
+#calib-overlay .calib-timer-bar {
+  background: color-mix(in srgb, var(--text-1) 15%, transparent);
+  height: 8px;
+  border-radius: var(--r-full);
+  overflow: hidden;
+}
+#calib-overlay .calib-timer-fill {
+  background: var(--warn);
+  height: 100%;
+  width: 0%;
+  transition: width 0.1s linear;
+}
+
+/* =============================================================================
+ * 動效：reduced motion 全部關閉（§5）
+ * ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

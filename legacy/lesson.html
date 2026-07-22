@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CREAFLY 老師教材 · 解答投影</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='52' font-size='52'%3E%F0%9F%93%BD%3C/text%3E%3C/svg%3E">
+<style>
+  :root { --bg:#0a1929; --bg2:#13314f; --cyan:#4dd0e1; --yellow:#ffd54a; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, 'Noto Sans TC', 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, var(--bg), var(--bg2)); color: #fff;
+    min-height: 100vh; overflow: hidden;
+  }
+  /* 通關碼閘門 */
+  #gate {
+    position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 18px; background: var(--bg);
+  }
+  #gate h1 { font-size: 30px; color: var(--cyan); margin: 0; }
+  #gate p { opacity: .7; margin: 0; }
+  #gate input {
+    font-size: 22px; padding: 12px 18px; border-radius: 10px; border: 2px solid rgba(255,255,255,.3);
+    background: rgba(255,255,255,.1); color: #fff; text-align: center; width: 240px;
+  }
+  #gate button {
+    font-size: 18px; font-weight: 700; padding: 11px 28px; border: none; border-radius: 10px;
+    background: var(--cyan); color: #06222f; cursor: pointer;
+  }
+  #gate .err { color: #ff8a80; min-height: 20px; }
+
+  /* 投影片 */
+  #deck { display: none; height: 100vh; flex-direction: column; }
+  header {
+    display: flex; align-items: center; gap: 16px; padding: 14px 28px;
+    background: rgba(0,0,0,.25); border-bottom: 1px solid rgba(255,255,255,.12);
+  }
+  header .brand { font-size: 18px; font-weight: 800; letter-spacing: 1px; }
+  header .brand .dot { color: var(--yellow); }
+  header .pageno { margin-left: auto; font-family: Consolas, monospace; opacity: .8; font-size: 15px; }
+  header .tag { background: rgba(255,213,74,.18); color: var(--yellow); border-radius: 6px; padding: 3px 10px; font-size: 13px; font-weight: 700; }
+
+  .slide { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; padding: 26px 40px; overflow: auto; }
+  .lvl-title { font-size: 40px; font-weight: 900; margin: 0 0 6px; }
+  .lvl-title .star { color: var(--yellow); }
+  .goal { font-size: 21px; color: var(--cyan); margin: 0 0 18px; font-weight: 700; }
+  .sec-label { font-size: 15px; opacity: .65; letter-spacing: 2px; margin: 18px 0 8px; }
+  .concept { font-size: 22px; line-height: 1.5; }
+  .teach { font-size: 19px; line-height: 1.65; padding-left: 22px; margin: 6px 0; }
+  .teach li { margin: 8px 0; }
+  .looptip {
+    margin-top: 16px; background: rgba(155,109,208,.18); border-left: 5px solid #9b6dd0;
+    border-radius: 0 10px 10px 0; padding: 14px 18px; font-size: 19px; line-height: 1.55;
+  }
+  .looptip b { color: #d9c2f5; }
+
+  /* 解答積木堆疊 */
+  .blocks-col h3 { font-size: 16px; opacity: .65; letter-spacing: 2px; margin: 0 0 12px; }
+  .blocks { display: flex; flex-direction: column; gap: 7px; }
+  .blk {
+    display: flex; align-items: center; gap: 12px; color: #06222f;
+    border-radius: 10px; padding: 11px 16px; font-weight: 800; font-size: 21px;
+    box-shadow: 0 2px 0 rgba(0,0,0,.25); position: relative;
+  }
+  .blk .ic { font-size: 24px; }
+  .blk .note {
+    margin-left: auto; font-size: 14px; font-weight: 600; color: rgba(0,0,0,.62);
+    max-width: 48%; text-align: right; line-height: 1.3;
+  }
+  .blk .connector { position: absolute; left: 26px; bottom: -7px; width: 10px; height: 7px; background: inherit; }
+
+  footer {
+    display: flex; align-items: center; gap: 14px; padding: 12px 28px;
+    background: rgba(0,0,0,.25); border-top: 1px solid rgba(255,255,255,.12);
+  }
+  footer button {
+    font-size: 18px; font-weight: 700; padding: 10px 22px; border: none; border-radius: 10px;
+    background: rgba(255,255,255,.16); color: #fff; cursor: pointer;
+  }
+  footer button:hover { background: rgba(255,255,255,.3); }
+  footer .hint { margin-left: auto; opacity: .6; font-size: 14px; }
+  .dots { display: flex; gap: 7px; }
+  .dots span { width: 11px; height: 11px; border-radius: 50%; background: rgba(255,255,255,.25); cursor: pointer; }
+  .dots span.on { background: var(--yellow); }
+
+  @media (max-width: 900px) { .slide { grid-template-columns: 1fr; } .lvl-title { font-size: 30px; } }
+</style>
+</head>
+<body>
+  <!-- 通關碼閘門 -->
+  <div id="gate">
+    <h1>📽️ CREAFLY 老師教材</h1>
+    <p>輸入通關碼以開啟解答投影（學生請勿觀看）</p>
+    <input id="gate-input" type="password" placeholder="通關碼" autocomplete="off">
+    <div class="err" id="gate-err"></div>
+    <button id="gate-btn">進入</button>
+  </div>
+
+  <!-- 投影片 -->
+  <div id="deck">
+    <header>
+      <span class="brand">CREAFLY<span class="dot">.</span> 教材</span>
+      <span class="tag" id="head-tag">解答 + 教學重點</span>
+      <span class="pageno" id="pageno"></span>
+    </header>
+    <div class="slide" id="slide"></div>
+    <footer>
+      <button id="prev">← 上一關</button>
+      <button id="next">下一關 →</button>
+      <div class="dots" id="dots"></div>
+      <span class="hint">← / → 鍵翻頁</span>
+    </footer>
+  </div>
+
+  <script src="/lessons-data.js"></script>
+  <script>
+    const D = window.LESSON_DATA;
+    let idx = 0;
+
+    // ===== 通關碼閘門 =====
+    const gate = document.getElementById('gate');
+    const deck = document.getElementById('deck');
+    function unlock() { gate.style.display = 'none'; deck.style.display = 'flex'; render(); }
+    function tryPass() {
+      const v = (document.getElementById('gate-input').value || '').trim();
+      if (v === D.passcode) { try { sessionStorage.setItem('creafly_lesson_ok', '1'); } catch (e) {} unlock(); }
+      else { document.getElementById('gate-err').textContent = '通關碼不對，再試一次'; }
+    }
+    document.getElementById('gate-btn').addEventListener('click', tryPass);
+    document.getElementById('gate-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryPass(); });
+    try { if (sessionStorage.getItem('creafly_lesson_ok') === '1') unlock(); } catch (e) {}
+    document.getElementById('gate-input').focus();
+
+    // ===== 投影片渲染 =====
+    function blockHtml(b, isLast) {
+      const color = D.catColor[b.cat] || '#888';
+      const note = b.note ? `<span class="note">${b.note}</span>` : '';
+      const conn = isLast ? '' : `<span class="connector"></span>`;
+      return `<div class="blk" style="background:${color}"><span class="ic">${b.icon}</span><span>${b.label}</span>${note}${conn}</div>`;
+    }
+    function render() {
+      const L = D.levels[idx];
+      const titleStar = L.star ? ' <span class="star">⭐</span>' : '';
+      const blocksHtml = L.blocks.map((b, i) => blockHtml(b, i === L.blocks.length - 1)).join('');
+      const teachHtml = (L.teach || []).map(t => `<li>${t}</li>`).join('');
+      const loopHtml = L.loopTip ? `<div class="looptip"><b>🔁 進階（迴圈寫法）：</b>${L.loopTip}</div>` : '';
+      document.getElementById('slide').innerHTML = `
+        <div class="left">
+          <h1 class="lvl-title">${L.id} ${L.name}${titleStar}</h1>
+          <p class="goal">🎯 任務：${L.goal}</p>
+          <div class="sec-label">核心概念</div>
+          <div class="concept">${L.concept}</div>
+          <div class="sec-label">教學重點</div>
+          <ul class="teach">${teachHtml}</ul>
+          ${loopHtml}
+        </div>
+        <div class="blocks-col right">
+          <h3>✅ 解答積木（唯讀展示）</h3>
+          <div class="blocks">${blocksHtml}</div>
+        </div>`;
+      document.getElementById('pageno').textContent = `第 ${idx + 1} / ${D.levels.length} 關`;
+      document.getElementById('dots').innerHTML = D.levels.map((_, i) =>
+        `<span class="${i === idx ? 'on' : ''}" data-i="${i}"></span>`).join('');
+      document.querySelectorAll('.dots span').forEach(s =>
+        s.addEventListener('click', () => { idx = +s.getAttribute('data-i'); render(); }));
+      document.getElementById('prev').disabled = idx === 0;
+      document.getElementById('next').disabled = idx === D.levels.length - 1;
+    }
+    function go(d) { idx = Math.max(0, Math.min(D.levels.length - 1, idx + d)); render(); }
+    document.getElementById('prev').addEventListener('click', () => go(-1));
+    document.getElementById('next').addEventListener('click', () => go(1));
+    // 左右鍵翻頁（投影片必備）
+    window.addEventListener('keydown', e => {
+      if (deck.style.display === 'none') return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') { go(1); e.preventDefault(); }
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { go(-1); e.preventDefault(); }
+    });
+  </script>
+</body>
+</html>
