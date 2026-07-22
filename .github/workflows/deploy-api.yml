@@ -16,6 +16,9 @@ env:
   EC2_INSTANCE_ID: i-01149a2c1afbba98c       # ← EC2 建好後填 instance id
   API_DOMAIN: creafly-api.propskynet.com      # ← 後端網域
   LETSENCRYPT_EMAIL: paypaycloud.rd@gmail.com # ← 憑證信箱
+  # 前端網域白名單（逗號分隔；*.前綴 = 萬用子網域，涵蓋 Pages preview 部署）
+  # 之後前端換網域：改這行 + Pages 的 VITE_API_URL，各重新部署一次即可
+  ALLOWED_ORIGINS: droneclassroom.pages.dev,*.droneclassroom.pages.dev
 # ========================================
 
 jobs:
@@ -91,6 +94,7 @@ jobs:
             -e "LETSENCRYPT_HOST=${{ env.API_DOMAIN }}" \
             -e "LETSENCRYPT_EMAIL=${{ env.LETSENCRYPT_EMAIL }}" \
             -e "TEACHER_AUTH_DISABLED=1" \
+            -e "ALLOWED_ORIGINS=${{ env.ALLOWED_ORIGINS }}" \
             --env-file /opt/creafly/creafly.env \
             -p 3000:3000 \
             "$IMAGE"

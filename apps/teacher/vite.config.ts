@@ -4,7 +4,9 @@ import { defineConfig } from 'vite';
 // 打包出來的 assets 掛在 /teacher-assets/ 底下（所以 base 固定指到那）。
 // 開發時 REST 與 WS 都代理到本機後端（apps/api，:3000）。
 export default defineConfig({
-  base: '/teacher-assets/',
+  // Pages 獨立部署時設環境變數 VITE_TEACHER_BASE=/；
+  // 預設值供 all-in-one 模式（api 於 /teacher-assets 供檔）
+  base: process.env.VITE_TEACHER_BASE || '/teacher-assets/',
   server: {
     proxy: {
       '/auth': 'http://localhost:3000',

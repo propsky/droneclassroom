@@ -1,5 +1,6 @@
 // 老師 WebSocket client — 連 /teacher?ticket=<...>。
 // close 4401（ticket 無效/過期）→ 通知上層登出；其他斷線固定 2 秒後重連（沿用有效 ticket）。
+import { wsUrl } from './backend';
 import type {
   ArenaEndMsg,
   ArenaScoresMsg,
@@ -66,10 +67,9 @@ export class TeacherWs {
       this.handlers.onUnauthorized();
       return;
     }
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     let ws: WebSocket;
     try {
-      ws = new WebSocket(`${proto}//${location.host}/teacher?ticket=${encodeURIComponent(ticket)}`);
+      ws = new WebSocket(wsUrl(`/teacher?ticket=${encodeURIComponent(ticket)}`));
     } catch (e) {
       console.warn('[WS] 建立連線失敗：', e);
       this.scheduleReconnect();

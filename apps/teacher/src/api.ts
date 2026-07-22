@@ -1,4 +1,5 @@
 // REST 呼叫（契約見 @creafly/shared 的 rest.ts）＋ ticket 保存（sessionStorage，含過期時間）。
+import { API_BASE } from './backend';
 import type {
   TeacherLoginRequest,
   TeacherLoginResponse,
@@ -53,7 +54,7 @@ export class LoginError extends Error {
 
 export async function teacherLogin(pin: string): Promise<TeacherLoginResponse> {
   const body: TeacherLoginRequest = { password: pin };
-  const res = await fetch('/auth/teacher', {
+  const res = await fetch(API_BASE + '/auth/teacher', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -63,13 +64,13 @@ export async function teacherLogin(pin: string): Promise<TeacherLoginResponse> {
 }
 
 export async function fetchLevels(): Promise<LevelsResponse> {
-  const res = await fetch('/api/levels');
+  const res = await fetch(API_BASE + '/api/levels');
   if (!res.ok) throw new Error(`GET /api/levels 失敗（HTTP ${res.status}）`);
   return (await res.json()) as LevelsResponse;
 }
 
 export async function fetchInfo(): Promise<InfoResponse> {
-  const res = await fetch('/api/info');
+  const res = await fetch(API_BASE + '/api/info');
   if (!res.ok) throw new Error(`GET /api/info 失敗（HTTP ${res.status}）`);
   return (await res.json()) as InfoResponse;
 }

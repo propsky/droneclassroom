@@ -104,7 +104,8 @@ def origin_allowed(origin: str | None, host: str | None, extra_origins: frozense
     - Origin 的 host 與請求 Host 相同（忽略 port）→ 放行（同站，最常見）
     - localhost / loopback / 私有網段（10. / 172.16-31. / 192.168.）→ 放行：
       教室場景學生用 LAN IP 連、老師可能用 localhost，預設放行是刻意的
-    - 在 ALLOWED_ORIGINS 設定內（完整 origin 或 hostname 皆可）→ 放行
+    - 在 ALLOWED_ORIGINS 設定內（完整 origin、hostname、或 `*.網域` 萬用子網域）→ 放行
+      萬用寫法給 Cloudflare Pages 的 preview 部署用（<hash>.專案.pages.dev）
     - 其餘 → 拒絕（WS close 4403 / HTTP 403）
     """
     if origin is None:
@@ -114,6 +115,11 @@ def origin_allowed(origin: str | None, host: str | None, extra_origins: frozense
         return False
     if origin in extra_origins or hostname in extra_origins:
         return True
+    lower = hostname.lower()
+    for entry in extra_origins:
+        # "*.example.pages.dev" → 任何層級的子網域皆放行（不含裸網域本身，裸網域另列）
+        if entry.startswith("*.") and lower.endswith(entry[1:].lower()):
+            return True
     # 與請求 Host 同 host（忽略 port）：urlsplit 順便處理 "ip:port" / "[v6]:port"
     req_host = urlsplit(f"//{host}").hostname if host else None
     if req_host and hostname.lower() == req_host.lower():

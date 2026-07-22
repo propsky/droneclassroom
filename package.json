@@ -8,6 +8,7 @@
     "dev:sim": "pnpm --filter @creafly/simulator dev",
     "dev:api": "pnpm --filter @creafly/api dev",
     "build": "pnpm -r build",
+    "build:pages": "pnpm --filter @creafly/simulator build && VITE_TEACHER_BASE=/teacher/ pnpm --filter @creafly/teacher build && rm -rf apps/simulator/dist/teacher && cp -r apps/teacher/dist apps/simulator/dist/teacher",
     "typecheck": "pnpm -r typecheck",
     "legacy": "node legacy/server.js"
   },

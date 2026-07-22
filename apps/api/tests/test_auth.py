@@ -165,3 +165,38 @@ def test_generate_pin_為6位數字() -> None:
     for _ in range(20):
         pin = generate_pin()
         assert len(pin) == 6 and pin.isdigit()
+
+
+# ---------- 前後分離：萬用子網域 Origin 與 CORS ----------
+
+
+def test_origin萬用子網域(client: TestClient) -> None:
+    """`*.網域` 白名單項目：任何層級子網域放行、裸網域與無關網域照規則。"""
+    from app.auth import origin_allowed
+
+    extra = frozenset({"droneclassroom.pages.dev", "*.droneclassroom.pages.dev"})
+    assert origin_allowed("https://droneclassroom.pages.dev", "api.x.com", extra)
+    assert origin_allowed("https://abc123.droneclassroom.pages.dev", "api.x.com", extra)
+    assert not origin_allowed("https://evil.example.com", "api.x.com", extra)
+    assert not origin_allowed("https://droneclassroom.pages.dev.evil.com", "api.x.com", extra)
+
+
+def test_cors_headers_for_allowed_origin() -> None:
+    """設定 ALLOWED_ORIGINS 後，白名單來源的 REST 請求要拿到 CORS 許可 header。"""
+    from app.config import Settings
+    from app.main import create_app
+
+    app = create_app(
+        Settings(
+            teacher_password="pw",
+            game_tick_interval=0,
+            allowed_origins="droneclassroom.pages.dev,*.droneclassroom.pages.dev",
+        )
+    )
+    with TestClient(app) as c:
+        r = c.get("/api/info", headers={"Origin": "https://droneclassroom.pages.dev"})
+        assert r.headers.get("access-control-allow-origin") == "https://droneclassroom.pages.dev"
+        r2 = c.get("/api/info", headers={"Origin": "https://xyz.droneclassroom.pages.dev"})
+        assert r2.headers.get("access-control-allow-origin") == "https://xyz.droneclassroom.pages.dev"
+        r3 = c.get("/api/info", headers={"Origin": "https://evil.example.com"})
+        assert "access-control-allow-origin" not in r3.headers

@@ -3,6 +3,7 @@
 import type { ServerToClient, SoccerBallMsg, StudentToServer } from '@creafly/shared';
 import { WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
+import { wsUrl } from './backend';
 import { loadLevel, runCountdown, levelState, resetMission } from '../core/level';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
@@ -41,10 +42,9 @@ export function connectToTeacher(): void {
   ) {
     return;
   }
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   let ws: WebSocket;
   try {
-    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    ws = new WebSocket(wsUrl('/ws'));
   } catch (e) {
     console.warn('WebSocket 連線失敗：', e);
     scheduleReconnect();
