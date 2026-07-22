@@ -54,7 +54,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: apps/api
+          context: .
+          file: apps/api/Dockerfile
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:latest
           platforms: linux/arm64

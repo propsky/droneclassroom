@@ -1,0 +1,13 @@
+# 後端 image 的 build context 白名單：只放 apps/api 與關卡資料，其餘全排除
+# （context 在 repo 根目錄，見 .github/workflows/deploy-api.yml 的 context: .）
+*
+!apps
+apps/*
+!apps/api
+apps/api/.venv
+apps/api/__pycache__
+!apps/simulator
+apps/simulator/*
+!apps/simulator/public
+apps/simulator/public/*
+!apps/simulator/public/levels
