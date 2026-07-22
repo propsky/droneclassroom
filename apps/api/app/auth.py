@@ -48,7 +48,10 @@ class TeacherAuth:
     secret 每次啟動以 secrets 隨機產生（重啟即全失效，可接受）。
     """
 
-    def __init__(self, password: str, ttl: int) -> None:
+    def __init__(self, password: str, ttl: int, disabled: bool = False) -> None:
+        # disabled=True（TEACHER_AUTH_DISABLED=1）：免登入模式 —— 任何密碼都放行，
+        # ticket 機制照常運作（前端流程不變），僅密碼檢查跳過。測試環境專用。
+        self.disabled = disabled
         self.password = password
         self.ttl = ttl
         self._secret = secrets.token_bytes(32)
@@ -56,7 +59,9 @@ class TeacherAuth:
         self._attempts: dict[str, tuple[float, int]] = {}
 
     def check_password(self, password: str) -> bool:
-        """密碼比對（constant-time，避免 timing attack）。"""
+        """密碼比對（constant-time，避免 timing attack）；免登入模式一律放行。"""
+        if self.disabled:
+            return True
         return hmac.compare_digest(password.encode("utf-8"), self.password.encode("utf-8"))
 
     def issue_ticket(self, now: float | None = None) -> str:

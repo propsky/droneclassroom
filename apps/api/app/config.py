@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     teacher_html: Path = Field(default_factory=lambda: _API_DIR / "static" / "teacher.html")
     teacher_dist: Path = Field(default_factory=lambda: _APPS_DIR / "teacher" / "dist")
     teacher_password: str | None = None
+    # 免登入模式（測試用）：後台不需要 PIN 直接進入。正式環境務必維持 False
+    teacher_auth_disabled: bool = False
     ticket_ttl: int = 14400
     allowed_origins: str = ""
     levels_dir: Path = Field(

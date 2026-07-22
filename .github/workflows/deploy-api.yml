@@ -1,0 +1,126 @@
+name: Deploy CREAFLY API (ECR + SSM)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/api/**'
+      - 'packages/shared/**'
+      - '.github/workflows/deploy-api.yml'
+
+# ======= 改這裡（非機密值直接寫死）=======
+env:
+  AWS_REGION: ap-northeast-1
+  ECR_REPO: creafly-api
+  EC2_INSTANCE_ID: i-01149a2c1afbba98c       # ← EC2 建好後填 instance id
+  API_DOMAIN: creafly-api.propskynet.com      # ← 後端網域
+  LETSENCRYPT_EMAIL: paypaycloud.rd@gmail.com # ← 憑證信箱
+# ========================================
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ==========================================
+      # 1. 登入 ECR（GitHub 端）
+      # ==========================================
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ==========================================
+      # 2. Buildx
+      # ==========================================
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ==========================================
+      # 3. 建置並推送到 ECR（t4g/Graviton = ARM → linux/arm64）
+      # ==========================================
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:latest
+          platforms: linux/arm64
+
+      # ==========================================
+      # 4. 透過 SSM 叫 EC2 更新（無 SSH、無金鑰）
+      #    TEACHER_AUTH_DISABLED=1 = 後台免登入。
+      #    正式的帳密登入/註冊流程完成後，移除此行改接新認證。
+      # ==========================================
+      - name: Deploy via SSM
+        run: |
+          cat > /tmp/deploy.sh <<'DEPLOY'
+          set -e
+          echo "==== 開始部署 CREAFLY API ===="
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          IMAGE="$REGISTRY/${{ env.ECR_REPO }}:latest"
+
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+          echo "下載最新映像檔..."
+          docker pull "$IMAGE"
+
+          echo "停止舊容器..."
+          docker stop creafly-api || true
+          docker rm creafly-api || true
+          docker image prune -f
+
+          echo "啟動新容器..."
+          docker run -d \
+            --name creafly-api \
+            --restart always \
+            --network bridge-network \
+            -e "PORT=3000" \
+            -e "VIRTUAL_HOST=${{ env.API_DOMAIN }}" \
+            -e "VIRTUAL_PORT=3000" \
+            -e "LETSENCRYPT_HOST=${{ env.API_DOMAIN }}" \
+            -e "LETSENCRYPT_EMAIL=${{ env.LETSENCRYPT_EMAIL }}" \
+            -e "TEACHER_AUTH_DISABLED=1" \
+            --env-file /opt/creafly/creafly.env \
+            -p 3000:3000 \
+            "$IMAGE"
+          echo "==== 部署完成 ===="
+          DEPLOY
+
+          PARAMS=$(jq -n --arg s "$(cat /tmp/deploy.sh)" '{commands: [$s]}')
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ env.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "deploy creafly-api" \
+            --parameters "$PARAMS" \
+            --query 'Command.CommandId' --output text)
+          echo "SSM Command: $CMD_ID"
+
+          aws ssm wait command-executed \
+            --command-id "$CMD_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$CMD_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+            --query 'Status' --output text)
+          echo "===== 機器輸出 ====="
+          aws ssm get-command-invocation \
+            --command-id "$CMD_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+            --query 'StandardOutputContent' --output text
+          if [ "$STATUS" != "Success" ]; then
+            echo "===== 錯誤輸出 ====="
+            aws ssm get-command-invocation \
+              --command-id "$CMD_ID" --instance-id "${{ env.EC2_INSTANCE_ID }}" \
+              --query 'StandardErrorContent' --output text
+            echo "部署失敗：$STATUS"
+            exit 1
+          fi

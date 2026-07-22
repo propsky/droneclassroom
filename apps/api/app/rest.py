@@ -69,6 +69,8 @@ class InfoResponse(BaseModel):
     port: int
     maxStudents: int  # noqa: N815
     version: str
+    # 免登入模式（測試用）：前端據此跳過登入畫面自動取票
+    teacherAuthDisabled: bool = False  # noqa: N815
 
 
 # ---------- 關卡載入（啟動時一次，關卡是靜態資料、改檔重啟即可）----------
@@ -170,4 +172,5 @@ async def get_info(request: Request) -> InfoResponse:
         port=settings.port,
         maxStudents=settings.max_students,
         version=API_VERSION,
+        teacherAuthDisabled=settings.teacher_auth_disabled,
     )

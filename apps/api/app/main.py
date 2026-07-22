@@ -43,9 +43,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """組裝 FastAPI app；settings 可注入（測試用），預設讀環境變數。"""
     cfg = settings or Settings()
 
-    # 教師密碼：TEACHER_PASSWORD 未設定 → 啟動隨機產生 6 位數 PIN（lifespan 印出）
-    generated_pin = generate_pin() if not cfg.teacher_password else None
-    auth = TeacherAuth(password=cfg.teacher_password or generated_pin, ttl=cfg.ticket_ttl)
+    # 教師密碼：TEACHER_PASSWORD 未設定 → 啟動隨機產生 6 位數 PIN（lifespan 印出）；
+    # TEACHER_AUTH_DISABLED=1 → 免登入模式（測試用），不產 PIN、密碼檢查全放行
+    generated_pin = (
+        generate_pin() if not cfg.teacher_password and not cfg.teacher_auth_disabled else None
+    )
+    auth = TeacherAuth(
+        password=cfg.teacher_password or generated_pin or "",
+        ttl=cfg.ticket_ttl,
+        disabled=cfg.teacher_auth_disabled,
+    )
 
     # 關卡清單啟動時載入一次（/api/levels 快取 + 防作弊已知關卡清單）
     levels = load_levels(cfg.levels_dir)
@@ -66,6 +73,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info(
             "WebSocket 與 HTTP 共用 port %d（path: / 或 /ws 學生、/teacher 老師）", cfg.port
         )
+        if cfg.teacher_auth_disabled:
+            logger.warning(
+                "⚠️ 教師後台免登入模式（TEACHER_AUTH_DISABLED=1）— 僅供測試，正式環境請關閉"
+            )
         if generated_pin:
             logger.warning("=" * 50)
             logger.warning("🔑 教師後台 PIN：%s", generated_pin)

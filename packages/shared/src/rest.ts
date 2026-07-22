@@ -30,6 +30,8 @@ export interface InfoResponse {
   /** 學生人數上限（顯示用，來自設定） */
   maxStudents: number;
   version: string;
+  /** 免登入模式（測試用）：true 時前端跳過登入畫面自動取票 */
+  teacherAuthDisabled?: boolean;
 }
 
 /** WS 升級被拒的 close codes */

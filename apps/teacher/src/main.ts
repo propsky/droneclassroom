@@ -8,11 +8,23 @@ import { renderDashboard } from './views/dashboard';
 
 const app = document.getElementById('app')!;
 let wsClient: TeacherWs | null = null;
+/** 免登入模式（伺服器 TEACHER_AUTH_DISABLED=1，由 /api/info 得知）：跳過登入畫面自動取票 */
+let authDisabled = false;
 
 function showLogin(): void {
   wsClient?.stop();
   wsClient = null;
   renderLogin(app, () => void enterDashboard());
+}
+
+/** 免登入模式自動取票（伺服器不驗密碼，空字串即可）；失敗回傳 false 落回登入畫面 */
+async function autoLogin(): Promise<boolean> {
+  try {
+    saveTicket(await teacherLogin(''));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function enterDashboard(): Promise<void> {
@@ -37,6 +49,11 @@ async function enterDashboard(): Promise<void> {
       onSoccer: (msg) => view.onSoccerMsg(msg),
       onUnauthorized: () => {
         clearTicket();
+        if (authDisabled) {
+          // 免登入模式：票失效（如伺服器重啟）就靜靜換一張，不打擾使用者
+          void autoLogin().then((ok) => (ok ? client.connect() : showLogin()));
+          return;
+        }
         toast('登入已過期，請重新輸入 PIN', 'error');
         showLogin();
       },
@@ -58,6 +75,12 @@ async function enterDashboard(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
+  // 免登入模式偵測：伺服器 TEACHER_AUTH_DISABLED=1 時跳過登入畫面
+  authDisabled = await fetchInfo()
+    .then((i) => !!i.teacherAuthDisabled)
+    .catch(() => false);
+  if (authDisabled && !loadTicket()) await autoLogin();
+
   // 開發後門：URL ?pin=xxx 自動登入（headless 截圖測試用，正式環境 PIN 錯就照常回登入畫面）
   const urlPin = new URLSearchParams(location.search).get('pin');
   if (!loadTicket() && urlPin) {
