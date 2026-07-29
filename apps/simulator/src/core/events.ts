@@ -18,8 +18,12 @@ export interface CoreEventMap {
   'level-loaded': { level: LevelDef };
   /** 顯示關卡說明 overlay */
   'level-intro': { level: LevelDef };
-  /** 學生按「開始」（或 fallback 逾時自動開始）→ 關閉 intro */
+  /** 學生按「開始」→ 關閉 intro */
   'level-armed': { level: LevelDef };
+  /** 暫停 / 繼續（UI 顯示暫停 overlay、切換按鈕態） */
+  'level-paused': { paused: boolean };
+  /** 老師鎖定 / 解鎖關卡選擇（UI 停用關卡選單） */
+  'level-lock': { locked: boolean };
   /** 3-2-1 倒數：n=3,2,1；n=0 表示 GO */
   'countdown': { n: number };
   /** 穿過一個圈 */

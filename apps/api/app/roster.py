@@ -21,6 +21,8 @@ from starlette.websockets import WebSocketState
 
 from .protocol import (
     WS_CLOSE_REPLACED,
+    LoadLevelPayload,
+    LockLevelPayload,
     StudentBrief,
     StudentInfo,
     StudentListMsg,
@@ -74,15 +76,33 @@ class Roster:
         self._student_counter = 0
         # 已知關卡 id（來自 /api/levels 快取）：complete_level 帶未知 levelId → suspect
         self._known_levels = known_levels
+        # 老師鎖定關卡選擇（伺服器記住 → 遲到學生連上時補送鎖定狀態與課程關卡）
+        self.level_locked = False
+        # 老師最後一次廣播的關卡（load_level / race_start）；鎖定中遲到者補載入用
+        self.current_level_id: str | None = None
 
     # ---------- 連線生命週期 ----------
 
     async def add_student(self, ws: WebSocket) -> StudentRecord:
-        """學生連上：配發 id、發 welcome、通知老師。"""
+        """學生連上：配發 id、發 welcome、通知老師。
+
+        老師鎖定關卡中 → 補送鎖定狀態與課程關卡（遲到 / 重整的學生跟上全班進度）。
+        """
         self._student_counter += 1
         record = StudentRecord(id=f"s{self._student_counter}", ws=ws)
         self._students.append(record)
         await send_safe(ws, WelcomeMsg(id=record.id).model_dump_json())
+        if self.level_locked:
+            await send_safe(
+                ws, LockLevelPayload(type="lock_level", locked=True).model_dump_json()
+            )
+            if self.current_level_id is not None:
+                await send_safe(
+                    ws,
+                    LoadLevelPayload(
+                        type="load_level", levelId=self.current_level_id
+                    ).model_dump_json(),
+                )
         await self.broadcast_to_teachers(self._student_list_payload())
         return record
 
@@ -101,9 +121,16 @@ class Roster:
         await self.broadcast_to_teachers(self._student_list_payload())
 
     async def add_teacher(self, ws: WebSocket) -> None:
-        """老師連上：先給一份完整名冊。"""
+        """老師連上：先給一份完整名冊；鎖定中再補送鎖定狀態（重整 / 多裝置同步開關）。
+
+        未鎖定不送 —— 老師端開關預設即未鎖定，且維持訊息流與既有 client 相容。
+        """
         self._teachers.add(ws)
         await send_safe(ws, self._student_list_payload().model_dump_json())
+        if self.level_locked:
+            await send_safe(
+                ws, LockLevelPayload(type="lock_level", locked=True).model_dump_json()
+            )
 
     def remove_teacher(self, ws: WebSocket) -> None:
         """老師斷線：移出集合。"""

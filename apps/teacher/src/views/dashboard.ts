@@ -24,6 +24,8 @@ export interface DashboardView {
   onArenaMsg(msg: TeacherArenaMsg): void;
   /** 足球訊息 → 隊伍名單 / 比分 / 進球與勝負 toast */
   onSoccerMsg(msg: TeacherSoccerMsg): void;
+  /** 關卡鎖定狀態（伺服器回送為準）→ 鎖定按鈕 UI */
+  setLevelLock(locked: boolean): void;
 }
 
 export interface DashboardOptions {
@@ -178,6 +180,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-actions">
+              <button class="btn btn-ghost" id="btn-lock-level" title="鎖定後學生無法自行切換關卡，只能由老師廣播切關（遲到連上的學生也會套用）">${ICONS.lockOpen}鎖定關卡</button>
               <button class="btn btn-ghost" id="btn-load-level">${ICONS.map}全班載入此關卡</button>
               <button class="btn btn-primary" id="btn-race-start">${ICONS.flag}開始比賽</button>
             </div>
@@ -401,6 +404,22 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 賽局進行中時附加在 confirm 的提醒（伺服器會智能停止比賽，這裡只是提示） */
   const gameWarn = (): string =>
     gameInProgress() ? '\n注意：目前有比賽進行中，切換將自動結束比賽。' : '';
+
+  // 關卡鎖定：點擊送出切換請求，按鈕狀態等伺服器回送（setLevelLock）才更新 —
+  // 開關以伺服器為準，多裝置 / 重整後台也同步
+  let levelLocked = false;
+  const lockBtn = root.querySelector<HTMLButtonElement>('#btn-lock-level')!;
+  const drawLockBtn = (): void => {
+    lockBtn.innerHTML = levelLocked ? `${ICONS.lock}解除關卡鎖定` : `${ICONS.lockOpen}鎖定關卡`;
+    lockBtn.classList.toggle('btn-warning', levelLocked);
+  };
+  lockBtn.addEventListener('click', () => {
+    const next = !levelLocked;
+    send(
+      { type: 'lock_level', locked: next },
+      next ? '已鎖定關卡（學生無法自行切換）' : '已解除關卡鎖定',
+    );
+  });
 
   on('logout-btn', () => opts.onLogout());
   on('btn-load-level', () => {
@@ -782,6 +801,10 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           }
           break;
       }
+    },
+    setLevelLock(locked: boolean): void {
+      levelLocked = locked;
+      drawLockBtn();
     },
     setWsStatus(connected: boolean): void {
       wsStatusEl.className = connected ? 'ws-on' : 'ws-off';

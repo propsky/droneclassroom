@@ -31,6 +31,8 @@ export const levelState = {
   current: null as LevelDef | null,
   /** 0 = 尚未開始計時（按開始 + 3-2-1 倒數後才設定） */
   startTime: 0,
+  /** 暫停起始時間戳（0 = 未暫停）；恢復時把暫停時長補回 startTime，計時凍結 */
+  pausedAt: 0,
   armed: false,
   rings: [] as MissionRing[],
   ringsCollected: 0,
@@ -54,7 +56,10 @@ export function ringWorldY(index: number, baseY: number, nowMs: number): number 
 }
 
 export function levelElapsedMs(): number {
-  return levelState.startTime ? Date.now() - levelState.startTime : 0;
+  if (!levelState.startTime) return 0;
+  // 暫停中：以暫停當下時間為基準 → HUD 計時凍結
+  const base = levelState.pausedAt || Date.now();
+  return base - levelState.startTime;
 }
 
 // =============================================================================
@@ -102,8 +107,10 @@ export function loadLevel(levelId: string): void {
   s.returnPhase = null;
   s.durationDone = false;
   s.startTime = 0;
+  s.pausedAt = 0;
   s.armed = false;
   flags.countdownActive = false;
+  flags.paused = false;
   lastFaceAligned = null;
   lastFaceRing = -1;
 
@@ -139,8 +146,10 @@ export function clearLevel(): void {
   s.returnPhase = null;
   s.durationDone = false;
   s.startTime = 0;
-  s.armed = true; // 取消 intro 的 fallback 自動開始
+  s.pausedAt = 0;
+  s.armed = true;
   flags.countdownActive = false;
+  flags.paused = false;
   lastFaceAligned = null;
   lastFaceRing = -1;
   setSolidObstacles([]);
@@ -148,15 +157,9 @@ export function clearLevel(): void {
 }
 
 function showIntro(level: LevelDef): void {
+  // 只顯示說明，等學生按「開始」才啟動（不再有逾時自動倒數 —
+  // 學生還在登入 / 看題目就被強制開始計時的問題由此修掉）
   bus.emit('level-intro', { level });
-  // 太久沒按「開始」→ fallback 自動啟動（1-0 較短）
-  const armId = level.id;
-  setTimeout(
-    () => {
-      if (levelState.current?.id === armId) armLevelStart();
-    },
-    level.id === '1-0' ? 15000 : 20000,
-  );
 }
 
 /** 按「開始」→ 關閉說明 → 3-2-1 倒數 → 開始計時（每關只觸發一次） */

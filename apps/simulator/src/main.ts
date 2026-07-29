@@ -2,7 +2,7 @@
 // 渲染幀率無關；單幀最多補 5 tick 防 spiral of death。
 import './ui/style.css';
 import { Vector3 } from '@babylonjs/core';
-import { TICK_MS, droneState, isManualLocked } from './core/droneState';
+import { TICK_MS, droneState, flags, isManualLocked } from './core/droneState';
 import {
   applyManualControls,
   integrate,
@@ -250,8 +250,14 @@ function fixedTick(nowMs: number): void {
 
 world.engine.runRenderLoop(() => {
   const now = performance.now();
-  accumulator += now - lastTime;
-  lastTime = now;
+  if (flags.paused) {
+    // 暫停中：不累積時間、不 tick（物理 / motion plan / 判定全部凍結），畫面照常渲染
+    lastTime = now;
+    accumulator = 0;
+  } else {
+    accumulator += now - lastTime;
+    lastTime = now;
+  }
 
   let ticks = 0;
   while (accumulator >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {

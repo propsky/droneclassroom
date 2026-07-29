@@ -44,7 +44,9 @@ export type TeacherBroadcastPayload =
   | { type: 'set_mode'; mode: 'manual' | 'program' }
   | { type: 'reset_all' }
   | { type: 'race_start'; levelId: string }
-  | { type: 'show_message'; text: string };
+  | { type: 'show_message'; text: string }
+  /** 鎖定關卡選擇：學生端關卡選單停用，只能由老師廣播切關（伺服器記住狀態，遲到者補送） */
+  | { type: 'lock_level'; locked: boolean };
 
 export interface TeacherBroadcastMsg {
   type: 'broadcast';

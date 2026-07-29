@@ -72,4 +72,10 @@ export const ICONS = {
     '<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/>' +
     '<line x1="9" x2="9" y1="3" y2="18"/><line x1="15" x2="15" y1="6" y2="21"/>',
   ),
+  lock: svg(
+    '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  ),
+  lockOpen: svg(
+    '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+  ),
 } as const;

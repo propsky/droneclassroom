@@ -85,6 +85,8 @@ export const flags = {
   programRunning: false,
   /** 3-2-1 倒數中（鎖操控、不判定過關） */
   countdownActive: false,
+  /** 暫停中（主迴圈不 tick、計時凍結；多人賽局中不可暫停） */
+  paused: false,
   /**
    * 多人模式鎖操控（大亂鬥倒數中 / 鬼抓人暈眩中）。
    * 由 multiplayer/arena.ts 每 tick 更新 — core 不 import multiplayer，避免反向依賴。
@@ -92,12 +94,13 @@ export const flags = {
   multiplayerLock: false,
 };
 
-/** 手動輸入是否被鎖定（程式模式 / 程式執行中 / 倒數中 / 回家中 / 多人鎖定） */
+/** 手動輸入是否被鎖定（程式模式 / 程式執行中 / 倒數中 / 暫停中 / 回家中 / 多人鎖定） */
 export function isManualLocked(): boolean {
   return (
     flags.programRunning ||
     flags.mode !== 'manual' ||
     flags.countdownActive ||
+    flags.paused ||
     flags.multiplayerLock ||
     droneState.returning
   );

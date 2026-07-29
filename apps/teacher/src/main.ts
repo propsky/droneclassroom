@@ -47,6 +47,7 @@ async function enterDashboard(): Promise<void> {
       onStudents: (list) => view.setStudents(list),
       onArena: (msg) => view.onArenaMsg(msg),
       onSoccer: (msg) => view.onSoccerMsg(msg),
+      onLock: (locked) => view.setLevelLock(locked),
       onUnauthorized: () => {
         clearTicket();
         if (authDisabled) {

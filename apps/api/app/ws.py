@@ -247,13 +247,21 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                 continue
             match valid:
                 case TeacherBroadcastMsg():
-                    # 老師廣播（load_level / set_mode / reset_all / race_start / show_message）
+                    # 老師廣播（load_level / set_mode / reset_all / race_start /
+                    # show_message / lock_level）
                     if valid.payload.type in ("load_level", "race_start", "reset_all"):
                         # 智能停止：賽局（含倒數）進行中老師切關 → 先結束該賽局
                         # （end 廣播 reason:'level_switch'）再轉發關卡廣播。
                         # 同一 handler 內依序 await，學生保證先收到 end 再收到關卡廣播
                         await arena.stop("level_switch")
                         await soccer.stop("level_switch")
+                    if valid.payload.type in ("load_level", "race_start"):
+                        # 記住課程關卡：鎖定中遲到 / 重整的學生連上時補載入
+                        roster.current_level_id = valid.payload.levelId
+                    if valid.payload.type == "lock_level":
+                        # 鎖定狀態存伺服器（遲到者補送），並回送全體老師同步開關 UI
+                        roster.level_locked = valid.payload.locked
+                        await roster.send_raw_to_teachers(valid.payload.model_dump_json())
                     await roster.broadcast_to_students(valid.payload)
                 # ----- 大亂鬥 -----
                 case ArenaStartMsg():

@@ -32,6 +32,8 @@ export interface TeacherWsHandlers {
   onArena(msg: TeacherArenaMsg): void;
   /** 足球訊息（隊伍名單 / 比分 / 進球 / 勝負） */
   onSoccer(msg: TeacherSoccerMsg): void;
+  /** 關卡鎖定狀態（連上時伺服器補送 + 廣播後回送 → 開關 UI 以伺服器為準） */
+  onLock(locked: boolean): void;
   /** ticket 無效或已過期 → 上層清 sessionStorage 回登入畫面 */
   onUnauthorized(): void;
 }
@@ -165,6 +167,9 @@ export class TeacherWs {
       case 'soccer_goal_ok':
       case 'soccer_end':
         this.handlers.onSoccer(msg);
+        break;
+      case 'lock_level':
+        this.handlers.onLock(msg.locked);
         break;
       default:
         break; // 其餘（學生端專用的 arena_go / soccer_countdown …）老師端不需處理

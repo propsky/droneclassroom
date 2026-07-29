@@ -411,6 +411,15 @@ tbody tr.offline td { opacity: 0.55; }
 .btn-primary:hover:not(:disabled) { background: var(--brand-strong); }
 .btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
 .btn-danger:hover:not(:disabled) { background: var(--danger); color: #fff; }
+/* 鎖定中（關卡鎖定按鈕）：黃色警示態 */
+.btn-warning {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.btn-warning:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warn) 30%, transparent);
+}
 
 /* ===== 控件區：label 在上、同列同高 40、欄距 --sp-3 ===== */
 .field { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }

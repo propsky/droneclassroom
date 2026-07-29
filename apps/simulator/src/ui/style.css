@@ -1044,6 +1044,23 @@ body.joystick-forced #joystick-layer {
   background: var(--brand-strong);
   border-color: var(--brand-strong);
 }
+/* 次要 modal 按鈕（暫停 overlay 的「重新本關」）*/
+.modal-btn-ghost {
+  background: transparent;
+  color: var(--text-1);
+  border-color: var(--line);
+  margin-top: var(--sp-3);
+}
+.modal-btn-ghost:hover {
+  background: var(--bg-2, rgba(0, 0, 0, 0.06));
+  color: var(--text-1);
+  border-color: var(--line);
+}
+/* 老師鎖定關卡：選單按鈕降飽和示意不可用 */
+.level-selector.locked #level-menu-toggle {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 #login-name {
   width: 100%;
   height: 40px;

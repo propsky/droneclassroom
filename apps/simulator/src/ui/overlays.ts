@@ -4,6 +4,7 @@ import { bus, toast } from '../core/events';
 import { flags } from '../core/droneState';
 import { levelState, loadLevel, armLevelStart, resetMission } from '../core/level';
 import { setMode, runProgram, stopProgram, programState } from '../core/program';
+import { togglePause, resumeGame } from '../core/pause';
 import { goHome } from '../core/physics';
 import { iconHtml, mountIcons } from './icons';
 
@@ -132,7 +133,13 @@ export function initOverlays(): void {
   mountIcons();
 
   // ---- 關卡 intro ----
+  // ?autostart=1：headless 截圖 / 自動化測試用 — 跳過「開始」按鈕直接啟動
+  const autoStart = new URLSearchParams(location.search).get('autostart') === '1';
   bus.on('level-intro', ({ level }) => {
+    if (autoStart) {
+      armLevelStart();
+      return;
+    }
     const modal = $('level-intro');
     if (!modal) return;
     const title = modal.querySelector('.level-intro-title');
@@ -168,6 +175,20 @@ export function initOverlays(): void {
   });
 
   // ---- 關卡選單（動態建立，三章；draw 關加畫筆圖標）----
+  // 老師鎖定關卡：選單停用，只能由老師廣播切關
+  let levelLocked = false;
+  bus.on('level-lock', ({ locked }) => {
+    levelLocked = locked;
+    $('level-selector')?.classList.toggle('locked', locked);
+    const toggle = $('level-menu-toggle');
+    if (toggle) {
+      toggle.innerHTML = locked
+        ? `${iconHtml('lock')}<span>關卡</span>`
+        : `${iconHtml('map')}<span>關卡</span><span class="btn-ic chev">${iconHtml('chevron-down')}</span>`;
+      toggle.title = locked ? '老師已鎖定關卡選擇' : '選擇關卡';
+    }
+    if (locked) closeLevelMenu();
+  });
   bus.on('levels-ready', ({ levels }) => {
     const holder = $('level-selector-btns');
     if (!holder) return;
@@ -182,6 +203,10 @@ export function initOverlays(): void {
       label.textContent = `${level.id} ${level.name}`;
       btn.appendChild(label);
       btn.addEventListener('click', () => {
+        if (levelLocked) {
+          toast('🔒 老師已鎖定關卡，無法自行切換', 'warning');
+          return;
+        }
         loadLevel(level.id);
         closeLevelMenu();
       });
@@ -198,6 +223,10 @@ export function initOverlays(): void {
   };
   $('level-menu-toggle')?.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (levelLocked) {
+      toast('🔒 老師已鎖定關卡，無法自行切換', 'warning');
+      return;
+    }
     $('level-selector')?.classList.toggle('open');
   });
   document.addEventListener('click', (e) => {
@@ -229,6 +258,7 @@ export function initOverlays(): void {
 
   // ---- header 按鈕 ----
   $('home-btn')?.addEventListener('click', () => goHome());
+  initPause();
   initFullscreen();
 
   // ---- Blockly 工具列（積木內容由後續任務實作；API 已就緒）----
@@ -250,6 +280,58 @@ export function initOverlays(): void {
   );
 
   void levelState;
+}
+
+/** 暫停：header 按鈕 + P 鍵 + overlay（繼續 / 重新本關）；多人賽局中收起按鈕 */
+function initPause(): void {
+  const btn = $('pause-btn') as HTMLButtonElement | null;
+  if (!btn) return;
+
+  const setBtn = (paused: boolean): void => {
+    btn.innerHTML = paused
+      ? `${iconHtml('play')}<span>繼續</span>`
+      : `${iconHtml('pause')}<span>暫停</span>`;
+    btn.classList.toggle('active', paused);
+  };
+
+  bus.on('level-paused', ({ paused }) => {
+    setBtn(paused);
+    $('pause-overlay')?.classList.toggle('show', paused);
+  });
+  // 換關（含老師廣播切關）會直接清掉暫停旗標 → UI 同步復位
+  bus.on('level-loaded', () => {
+    setBtn(false);
+    $('pause-overlay')?.classList.remove('show');
+  });
+
+  btn.addEventListener('click', () => togglePause());
+  $('pause-resume')?.addEventListener('click', () => resumeGame());
+  $('pause-restart')?.addEventListener('click', () => {
+    resumeGame();
+    if (levelState.current) loadLevel(levelState.current.id);
+  });
+
+  // P 鍵切換（輸入框聚焦時不攔截）
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'p' && e.key !== 'P') return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (btn.style.display === 'none') return; // 多人賽局中不可暫停
+    togglePause();
+  });
+
+  // 多人賽局（伺服器權威時間）不可暫停 → 收起按鈕；回一般關卡再顯示
+  const setVisible = (show: boolean): void => {
+    btn.style.display = show ? '' : 'none';
+  };
+  bus.on('arena-entered', () => setVisible(false));
+  bus.on('soccer-entered', () => setVisible(false));
+  bus.on('arena-exited', () => setVisible(true));
+  bus.on('soccer-exited', () => setVisible(true));
+  bus.on('level-cleared', () => {
+    // 進賽局前的清關：若正暫停中先恢復，避免賽局被凍結
+    resumeGame();
+  });
 }
 
 /** 視角按鈕文字同步（點按鈕與按 C 鍵共用；由 main 呼叫）。label 由 CameraRig 決定（足球中三段循環）。 */

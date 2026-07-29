@@ -31,6 +31,7 @@
                     </div>
                 </div>
                 <button id="home-btn" class="header-btn" title="一鍵飛回起飛墊"><span class="btn-ic" data-icon="home"></span><span>回家</span></button>
+                <button id="pause-btn" class="header-btn" title="暫停 / 繼續（鍵盤 P）"><span class="btn-ic" data-icon="pause"></span><span>暫停</span></button>
             </div>
             <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 2：音效 / 音樂 / 視角 -->
@@ -186,6 +187,16 @@
 <!-- ===== 全域 overlay ===== -->
 <div id="toast"></div>
 <div id="countdown-overlay"></div>
+
+<!-- 暫停 overlay（單人關卡；多人賽局中不可暫停） -->
+<div id="pause-overlay" class="modal-overlay">
+    <div class="modal-card">
+        <div class="level-intro-title">已暫停</div>
+        <div class="level-intro-body">計時已凍結，按「繼續」回到飛行。</div>
+        <button id="pause-resume" class="modal-btn">▶ 繼續</button>
+        <button id="pause-restart" class="modal-btn modal-btn-ghost">↻ 重新本關</button>
+    </div>
+</div>
 
 <!-- 關卡教學提示 -->
 <div id="level-intro" class="modal-overlay">

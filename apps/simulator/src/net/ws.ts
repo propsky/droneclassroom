@@ -4,7 +4,7 @@ import type { ServerToClient, SoccerBallMsg, StudentToServer } from '@creafly/sh
 import { WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
-import { loadLevel, runCountdown, levelState, resetMission } from '../core/level';
+import { armLevelStart, loadLevel, levelState, resetMission } from '../core/level';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
 
@@ -27,10 +27,20 @@ export function sendToServer(msg: StudentToServer): void {
 }
 const send = sendToServer;
 
+/** 老師廣播比關卡資料早到（遲到者剛連上時）→ 暫存，levels-ready 後補載入 */
+let pendingLevelId: string | null = null;
+
 export function initWs(): void {
   // 過關 / 切關 → 上報老師後台
   bus.on('level-complete', ({ levelId, timeMs }) => send({ type: 'complete_level', levelId, timeMs }));
   bus.on('level-loaded', ({ level }) => send({ type: 'progress', levelId: level.id }));
+  bus.on('levels-ready', () => {
+    if (pendingLevelId) {
+      const id = pendingLevelId;
+      pendingLevelId = null;
+      loadLevel(id);
+    }
+  });
 }
 
 /** 登入完成後呼叫（含重新整理後自動重連） */
@@ -128,6 +138,11 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       wsState.myId = msg.id;
       break;
     case 'load_level': {
+      if (levelState.levels.length === 0) {
+        // 關卡資料還沒載完（剛連上就收到伺服器補送的鎖定關卡）→ 暫存待補
+        pendingLevelId = msg.levelId;
+        break;
+      }
       const level = levelState.levels.find((l) => l.id === msg.levelId);
       if (level) {
         exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再載入
@@ -136,6 +151,10 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       }
       break;
     }
+    case 'lock_level':
+      bus.emit('level-lock', { locked: msg.locked });
+      toast(msg.locked ? '🔒 老師已鎖定關卡選擇' : '🔓 老師已解除關卡鎖定', 'warning');
+      break;
     case 'set_mode':
       setMode(msg.mode === 'program' ? 'program' : 'manual');
       toast(msg.mode === 'program' ? '🧩 老師切到：程式模式' : '🕹 老師切到：手動模式', 'success');
@@ -150,7 +169,9 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再開賽
       setMode('manual');
       loadLevel(msg.levelId || '1-4');
-      runCountdown();
+      // 直接進入倒數並開始計時（跳過 intro 的「開始」按鈕 — 比賽全班同步起跑；
+      // 修掉舊寫法只跑 runCountdown 導致 startTime 沒設定、成績為 0 還被標可疑的 bug）
+      armLevelStart();
       toast('🏁 比賽開始！', 'success');
       break;
     case 'show_message':

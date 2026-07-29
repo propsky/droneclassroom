@@ -174,8 +174,20 @@ class ShowMessagePayload(_StrictModel):
     text: str
 
 
+class LockLevelPayload(_StrictModel):
+    """鎖定 / 解鎖關卡選擇（伺服器記住狀態，遲到學生連上時補送）。"""
+
+    type: Literal["lock_level"]
+    locked: bool
+
+
 TeacherBroadcastPayload = Annotated[
-    LoadLevelPayload | SetModePayload | ResetAllPayload | RaceStartPayload | ShowMessagePayload,
+    LoadLevelPayload
+    | SetModePayload
+    | ResetAllPayload
+    | RaceStartPayload
+    | ShowMessagePayload
+    | LockLevelPayload,
     Field(discriminator="type"),
 ]
 
