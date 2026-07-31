@@ -7,6 +7,7 @@
 import type { Vec3 } from './droneState';
 import { droneState, flags, distVec3 } from './droneState';
 import { levelState } from './level';
+import { rng } from './rng';
 import { bus } from './events';
 
 // ---- 墨水常數（出處：legacy main.js L947–951）----
@@ -110,7 +111,7 @@ export function inkRandomColor(): void {
   let c: string = penState.color;
   let guard = 0;
   while (c === penState.color && guard++ < 8) {
-    c = INK_RANDOM_PALETTE[Math.floor(Math.random() * INK_RANDOM_PALETTE.length)] as string;
+    c = INK_RANDOM_PALETTE[Math.floor(rng() * INK_RANDOM_PALETTE.length)] as string;
   }
   applyColor(c);
 }

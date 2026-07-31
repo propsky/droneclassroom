@@ -159,6 +159,12 @@ HUD/面板以純 TS + DOM 元件實作，但**核心層已透過 event bus 與 U
 > 可擇期整包移除（建議教室實測一輪後）。
 
 ### Phase 3 — 超越舊版
+- [x] **G-04 跨環境 bit 級確定性（✅ 2026-07-31，收費線 Gate）**：detmath
+  （fdlibm sin/cos、確定性 hypot）+ 可播種 PRNG + 模擬時間（tick 推導）；
+  回放場景 V8 ≡ JSC（iPad Safari 引擎）hash 全等。細節與範圍見
+  `docs/determinism.md`，驗證：`pnpm --filter @creafly/simulator verify:determinism`
+- [x] 首次上手新手引導（✅ 2026-07-31）：逐步導覽 overlay（觸控/鍵盤文案自適應、
+  頭像下拉可重看、?guide=1 強制）+ 關卡選單章節分組導覽
 - Havok 接入 `PhysicsBackend`（glb 場景網格碰撞）
 - Blockly 生成碼移入 Web Worker
 - UI 框架定案（React/Vue 3）並改寫 `ui/`

@@ -2,7 +2,16 @@
 // 指令產生 motion plan（起點/終點/時長/easing），由 60Hz 物理 tick 推進（tickProgram），
 // 完成才 resolve Promise —— 與 legacy 的 rAF tween 對外行為等價，但狀態流單一。
 import { DEG2RAD, randomInt } from '@creafly/shared';
-import { droneState, HOME_POSITION, flags, forwardVec, rightVec, type Vec3 } from './droneState';
+import {
+  droneState,
+  HOME_POSITION,
+  flags,
+  forwardVec,
+  rightVec,
+  simNowMs,
+  type Vec3,
+} from './droneState';
+import { rng } from './rng';
 import { easeInOut } from './physics';
 import { resetMission, checkProgramCompletion, levelState } from './level';
 import { inkPenDown, inkPenUp, inkSetColor, inkRandomColor } from './pen';
@@ -11,7 +20,11 @@ import { bus, toast, sound, stateHud } from './events';
 export const programState = {
   running: false,
   abort: false,
-  /** cf_elapsed / cf_timerReset 的基準時間戳 */
+  /**
+   * cf_elapsed / cf_timerReset 的基準（模擬時間 ms，見 droneState.simNowMs）。
+   * G-04：程式流程控制（forever/every/elapsed 條件）必須跟著模擬 tick 走
+   * 才能確定性重演；暫停時 tick 不前進 → elapsed 自然凍結。
+   */
   startTime: 0,
 };
 
@@ -207,20 +220,20 @@ export function cf_penRandom(): void {
   stateHud('🎲 隨機換色');
 }
 
-/** 從程式開始到現在的秒數（可用於「if elapsed > 5」條件） */
+/** 從程式開始到現在的秒數（模擬時間；可用於「if elapsed > 5」條件） */
 export function cf_elapsed(): number {
   if (!programState.startTime) return 0;
-  return (Date.now() - programState.startTime) / 1000;
+  return (simNowMs() - programState.startTime) / 1000;
 }
 
 export function cf_timerReset(): void {
-  programState.startTime = Date.now();
+  programState.startTime = simNowMs();
   stateHud('⏱ 計時器重設');
 }
 
-/** 隨機整數 A~B（含頭尾），A > B 自動對調 */
+/** 隨機整數 A~B（含頭尾），A > B 自動對調（可播種 PRNG — 回放可重現） */
 export function cf_random(a: number, b: number): number {
-  return randomInt(Number(a), Number(b));
+  return randomInt(Number(a), Number(b), rng);
 }
 
 export function cf_log(msg: unknown): void {
@@ -261,7 +274,7 @@ export function runProgram(code: string): void {
   resetMission();
   programState.running = true;
   programState.abort = false;
-  programState.startTime = Date.now();
+  programState.startTime = simNowMs();
   flags.programRunning = true;
   bus.emit('program-running', { running: true });
 

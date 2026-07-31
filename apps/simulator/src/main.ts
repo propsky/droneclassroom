@@ -2,7 +2,14 @@
 // 渲染幀率無關；單幀最多補 5 tick 防 spiral of death。
 import './ui/style.css';
 import { Vector3 } from '@babylonjs/core';
-import { TICK_MS, droneState, flags, isManualLocked } from './core/droneState';
+import {
+  TICK_MS,
+  advanceSimTick,
+  droneState,
+  flags,
+  isManualLocked,
+  simNowMs,
+} from './core/droneState';
 import {
   applyManualControls,
   integrate,
@@ -29,6 +36,7 @@ import { InkVisual } from './render/ink';
 import { GuideVisual } from './render/guide';
 import { CameraRig } from './render/cameras';
 import { initHud, updateHudFrame } from './ui/hud';
+import { initOnboarding } from './ui/onboarding';
 import { initOverlays, initPlayer, syncViewButton } from './ui/overlays';
 import { initCalibrationOverlay } from './ui/calibrationOverlay';
 import {
@@ -101,6 +109,7 @@ initSoccerHud(
   () => (soccerState.active ? exitSoccerMatch() : enterSoccerMatch()),
 );
 initEndCountdown(); // 賽局結束倒數 chip（§5.3；arena / soccer 共用 endTime）
+initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initPlayer(connectToTeacher);
 
 const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
@@ -202,6 +211,8 @@ function snapshot(dst: typeof prevSnap): void {
 }
 
 function fixedTick(nowMs: number): void {
+  // nowMs = 模擬時間（tick 計數推導，G-04 確定性）—— 判定 / 墨水 / 視覺動畫共用；
+  // 牆鐘只在成績計時（levelElapsedMs）與多人伺服器對時使用
   // 輸入裝置輪詢（gamepad + 搖桿按鈕）
   tickInputDevices(isManualLocked());
 
@@ -262,7 +273,8 @@ world.engine.runRenderLoop(() => {
   let ticks = 0;
   while (accumulator >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {
     snapshot(prevSnap);
-    fixedTick(Date.now());
+    advanceSimTick();
+    fixedTick(simNowMs());
     snapshot(currSnap);
     accumulator -= TICK_MS;
     ticks++;

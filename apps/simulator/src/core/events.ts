@@ -22,6 +22,8 @@ export interface CoreEventMap {
   'level-armed': { level: LevelDef };
   /** 暫停 / 繼續（UI 顯示暫停 overlay、切換按鈕態） */
   'level-paused': { paused: boolean };
+  /** 玩家登入完成（含重整自動登入）— 新手引導的觸發條件之一 */
+  'player-ready': Record<string, never>;
   /** 老師鎖定 / 解鎖關卡選擇（UI 停用關卡選單） */
   'level-lock': { locked: boolean };
   /** 3-2-1 倒數：n=3,2,1；n=0 表示 GO */

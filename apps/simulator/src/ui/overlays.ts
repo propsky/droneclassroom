@@ -90,6 +90,7 @@ export function initPlayer(onReady: () => void): void {
     savePlayer();
     hideLoginModal();
     toast(`✓ 歡迎 ${player.name}${player.emoji}！`, 'success');
+    bus.emit('player-ready', {});
     setTimeout(onReady, 200);
   });
 
@@ -119,6 +120,7 @@ export function initPlayer(onReady: () => void): void {
 
   if (loadPlayer()) {
     hideLoginModal();
+    bus.emit('player-ready', {});
     setTimeout(onReady, 200); // 已登入（重新整理）也要自動連線
   } else {
     showLoginModal();
@@ -193,7 +195,7 @@ export function initOverlays(): void {
     const holder = $('level-selector-btns');
     if (!holder) return;
     holder.innerHTML = '';
-    levels.forEach((level) => {
+    const makeBtn = (level: (typeof levels)[number]): HTMLButtonElement => {
       const btn = document.createElement('button');
       btn.className = 'level-btn';
       btn.dataset['level'] = level.id;
@@ -210,8 +212,20 @@ export function initOverlays(): void {
         loadLevel(level.id);
         closeLevelMenu();
       });
-      holder.appendChild(btn);
-    });
+      return btn;
+    };
+    // 章節導覽：依章分組 + 章名標題（chapters 空時退回平鋪，行為與舊版相同）
+    if (levelState.chapters.length > 0) {
+      levelState.chapters.forEach((ch) => {
+        const title = document.createElement('div');
+        title.className = 'level-chapter-title';
+        title.textContent = `第 ${ch.chapter} 章 · ${ch.name}`;
+        holder.appendChild(title);
+        ch.levels.forEach((level) => holder.appendChild(makeBtn(level)));
+      });
+    } else {
+      levels.forEach((level) => holder.appendChild(makeBtn(level)));
+    }
   });
   bus.on('level-loaded', ({ level }) => {
     document

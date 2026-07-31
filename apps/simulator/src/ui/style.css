@@ -354,6 +354,22 @@ body:not(.gamepad-connected) .header-btn-calib {
   gap: var(--sp-2);
   max-width: 72vw;
 }
+/* 章節導覽：章名標題獨佔一列，關卡鈕在其下換行群聚 */
+.level-chapter-title {
+  flex-basis: 100%;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: 0.05em;
+  border-top: 1px solid var(--line);
+  padding-top: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.level-chapter-title:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
 .level-btn {
   display: inline-flex;
   align-items: center;
@@ -1060,6 +1076,76 @@ body.joystick-forced #joystick-layer {
 .level-selector.locked #level-menu-toggle {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* =============================================================================
+ * 新手引導（B-05）— 高亮框 + 說明卡；遮罩用 spot 的超大 box-shadow 做 cutout
+ * ========================================================================== */
+#guide-root {
+  position: fixed;
+  inset: 0;
+  z-index: 150; /* modal(100) 之上、toast(200) 之下 */
+}
+.guide-spot {
+  position: fixed;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 9999px rgba(10, 20, 30, 0.62); /* 環外全遮，框內透亮 */
+  border: 2px solid var(--brand);
+  pointer-events: none;
+  transition: all 0.25s ease;
+}
+.guide-card {
+  position: fixed;
+  background: var(--bg-1);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-4);
+  width: max-content;
+  transition: top 0.25s ease, left 0.25s ease;
+}
+.guide-progress {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-bottom: var(--sp-1);
+}
+.guide-title {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  margin-bottom: var(--sp-2);
+}
+.guide-body {
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-2);
+  margin-bottom: var(--sp-3);
+}
+.guide-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.guide-next {
+  background: var(--brand);
+  color: #fff;
+  border: 1px solid var(--brand);
+  height: 36px;
+  padding: 0 var(--sp-5);
+  border-radius: var(--r-sm);
+  font-weight: 700;
+}
+.guide-next:hover {
+  background: var(--brand-strong);
+}
+.guide-skip {
+  background: transparent;
+  color: var(--text-3);
+  border: none;
+  padding: 0 var(--sp-2);
+}
+.guide-skip:hover {
+  color: var(--text-1);
 }
 #login-name {
   width: 100%;

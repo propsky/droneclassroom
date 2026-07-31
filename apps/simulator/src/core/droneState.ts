@@ -1,5 +1,7 @@
 // 無人機物理狀態 — 單一真相來源（框架無關純 TS）。
 // 座標系：右手系、機頭朝 -Z、yaw 正向 = 左轉（與 legacy Three.js 版一致）。
+// G-04：模擬路徑上的 sin/cos/hypot 一律走 detmath（跨引擎 bit 一致）。
+import { detSin, detCos, detHypot2, detHypot3 } from '@creafly/shared';
 
 export interface Vec3 {
   x: number;
@@ -14,18 +16,19 @@ export const copyVec3 = (dst: Vec3, src: Vec3): Vec3 => {
   dst.z = src.z;
   return dst;
 };
-export const lenVec3 = (v: Vec3): number => Math.hypot(v.x, v.y, v.z);
+export const lenVec3 = (v: Vec3): number => detHypot3(v.x, v.y, v.z);
 export const distVec3 = (a: Vec3, b: Vec3): number =>
-  Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+  detHypot3(a.x - b.x, a.y - b.y, a.z - b.z);
+export { detHypot2, detHypot3 };
 
 /** 機頭方向（yaw 弧度 → 單位向量；yaw=0 時朝 -Z） */
 export function forwardVec(yaw: number): Vec3 {
-  return { x: -Math.sin(yaw), y: 0, z: -Math.cos(yaw) };
+  return { x: -detSin(yaw), y: 0, z: -detCos(yaw) };
 }
 
 /** 機身右方（yaw=0 時朝 +X） */
 export function rightVec(yaw: number): Vec3 {
-  return { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
+  return { x: detCos(yaw), y: 0, z: -detSin(yaw) };
 }
 
 // ---- 手感常數（legacy per-frame 值，本版定義為 per-tick @60Hz，數值原封沿用） ----
@@ -39,6 +42,22 @@ export const TICK_HZ = 60;
 export const TICK_MS = 1000 / TICK_HZ;
 
 export const HOME_POSITION: Readonly<Vec3> = Object.freeze({ x: 0, y: 0.4, z: 0 });
+
+// ---- 模擬時間（G-04 確定性）----
+// 判定與程式計時一律由「tick 計數 × TICK_MS」推導，不讀牆鐘 —— 同一份輸入
+// 序列在任何機器重演，時間軸 bit 相同。牆鐘只留給 UI 顯示與成績（wall-clock
+// 語意，見 level.ts levelElapsedMs）。
+export const simTime = { tick: 0 };
+
+/** 目前模擬時間（毫秒；= 已執行 tick 數 × TICK_MS） */
+export function simNowMs(): number {
+  return simTime.tick * TICK_MS;
+}
+
+/** 主迴圈每個 fixed tick 呼叫一次（回放 harness 亦同） */
+export function advanceSimTick(): void {
+  simTime.tick++;
+}
 
 export interface DroneState {
   position: Vec3;

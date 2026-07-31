@@ -11,6 +11,7 @@ import {
   rightVec,
   copyVec3,
   lenVec3,
+  distVec3,
   type Vec3,
 } from './droneState';
 import { toast, sound, stateHud } from './events';
@@ -181,17 +182,16 @@ interface AutoPlan {
 
 let autoPlan: AutoPlan | null = null;
 
-export const easeInOut = (t: number): number =>
-  t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+export const easeInOut = (t: number): number => {
+  if (t < 0.5) return 2 * t * t;
+  const u = -2 * t + 2;
+  return 1 - (u * u) / 2; // 乘法取代 Math.pow(u,2)：pow 未被規格保證正確捨入
+};
 
 /** 一鍵飛回起飛墊（機頭轉回 0） */
 export function goHome(): void {
   if (droneState.returning) return;
-  const d = Math.hypot(
-    droneState.position.x - HOME_POSITION.x,
-    droneState.position.y - HOME_POSITION.y,
-    droneState.position.z - HOME_POSITION.z,
-  );
+  const d = distVec3(droneState.position, HOME_POSITION);
   if (droneState.isGrounded && d < 0.5) {
     toast('🏠 已經在起飛墊上了');
     return;

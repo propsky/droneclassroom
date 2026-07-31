@@ -5,7 +5,6 @@
 // 多人賽局（大亂鬥 / 足球）為伺服器權威時間，不可暫停 —— 由 UI 層把按鈕收起。
 import { flags } from './droneState';
 import { levelState } from './level';
-import { programState } from './program';
 import { bus, toast } from './events';
 
 /** 目前是否可暫停：要有關卡、且不在 3-2-1 倒數中 */
@@ -24,9 +23,9 @@ export function pauseGame(): void {
 export function resumeGame(): void {
   if (!flags.paused) return;
   const pausedMs = levelState.pausedAt ? Date.now() - levelState.pausedAt : 0;
-  // 把暫停時長補回計時基準 → elapsed 不含暫停時間
+  // 把暫停時長補回關卡計時基準（牆鐘語意）→ elapsed 不含暫停時間。
+  // 程式計時（cf_elapsed）走模擬時間，暫停時 tick 不前進、自然凍結，不需補償。
   if (levelState.startTime) levelState.startTime += pausedMs;
-  if (programState.running && programState.startTime) programState.startTime += pausedMs;
   levelState.pausedAt = 0;
   flags.paused = false;
   bus.emit('level-paused', { paused: false });

@@ -29,9 +29,9 @@ export function headingLabel(deg: number): string {
 export const RAD2DEG = 180 / Math.PI;
 export const DEG2RAD = Math.PI / 180;
 
-/** 含頭尾隨機整數（cf_random 積木語意） */
-export function randomInt(a: number, b: number): number {
+/** 含頭尾隨機整數（cf_random 積木語意）。rand 可注入（確定性回放用可播種 PRNG） */
+export function randomInt(a: number, b: number, rand: () => number = Math.random): number {
   const lo = Math.min(Math.floor(a), Math.floor(b));
   const hi = Math.max(Math.floor(a), Math.floor(b));
-  return lo + Math.floor(Math.random() * (hi - lo + 1));
+  return lo + Math.floor(rand() * (hi - lo + 1));
 }

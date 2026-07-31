@@ -1,7 +1,15 @@
 // 關卡系統 — 載入 chapter JSON、rings/passZones/balloons 判定、returnHome、計時。
 // 行為對齊 legacy main.js §4 / §12（checkRingCollisions / checkPassZones / checkBalloons）。
 import type { LevelDef } from '@creafly/shared';
-import { isChapterDef, normalizeDeg, signedYawDiffDeg, RAD2DEG } from '@creafly/shared';
+import {
+  isChapterDef,
+  normalizeDeg,
+  signedYawDiffDeg,
+  RAD2DEG,
+  detSin,
+  detHypot2,
+  detHypot3,
+} from '@creafly/shared';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
 import { setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
@@ -28,6 +36,8 @@ export interface FaceGuidance {
 
 export const levelState = {
   levels: [] as LevelDef[],
+  /** 章節導覽用：各章 meta + 所屬關卡（levels 為三章攤平，維持既有相容） */
+  chapters: [] as { chapter: number; name: string; levels: LevelDef[] }[],
   current: null as LevelDef | null,
   /** 0 = 尚未開始計時（按開始 + 3-2-1 倒數後才設定） */
   startTime: 0,
@@ -50,9 +60,9 @@ let ringFaceHintAt = 0; // 「機頭沒對準圈」提示節流
 let lastFaceAligned: boolean | null = null;
 let lastFaceRing = -1;
 
-/** ring 上下漂浮的即時世界 Y（core 判定與 render 視覺共用同一公式） */
+/** ring 上下漂浮的即時世界 Y（core 判定與 render 視覺共用同一公式；nowMs = 模擬時間） */
 export function ringWorldY(index: number, baseY: number, nowMs: number): number {
-  return baseY + Math.sin(nowMs * 0.001 + index) * 0.2;
+  return baseY + detSin(nowMs * 0.001 + index) * 0.2;
 }
 
 export function levelElapsedMs(): number {
@@ -65,23 +75,26 @@ export function levelElapsedMs(): number {
 // =============================================================================
 // 載入
 // =============================================================================
-async function fetchChapter(n: number): Promise<LevelDef[]> {
+async function fetchChapter(n: number): Promise<{ chapter: number; name: string; levels: LevelDef[] } | null> {
   try {
     const r = await fetch(`/levels/chapter${n}.json`);
     const data: unknown = await r.json();
     if (!isChapterDef(data)) throw new Error('格式不符');
-    return data.levels;
+    return { chapter: data.chapter, name: data.name ?? `第 ${n} 章`, levels: data.levels };
   } catch (e) {
     console.warn(`載入 chapter${n}.json 失敗：`, e);
-    return [];
+    return null;
   }
 }
 
 /** 載入三章關卡，完成後載入預設關（或 URL ?level= 指定關） */
 export async function loadChapters(): Promise<void> {
-  const [c1, c2, c3] = await Promise.all([fetchChapter(1), fetchChapter(2), fetchChapter(3)]);
-  levelState.levels = [...c1, ...c2, ...c3];
-  console.log(`[Chapter] 載入 ${c1.length} + ${c2.length} + ${c3.length} 個關卡`);
+  const chapters = (
+    await Promise.all([fetchChapter(1), fetchChapter(2), fetchChapter(3)])
+  ).filter((c): c is NonNullable<typeof c> => c !== null);
+  levelState.chapters = chapters;
+  levelState.levels = chapters.flatMap((c) => c.levels);
+  console.log(`[Chapter] 載入 ${chapters.map((c) => c.levels.length).join(' + ')} 個關卡`);
   bus.emit('levels-ready', { levels: levelState.levels });
   const lp = new URLSearchParams(location.search).get('level');
   loadLevel(/^[123]-[0-6]$/.test(lp ?? '') ? (lp as string) : '1-0');
@@ -226,7 +239,7 @@ function checkRings(nowMs: number): void {
   s.rings.forEach((ring, i) => {
     if (ring.passed) return;
     const ry = ringWorldY(i, ring.y, nowMs);
-    const dist = Math.hypot(p.x - ring.x, p.y - ry, p.z - ring.z);
+    const dist = detHypot3(p.x - ring.x, p.y - ry, p.z - ring.z);
     if (dist >= 1.5) return;
     // 旋轉鑽圈關：faceYaw 圈必須機頭對準才算穿過
     if (ring.faceYaw !== undefined && ring.faceYaw !== null) {
@@ -257,7 +270,7 @@ function checkRings(nowMs: number): void {
     if (level?.returnHome) {
       const dx = p.x - HOME_POSITION.x;
       const dz = p.z - HOME_POSITION.z;
-      const overPad = Math.hypot(dx, dz) < 1.5; // 水平距離，不看高度
+      const overPad = detHypot2(dx, dz) < 1.5; // 水平距離，不看高度
       const landed = droneState.isGrounded;
       if (overPad && landed) {
         manualLevelComplete();
@@ -350,7 +363,7 @@ function checkBalloons(): void {
   const p = droneState.position;
   s.balloons.forEach((b, i) => {
     if (b.popped) return;
-    if (Math.hypot(p.x - b.x, p.y - b.y, p.z - b.z) < 1.4) {
+    if (detHypot3(p.x - b.x, p.y - b.y, p.z - b.z) < 1.4) {
       b.popped = true;
       s.balloonsCollected++;
       bus.emit('balloon-popped', {
