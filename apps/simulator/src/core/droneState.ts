@@ -38,6 +38,9 @@ export const DRAG = 0.92;          // 每 tick 空氣阻力
 export const YAW_KEY_RATE = 0.03;  // 方向鍵每 tick 旋轉（弧度）
 export const YAW_STICK_RATE = 0.04; // 搖桿滿舵每 tick 旋轉（弧度）
 export const DRONE_RADIUS = 0.6;   // 碰撞球半徑（略大於機身，避免視覺穿模）
+/** 飛行高度上限（m）：教學關卡最高要求 3–5m，30m 給足自由又不至於飛到雲上失去所有參照
+ *  （測試者回報：無上限時按住上升幾秒即 80m+，機身在天空背景中失去辨識、必須降回才能繼續） */
+export const CEILING_Y = 30;
 export const TICK_HZ = 60;
 export const TICK_MS = 1000 / TICK_HZ;
 

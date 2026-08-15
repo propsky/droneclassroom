@@ -130,6 +130,8 @@ declare global {
       resetMission: typeof resetMission;
       setMode: typeof setMode;
       droneState: typeof droneState;
+      /** debug：相機（headless 診斷用） */
+      cameraRig: CameraRig;
       levelState: typeof levelState;
       arenaState: typeof arenaState;
       enterArena: typeof enterArena;
@@ -157,6 +159,7 @@ window.CREAFLY = {
   resetMission,
   setMode,
   droneState,
+  cameraRig,
   levelState,
   // 大亂鬥 debug 入口（對齊 legacy 的 arena / enterArena / exitArena 匯出）
   arenaState,

@@ -7,6 +7,7 @@ import {
   MANUAL_LIFT,
   DRAG,
   DRONE_RADIUS,
+  CEILING_Y,
   forwardVec,
   rightVec,
   copyVec3,
@@ -143,12 +144,27 @@ export function integrate(): void {
     droneState.isFlying = false;
     if (wasFlying) sound('bump'); // 撞地音效
   }
+  // 天花板：撞頂停住（不彈、不掉），提示節流避免每 tick 洗版
+  if (p.y > CEILING_Y) {
+    p.y = CEILING_Y;
+    if (v.y > 0) v.y = 0;
+    const now = performance.now();
+    if (now - ceilingHintAt > 2000) {
+      ceilingHintAt = now;
+      toast(`已到最高高度 ${CEILING_Y}m，往下飛吧`, 'warning');
+    }
+  }
 }
 
-/** 程式模式：位置由 motion plan 控制，只做地板保護 */
+let ceilingHintAt = 0;
+
+/** 程式模式：位置由 motion plan 控制，只做地板 / 天花板保護 */
 export function floorProtect(): void {
   if (droneState.position.y < HOME_POSITION.y) {
     droneState.position.y = HOME_POSITION.y;
+  }
+  if (droneState.position.y > CEILING_Y) {
+    droneState.position.y = CEILING_Y;
   }
 }
 

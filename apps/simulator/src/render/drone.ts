@@ -38,6 +38,9 @@ export class DroneVisual {
       const m = new StandardMaterial(name, scene);
       m.diffuseColor = hex(color);
       m.specularColor = new Color3(spec, spec, spec);
+      // 主角不吃場景霧：高空背景是淡藍天空、霧色也是淡藍，12m 外的機身會「褪」進天空裡
+      // （測試者回報高空機身消失的主因）；環境該有霧照有，機身永遠清晰
+      m.fogEnabled = false;
       createdMats.push(m);
       return m;
     };
@@ -171,6 +174,8 @@ export class DroneVisual {
     casters.forEach((m) => shadowGenerator.addShadowCaster(m));
 
     // LED 材質也要跟著暗 / 閃（大亂鬥視覺）
+    ledMatG.fogEnabled = false;
+    ledMatR.fogEnabled = false;
     createdMats.push(ledMatG, ledMatR);
     this.fadeMats = createdMats.map((m) => ({ mat: m, baseAlpha: m.alpha }));
   }

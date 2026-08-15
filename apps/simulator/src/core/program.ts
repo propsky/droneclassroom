@@ -10,6 +10,7 @@ import {
   rightVec,
   simNowMs,
   type Vec3,
+  CEILING_Y,
 } from './droneState';
 import { rng } from './rng';
 import { easeInOut } from './physics';
@@ -97,7 +98,8 @@ const lerpVec = (out: Vec3, a: Vec3, b: Vec3, t: number): void => {
 export async function cf_takeoff(height = 8): Promise<void> {
   ensureRunning();
   const from = droneState.position.y;
-  const to = Math.max(height, 1.5);
+  // 目標高度夾在 [1.5, CEILING_Y]（物理層另有天花板保護，這裡先夾讓 motion plan 不會空等）
+  const to = Math.min(Math.max(height, 1.5), CEILING_Y);
   droneState.isGrounded = false;
   droneState.isFlying = true;
   stateHud('起飛中...');
@@ -153,7 +155,9 @@ export async function cf_right(distance = 2): Promise<void> {
 export async function cf_up(distance = 1): Promise<void> {
   ensureRunning();
   const start: Vec3 = { ...droneState.position };
-  const target: Vec3 = { x: start.x, y: start.y + distance, z: start.z };
+  // 目標夾在 [地面, 天花板]（迴圈積木連續上升也不會飛到雲上）
+  const targetY = Math.min(Math.max(start.y + distance, HOME_POSITION.y), CEILING_Y);
+  const target: Vec3 = { x: start.x, y: targetY, z: start.z };
   droneState.isGrounded = false;
   droneState.isFlying = true;
   stateHud(distance >= 0 ? `上升 ${distance}m` : `下降 ${-distance}m`);
