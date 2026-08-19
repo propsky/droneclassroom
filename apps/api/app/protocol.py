@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 # 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連）
 WS_CLOSE_REPLACED = 4000
+# 老師踢人 / 關房時對學生 WS 用的 close code（學生端：回進房畫面、不自動重連進同房）
+WS_CLOSE_KICKED = 4001
 
 # 進站數值欄位共用型別：拒絕 NaN / Infinity（會毒害距離 / 速度計算與 JSON 序列化）
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
@@ -26,11 +28,17 @@ class _StrictModel(BaseModel):
 
 
 class RegisterMsg(_StrictModel):
-    """學生報到（登入 / 重連）。"""
+    """學生報到（登入 / 重連）。
+
+    roomCode 缺省 = 連線 URL 的 ?room=，再缺省 = 預設房（向後相容既有 URL / 流程）；
+    roomPassword 該房有設密碼時必填。
+    """
 
     type: Literal["register"]
     name: str
     emoji: str
+    roomCode: str | None = None
+    roomPassword: str | None = None
 
 
 class ProgressMsg(_StrictModel):
@@ -192,8 +200,14 @@ TeacherBroadcastPayload = Annotated[
 ]
 
 
-class TeacherBroadcastMsg(_StrictModel):
-    """老師廣播：payload 通過白名單驗證後原樣轉發全體學生。"""
+class _RoomScopedModel(_StrictModel):
+    """老師的房間作用訊息基底：roomCode 指定目標房，缺省 = 該老師目前選定的房間。"""
+
+    roomCode: str | None = None
+
+
+class TeacherBroadcastMsg(_RoomScopedModel):
+    """老師廣播：payload 通過白名單驗證後原樣轉發該房全體學生。"""
 
     type: Literal["broadcast"]
     payload: TeacherBroadcastPayload
@@ -203,7 +217,7 @@ class TeacherBroadcastMsg(_StrictModel):
 # 這些訊息只有已通過 ticket 驗證的 /teacher 連線才收得到（ws.py 只在老師端分派）。
 
 
-class ArenaStartMsg(_StrictModel):
+class ArenaStartMsg(_RoomScopedModel):
     """開始大亂鬥。durationSec 下限 30 秒由 handler clamp（對齊 legacy Math.max(30, …)）。"""
 
     type: Literal["arena_start"]
@@ -214,19 +228,19 @@ class ArenaStartMsg(_StrictModel):
     field: Literal["grid", "playground"] = "grid"
 
 
-class ArenaStateReqMsg(_StrictModel):
+class ArenaStateReqMsg(_RoomScopedModel):
     """老師請求大亂鬥完整快照（arena_state）。"""
 
     type: Literal["arena_state_req"]
 
 
-class ArenaStopMsg(_StrictModel):
+class ArenaStopMsg(_RoomScopedModel):
     """老師手動停止大亂鬥（倒數中或進行中皆可；廣播 arena_end reason:'teacher_stop'）。"""
 
     type: Literal["arena_stop"]
 
 
-class SoccerStartMsg(_StrictModel):
+class SoccerStartMsg(_RoomScopedModel):
     """開始足球。durationSec 下限 5 秒由 handler clamp（對齊 legacy Math.max(5, …)）。
 
     mode 缺省 'ball'（推球進門，共用球由伺服器模擬）；'striker' = FAI 前鋒穿門（進階）。
@@ -237,26 +251,26 @@ class SoccerStartMsg(_StrictModel):
     mode: Literal["ball", "striker"] = "ball"
 
 
-class SoccerStateReqMsg(_StrictModel):
+class SoccerStateReqMsg(_RoomScopedModel):
     """老師請求足球完整快照（soccer_state）。"""
 
     type: Literal["soccer_state_req"]
 
 
-class SoccerStopMsg(_StrictModel):
+class SoccerStopMsg(_RoomScopedModel):
     """老師手動停止足球（廣播 soccer_end reason:'teacher_stop'）。"""
 
     type: Literal["soccer_stop"]
 
 
-class SoccerSetStrikerMsg(_StrictModel):
+class SoccerSetStrikerMsg(_RoomScopedModel):
     """老師指定前鋒（每隊強制恰 1 名）。"""
 
     type: Literal["soccer_set_striker"]
     studentId: str
 
 
-class SoccerSetTeamMsg(_StrictModel):
+class SoccerSetTeamMsg(_RoomScopedModel):
     """老師手動分隊（藍 / 紅），取代自動平均分隊。"""
 
     type: Literal["soccer_set_team"]
@@ -264,11 +278,70 @@ class SoccerSetTeamMsg(_StrictModel):
     team: Literal["blue", "red"]
 
 
-class SoccerResetMsg(_StrictModel):
+class SoccerResetMsg(_RoomScopedModel):
     """重設足球賽局；clearTeams 連分隊重洗。"""
 
     type: Literal["soccer_reset"]
     clearTeams: bool = False
+
+
+# ---------- 老師 → 伺服器：房間（Room）管理 ----------
+# 一位老師一條 WS 管多間房：開房 / 關房 / 改設定 / 踢人 / 切換作用房 / 要列表。
+
+
+class RoomSettingsIn(_StrictModel):
+    """房間設定（老師可改；欄位全 optional = 只改帶到的欄位，其餘沿用）。
+
+    name 空字串 = 清掉顯示名（列表退回顯示房間碼）；password 空字串 = 取消密碼。
+    """
+
+    name: str | None = None
+    password: str | None = None
+    maxStudents: int | None = Field(default=None, ge=1)
+    locked: bool | None = None
+
+
+class RoomCreateMsg(_StrictModel):
+    """開新房（伺服器產碼）；建好後老師自動切到新房。"""
+
+    type: Literal["room_create"]
+    settings: RoomSettingsIn | None = None
+
+
+class RoomCloseMsg(_StrictModel):
+    """關房：房內學生全部以 WS_CLOSE_KICKED 斷線、賽局停止、房移除（預設房拒絕）。"""
+
+    type: Literal["room_close"]
+    roomCode: str
+
+
+class RoomUpdateMsg(_StrictModel):
+    """改房間設定（改名 / 密碼 / 上限 / 鎖房）。"""
+
+    type: Literal["room_update"]
+    roomCode: str
+    settings: RoomSettingsIn
+
+
+class RoomKickMsg(_StrictModel):
+    """踢人：該生 WS 以 WS_CLOSE_KICKED 關閉（可重新加入，除非鎖房）。"""
+
+    type: Literal["room_kick"]
+    roomCode: str
+    studentId: str
+
+
+class RoomSelectMsg(_StrictModel):
+    """切換作用房：之後缺省 roomCode 的訊息以此房為準；伺服器補送該房名冊 + 賽局快照。"""
+
+    type: Literal["room_select"]
+    roomCode: str
+
+
+class RoomListReqMsg(_StrictModel):
+    """要一份房間列表。"""
+
+    type: Literal["room_list_req"]
 
 
 TeacherMessage = Annotated[
@@ -281,7 +354,13 @@ TeacherMessage = Annotated[
     | SoccerStopMsg
     | SoccerSetStrikerMsg
     | SoccerSetTeamMsg
-    | SoccerResetMsg,
+    | SoccerResetMsg
+    | RoomCreateMsg
+    | RoomCloseMsg
+    | RoomUpdateMsg
+    | RoomKickMsg
+    | RoomSelectMsg
+    | RoomListReqMsg,
     Field(discriminator="type"),
 ]
 TEACHER_MESSAGE_ADAPTER: TypeAdapter[
@@ -295,6 +374,12 @@ TEACHER_MESSAGE_ADAPTER: TypeAdapter[
     | SoccerSetStrikerMsg
     | SoccerSetTeamMsg
     | SoccerResetMsg
+    | RoomCreateMsg
+    | RoomCloseMsg
+    | RoomUpdateMsg
+    | RoomKickMsg
+    | RoomSelectMsg
+    | RoomListReqMsg
 ] = TypeAdapter(TeacherMessage)
 
 # ---------- 伺服器 → 客戶端 ----------
@@ -342,3 +427,52 @@ class StudentUpdateMsg(BaseModel):
 
     type: Literal["student_update"] = "student_update"
     student: StudentBrief
+
+
+# ---------- 伺服器 → 客戶端：房間 ----------
+
+
+class RoomInfo(BaseModel):
+    """房間資訊（room_joined 給學生 HUD、room_list 給老師列表）。"""
+
+    code: str
+    name: str
+    hasPassword: bool
+    maxStudents: int
+    locked: bool
+    studentCount: int
+    arenaStatus: str  # 房內賽局狀態摘要（idle / countdown / running / …）
+    soccerStatus: str
+    createdAt: float  # epoch 毫秒（與 Date.now() 同制）
+
+
+class RoomJoinedMsg(BaseModel):
+    """學生成功進房（register 通過）。"""
+
+    type: Literal["room_joined"] = "room_joined"
+    room: RoomInfo
+
+
+RejectReason = Literal["not_found", "locked", "full", "bad_password", "closed"]
+
+
+class RoomRejectedMsg(BaseModel):
+    """學生進房被拒（不斷線，可改碼 / 改密碼重試）。"""
+
+    type: Literal["room_rejected"] = "room_rejected"
+    reason: RejectReason
+
+
+class RoomClosedMsg(BaseModel):
+    """房間被關 / 被踢（隨後 WS 以 WS_CLOSE_KICKED 關閉）。"""
+
+    type: Literal["room_closed"] = "room_closed"
+    reason: Literal["closed", "kicked"]
+
+
+class RoomListMsg(BaseModel):
+    """老師端房間列表（連上 / 建立 / 關閉 / 設定變更 / 人數與賽局狀態變動時推送）。"""
+
+    type: Literal["room_list"] = "room_list"
+    rooms: list[RoomInfo]
+    selected: str | None

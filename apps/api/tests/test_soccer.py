@@ -5,7 +5,7 @@ tick 相關流程全部用假時鐘（conftest.clock）＋ 手動 tick（conftes
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import FakeClock, recv_until, settle, tick
+from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
 def _register(ws, t, name: str) -> None:
@@ -34,7 +34,7 @@ def _countdown_to_go(client: TestClient, clock: FakeClock, ws) -> dict:
 def test_自動分隊平衡與前鋒保證(client: TestClient, teacher_ticket: str) -> None:
     """三人依序加入 → 藍紅人數差 ≤ 1；每隊第一人自動成為前鋒。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with (
             client.websocket_connect("/") as s1,
@@ -53,7 +53,7 @@ def test_自動分隊平衡與前鋒保證(client: TestClient, teacher_ticket: s
 def test_老師手動分隊與指定前鋒(client: TestClient, teacher_ticket: str) -> None:
     """soccer_set_team 換隊（原隊 / 新隊都重新確保前鋒）；soccer_set_striker 指定。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with (
             client.websocket_connect("/") as s1,
@@ -82,7 +82,7 @@ def test_striker模式進球驗證與半場重置與勝負(
     """striker 模式（回歸保護）：前鋒 + armed + 位置在門環內才得分；
     進球後回自家半場恢復 armed；時間到判勝。場地常數依新設定換算（20×40、門高 4.5）。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with (
             client.websocket_connect("/") as s1,  # 藍隊前鋒
@@ -158,7 +158,7 @@ def test_倒數中soccer_reset取消與重新分隊(
 ) -> None:
     """soccer_reset 在倒數中 → 取消回 idle 不會 GO；clearTeams 交錯重新分隊。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -185,7 +185,7 @@ def test_前鋒斷線遞補與離開保留隊伍(client: TestClient, teacher_tic
     連線順序決定 id：s_stay 先連（s1）、s_leave 後連（s2）。
     """
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s_stay:  # id s1
             with client.websocket_connect("/") as s_leave:  # id s2
@@ -217,7 +217,7 @@ def test_與大亂鬥互斥(client: TestClient, teacher_ticket: str) -> None:
     """soccer_join 會退出大亂鬥；arena_join 會退出足球（雙向互斥）。"""
     arena = client.app.state.arena
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")

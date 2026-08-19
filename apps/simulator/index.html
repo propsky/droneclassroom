@@ -20,6 +20,12 @@
                 <span class="mode-seg mode-seg-program">程式</span>
             </button>
             <div class="subtitle">無人機教育模擬器 · Blockly 程式化飛行</div>
+            <!-- 房間標籤（room_joined 後顯示：房名 · 房碼；點擊換房） -->
+            <button id="room-tag" class="room-tag" title="換房間" style="display:none;">
+                <span class="btn-ic" data-icon="users"></span>
+                <span id="room-tag-name" class="room-tag-name"></span>
+                <span id="room-tag-code" class="room-tag-code"></span>
+            </button>
         </div>
         <div class="header-right">
             <!-- 群組 1：關卡 / 回家 -->
@@ -212,14 +218,14 @@
     </div>
 </div>
 
-<!-- 學生登入 -->
+<!-- 學生登入：名字 + 動物 + 房間碼（老師開房給的 4 碼；留空 = 預設房） -->
 <div id="login-modal" class="modal-overlay">
-    <div class="modal-card">
+    <div class="modal-card login-card">
         <div class="level-intro-title">歡迎來到 CREAFLY</div>
-        <div class="level-intro-body">
-            你的名字（給老師跟同學看）：<br>
-            <input id="login-name" type="text" maxlength="10" placeholder="例：小翔">
-            <br>選一個代表你的動物：<br>
+        <div class="login-form">
+            <label class="login-label" for="login-name">你的名字（給老師跟同學看）</label>
+            <input id="login-name" type="text" maxlength="10" placeholder="例：小翔" autocomplete="off">
+            <div class="login-label">選一個代表你的動物</div>
             <div id="emoji-picker">
                 <button class="emoji-btn" data-emoji="🐯">🐯</button>
                 <button class="emoji-btn" data-emoji="🦁">🦁</button>
@@ -234,6 +240,19 @@
                 <button class="emoji-btn" data-emoji="🦄">🦄</button>
                 <button class="emoji-btn" data-emoji="🐢">🐢</button>
             </div>
+            <div class="login-room">
+                <div class="login-field login-field-code">
+                    <label class="login-label" for="login-room">房間碼</label>
+                    <input id="login-room" class="login-code" type="text" maxlength="4" inputmode="text"
+                           autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD">
+                </div>
+                <div class="login-field">
+                    <label class="login-label" for="login-room-pw">密碼（老師有設才需要）</label>
+                    <input id="login-room-pw" type="password" maxlength="20" autocomplete="off" placeholder="沒有就留空">
+                </div>
+            </div>
+            <div id="login-room-hint" class="login-hint">沒有房間碼？留空即可</div>
+            <div id="login-room-error" class="login-error" role="alert" hidden></div>
         </div>
         <button id="login-start" class="modal-btn">開始飛行</button>
     </div>

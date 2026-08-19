@@ -1,6 +1,6 @@
 // 型別化 event bus — 核心層對外發事件的唯一通道。
 // core 不碰 DOM、不碰 Babylon；render/ 與 ui/ 訂閱這裡的事件做視覺與介面更新。
-import type { ArenaServerMsg, SoccerServerMsg, LevelDef } from '@creafly/shared';
+import type { ArenaServerMsg, SoccerServerMsg, LevelDef, RoomInfo, RoomRejectedMsg } from '@creafly/shared';
 
 export type ToastKind = '' | 'success' | 'error' | 'warning';
 export type SoundName = 'ring' | 'bump' | 'stop' | 'complete' | 'pop' | 'beep' | 'go';
@@ -60,6 +60,13 @@ export interface CoreEventMap {
   // ---- 多人（net/ws.ts ↔ multiplayer/arena.ts）----
   /** WS 連上（含重連成功；arena 據此補送 arena_join） */
   'ws-connected': Record<string, never>;
+  // ---- 房間（net/ws.ts ↔ ui/overlays.ts 登入 modal / header 房間標籤）----
+  /** register 通過、成功進房（含重連後再進）：UI 收 modal、顯示房間標籤 */
+  'room-joined': { room: RoomInfo };
+  /** 進房被拒：登入 modal 顯示對應文案、讓使用者改房間碼 / 密碼 */
+  'room-rejected': { reason: RoomRejectedMsg['reason'] };
+  /** 被老師關房 / 踢出（room_closed 或 close code 4001）：退出多人模式、回登入 modal、不自動重連 */
+  'room-left': { reason: 'closed' | 'kicked' };
   /** 伺服器 arena_* 訊息（ws 只分派、不處理） */
   'arena-message': { msg: ArenaServerMsg };
   /** 進入大亂鬥（render 建場地、UI 切 HUD） */

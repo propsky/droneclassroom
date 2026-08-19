@@ -7,6 +7,10 @@ export interface RegisterMsg {
   type: 'register';
   name: string;
   emoji: string;
+  /** 房間碼（缺省 = 預設房，向後相容既有 URL）；也可由 WS 連線 ?room= 指定 */
+  roomCode?: string;
+  /** 房間密碼（該房有設時必填） */
+  roomPassword?: string;
 }
 export interface ProgressMsg {
   type: 'progress';
@@ -73,11 +77,53 @@ export interface SoccerSetStrikerMsg { type: 'soccer_set_striker'; studentId: st
 export interface SoccerSetTeamMsg { type: 'soccer_set_team'; studentId: string; team: SoccerTeam }
 export interface SoccerResetMsg { type: 'soccer_reset'; clearTeams?: boolean }
 
+// ---------- 房間（Room）：一位老師開的一個場次 = 獨立名冊 + 獨立賽局 + 設定 ----------
+// 老師一條 WS 管多間；「作用房間」由每則老師訊息的 roomCode 指定（缺省 = 老師目前選定的房間）。
+// 未來帳號系統：Room 加 ownerId/持久化即可，協定不變。
+
+/** 房間設定（老師可改）；伺服器端另有預設值（config），全部不寫死 */
+export interface RoomSettings {
+  /** 顯示名稱（如「三年二班」）；缺省用房間碼 */
+  name?: string;
+  /** 加入密碼（空 = 不需密碼） */
+  password?: string;
+  /** 人數上限（超過拒絕加入） */
+  maxStudents?: number;
+  /** 鎖房：禁止新加入，已在房內的不受影響 */
+  locked?: boolean;
+}
+
+export interface RoomInfo {
+  code: string;
+  name: string;
+  hasPassword: boolean;
+  maxStudents: number;
+  locked: boolean;
+  studentCount: number;
+  /** 房內賽局狀態摘要（給房間列表顯示） */
+  arenaStatus: string;
+  soccerStatus: string;
+  createdAt: number;
+}
+
+export interface RoomCreateMsg { type: 'room_create'; settings?: RoomSettings }
+export interface RoomCloseMsg { type: 'room_close'; roomCode: string }
+export interface RoomUpdateMsg { type: 'room_update'; roomCode: string; settings: RoomSettings }
+/** 踢人（該生 WS 以 WS_CLOSE_KICKED 關閉，可重新加入除非鎖房） */
+export interface RoomKickMsg { type: 'room_kick'; roomCode: string; studentId: string }
+/** 老師切換「目前作用房間」：之後的名冊/賽局訊息以此房為準 */
+export interface RoomSelectMsg { type: 'room_select'; roomCode: string }
+export interface RoomListReqMsg { type: 'room_list_req' }
+
+/** 帶 roomCode 的老師訊息：缺省 = 目前選定房間 */
+export interface RoomScoped { roomCode?: string }
+
 export type TeacherToServer =
-  | TeacherBroadcastMsg
-  | ArenaStartMsg | ArenaStateReqMsg | ArenaStopMsg
-  | SoccerStartMsg | SoccerStateReqMsg | SoccerStopMsg
-  | SoccerSetStrikerMsg | SoccerSetTeamMsg | SoccerResetMsg;
+  | (TeacherBroadcastMsg & RoomScoped)
+  | (ArenaStartMsg & RoomScoped) | (ArenaStateReqMsg & RoomScoped) | (ArenaStopMsg & RoomScoped)
+  | (SoccerStartMsg & RoomScoped) | (SoccerStateReqMsg & RoomScoped) | (SoccerStopMsg & RoomScoped)
+  | (SoccerSetStrikerMsg & RoomScoped) | (SoccerSetTeamMsg & RoomScoped) | (SoccerResetMsg & RoomScoped)
+  | RoomCreateMsg | RoomCloseMsg | RoomUpdateMsg | RoomKickMsg | RoomSelectMsg | RoomListReqMsg;
 
 // ---------- Server → Client ----------
 
@@ -96,6 +142,17 @@ export interface StudentInfo {
 }
 
 export interface WelcomeMsg { type: 'welcome'; id: string }
+/** 學生成功進房（register 通過）：帶房間資訊供 HUD 顯示 */
+export interface RoomJoinedMsg { type: 'room_joined'; room: RoomInfo }
+/** 學生進房被拒：reason 給 UI 顯示對應文案 */
+export interface RoomRejectedMsg {
+  type: 'room_rejected';
+  reason: 'not_found' | 'locked' | 'full' | 'bad_password' | 'closed';
+}
+/** 房間被老師關閉 / 被踢：學生端回到進房畫面 */
+export interface RoomClosedMsg { type: 'room_closed'; reason: 'closed' | 'kicked' }
+/** 老師端：房間列表（建立/關閉/設定變更/人數變動時推送） */
+export interface RoomListMsg { type: 'room_list'; rooms: RoomInfo[]; selected: string | null }
 export interface StudentListMsg { type: 'student_list'; students: StudentInfo[] }
 export interface StudentUpdateMsg { type: 'student_update'; student: StudentInfo }
 
@@ -249,6 +306,7 @@ export type SoccerServerMsg =
 
 export type ServerToClient =
   | WelcomeMsg | StudentListMsg | StudentUpdateMsg
+  | RoomJoinedMsg | RoomRejectedMsg | RoomClosedMsg | RoomListMsg
   | TeacherBroadcastPayload
   | ArenaStateMsg | ArenaCountdownMsg | ArenaGoMsg | ArenaPlayersMsg
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
@@ -257,3 +315,5 @@ export type ServerToClient =
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */
 export const WS_CLOSE_REPLACED = 4000;
+/** 老師踢人 / 關房時對學生 WS 用的 close code（學生端：回進房畫面、不自動重連進同房） */
+export const WS_CLOSE_KICKED = 4001;

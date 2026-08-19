@@ -7,7 +7,7 @@ import math
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import FakeClock, recv_until, settle, tick
+from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
 def _register(ws, t, name: str) -> None:
@@ -41,7 +41,7 @@ def _countdown_to_go(client: TestClient, clock: FakeClock, ws) -> dict:
 def test_balloon完整流程(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """join → start → 倒數 → 合法 pop / 超距 pop 丟棄 → 氣球重生 → 時間到 end。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -102,7 +102,7 @@ def test_balloon完整流程(client: TestClient, teacher_ticket: str, clock: Fak
 def test_tag抓捕與respawn與勝負(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """tag：GO 指派鬼 → 碰撞抓捕（stun + respawn + 鬼得分）→ 無敵不重複抓 → 鬼隊達標勝。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -150,7 +150,7 @@ def test_tag時間到抓捕未達標_跑者勝(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
     """tag：時間到時總抓捕數未達門檻 → 跑者隊勝。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -172,7 +172,7 @@ def test_tag時間到抓捕未達標_跑者勝(
 def test_倒數中reset取消(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """老師在 3-2-1 倒數中送 reset_all → 取消本場回 idle，之後不會 GO（legacy 沒做，補上）。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")
@@ -192,7 +192,7 @@ def test_倒數中reset取消(client: TestClient, teacher_ticket: str, clock: Fa
 def test_老師state_req與leave斷線清理(client: TestClient, teacher_ticket: str) -> None:
     """arena_state_req 回快照；arena_leave 保留分數；斷線整筆移除。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")

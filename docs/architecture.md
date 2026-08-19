@@ -69,6 +69,14 @@ droneclassroom/
 - **防作弊＝標記不阻擋**：`complete_level` 對照伺服器觀察的關卡經過時間，離譜（宣稱用時 < 觀察一半、<1s、沒 progress 就交、未知關卡）→ 該生標 `suspect`，老師端顯示 ⚠️；標記跟著名字走，重整頁面/同名重連不洗白。位置級驗證（限速/邊界）留給 Phase 2c 多人在 `games/` 做。
 - 學生端刻意不設帳密（國小教室場景）；正式競賽的帳號/RBAC 見 rewrite-plan Phase 4。
 
+### 多房間（`app/rooms.py`）
+
+- **一個 Room = 獨立名冊（Roster）+ 獨立賽局（ArenaGame / SoccerGame）+ 設定（名稱 / 密碼 / 人數上限 / 鎖房）**，`RoomManager` 持有 `dict[房間碼 → Room]`、統一 tick 所有房的賽局並推房間列表給老師。**預設房 `MAIN`**（`DEFAULT_ROOM_CODE`）啟動即存在、不可關閉——不帶房間碼的學生走預設房，既有 URL / 流程原封不動；`app.state.roster/arena/soccer` 保留為預設房的別名。
+- 房間碼 4 碼、去 0/O/1/I（`ROOM_CODE_LENGTH` / `ROOM_CODE_ALPHABET`），上限 `ROOM_MAX_ROOMS`（預設 20）；非預設房 0 人且無賽局閒置逾 `ROOM_IDLE_CLOSE_SEC`（預設 1h）自動關。
+- **學生**：連線 `?room=` 或 `register{roomCode, roomPassword}` 指定房 → 門檢（不存在 / 鎖房 / 滿員 / 密碼）→ `room_joined` 或 `room_rejected`（不斷線可重試，連錯密碼 5 次才斷）；之後訊息全路由到該房。同名重連只在房內比對。
+- **老師**：一條 WS 管多間，`RoomManager` 記每位老師「目前選定的房」；老師訊息帶 `roomCode` 就路由到該房、缺省用選定房；`room_create/close/update/kick/select/list_req` 管房，踢人 / 關房對學生 close **4001**（`WS_CLOSE_KICKED`）。名冊 / 賽局扇出只到選定該房的老師，`room_list` 則推所有老師（同一 loop tick 內合併）。
+- 未來帳號系統：`Room.owner_id` 已預留，加持久化即可，協定不變。
+
 ### 教師後台（`apps/teacher`）
 
 Vite + TS（無框架，同 simulator 慣例），dev :5174、生產由 api 以 `/teacher` 供檔（assets 掛 `/teacher-assets/`，`TEACHER_DIST` 設定）。相對 legacy 修掉三個 bug：關卡下拉三章全列（`GET /api/levels`）、顯示真 LAN 位址（`GET /api/info`，不再打 api.ipify.org）、人數上限來自 `MAX_STUDENTS` 設定。大亂鬥/足球分頁版面已備、待 2c 啟用。

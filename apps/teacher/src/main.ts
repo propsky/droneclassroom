@@ -48,6 +48,7 @@ async function enterDashboard(): Promise<void> {
       onArena: (msg) => view.onArenaMsg(msg),
       onSoccer: (msg) => view.onSoccerMsg(msg),
       onLock: (locked) => view.setLevelLock(locked),
+      onRooms: (rooms, selected) => view.setRooms(rooms, selected),
       onUnauthorized: () => {
         clearTicket();
         if (authDisabled) {
@@ -66,7 +67,7 @@ async function enterDashboard(): Promise<void> {
     info,
     levels,
     send: (payload) => client.broadcast(payload),
-    sendGame: (msg) => client.send(msg),
+    sendGame: (msg) => client.send(msg), // 賽局 / 房間管理訊息同一條路（roomCode 由 ws 補）
     onLogout: () => {
       clearTicket();
       showLogin();

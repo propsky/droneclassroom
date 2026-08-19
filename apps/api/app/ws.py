@@ -9,15 +9,20 @@
 3. JSON parse + 必須是物件且帶字串 type 欄位
 4. type 白名單 + Pydantic 欄位型別驗證（失敗丟棄並 log）
 
-arena / soccer 賽局訊息在驗證後分派給 app.state.arena / app.state.soccer
-（games/，狀態自持）。老師的賽局控制訊息（arena_start / soccer_start …）
-只在老師 endpoint 分派 —— ticket 機制已保證 /teacher 連線＝老師。
+名冊 / 賽局都是「每房一份」（rooms.py）：
+- 學生：連線 URL 沒帶 ?room= → 連上即進預設房（既有流程原封不動）；有帶 → 等 register
+  才進房。register 可帶 roomCode / roomPassword，通過門檢（存在 / 未鎖 / 未滿 / 密碼）
+  才進房並收 room_joined，被拒收 room_rejected 但不斷線（可改碼重試；連錯密碼
+  MAX_BAD_PASSWORD_TRIES 次才斷，防暴力）。之後所有訊息路由到該房的名冊 / 賽局。
+- 老師：一條 WS 管多間；帶 roomCode 的訊息路由到該房、缺省用目前選定的房。
+  賽局控制訊息（arena_start / soccer_start …）只在老師 endpoint 分派 ——
+  ticket 機制已保證 /teacher 連線＝老師。
 """
 
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import anyio
 from fastapi import FastAPI, WebSocket
@@ -39,6 +44,15 @@ from .protocol import (
     CompleteLevelMsg,
     ProgressMsg,
     RegisterMsg,
+    RejectReason,
+    RoomCloseMsg,
+    RoomCreateMsg,
+    RoomJoinedMsg,
+    RoomKickMsg,
+    RoomListReqMsg,
+    RoomRejectedMsg,
+    RoomSelectMsg,
+    RoomUpdateMsg,
     SoccerGoalMsg,
     SoccerJoinMsg,
     SoccerLeaveMsg,
@@ -51,15 +65,15 @@ from .protocol import (
     SoccerStopMsg,
     TeacherBroadcastMsg,
 )
-from .roster import Roster
-
-if TYPE_CHECKING:
-    from .games import ArenaGame, SoccerGame
+from .rooms import Room, RoomLimitError, RoomManager
+from .roster import StudentRecord, send_safe
 
 logger = logging.getLogger("creafly.api.ws")
 
 MAX_MESSAGE_BYTES = 4 * 1024  # 單則訊息大小上限
 MAX_MESSAGES_PER_SEC = 60  # 每 socket 每秒訊息數上限
+MAX_BAD_PASSWORD_TRIES = 5  # 同一連線連續錯房間密碼幾次就斷線（防暴力猜密碼）
+WS_CLOSE_POLICY_VIOLATION = 1008  # RFC 6455 標準碼：未知路徑 / 連錯密碼過多
 
 
 class RateLimiter:
@@ -159,14 +173,23 @@ async def _teacher_ticket_ok(ws: WebSocket) -> bool:
 
 
 async def _student_endpoint(ws: WebSocket) -> None:
-    """學生 WS：welcome → register / progress / complete_level / 賽局訊息迴圈。"""
-    roster: Roster = ws.app.state.roster
-    arena: ArenaGame = ws.app.state.arena
-    soccer: SoccerGame = ws.app.state.soccer
+    """學生 WS：welcome →（進房）→ register / progress / complete_level / 賽局訊息迴圈。
+
+    room = 目前所在的房（None = 帶 ?room= 連上但還沒 register 通過）；
+    所有名冊 / 賽局訊息都路由到 room 的 roster / arena / soccer。
+    """
+    rooms: RoomManager = ws.app.state.rooms
     if not await _origin_ok(ws):
         return
     await ws.accept()
-    record = await roster.add_student(ws)  # 內含發送 welcome
+    record = await rooms.new_student(ws)  # 配發 id + 發 welcome
+    # 連線 URL 的 ?room=：作為 register 缺省 roomCode；沒帶 → 連上即進預設房（舊流程）
+    url_room: str | None = ws.query_params.get("room") or None
+    room: Room | None = None
+    if url_room is None:
+        room = rooms.default
+        await room.roster.add_student(record)
+    bad_password_tries = 0
     limiter = RateLimiter()
     try:
         while True:
@@ -178,9 +201,33 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     "[WS] 學生訊息驗證失敗，丟棄：type=%s（%s）", msg["type"], record.name
                 )
                 continue
+            if isinstance(valid, RegisterMsg):
+                # ----- 進房門檢 → 進房 / 換房 → 報到 -----
+                target = rooms.get(valid.roomCode or url_room)
+                reason = _join_check(target, room, record, valid)
+                if reason is not None:
+                    await _send_rejected(ws, reason)
+                    bad_password_tries = bad_password_tries + 1 if reason == "bad_password" else 0
+                    if bad_password_tries >= MAX_BAD_PASSWORD_TRIES:
+                        logger.info("[WS] %s 連錯房間密碼太多次，斷線", record.id)
+                        await ws.close(code=WS_CLOSE_POLICY_VIOLATION, reason="bad password")
+                        break
+                    continue
+                bad_password_tries = 0
+                assert target is not None  # _join_check 已排除
+                if target is not room:
+                    if room is not None:
+                        await _leave_room(room, record)
+                    room = target
+                    await room.roster.add_student(record)
+                await room.roster.register(record, valid.name, valid.emoji)
+                await send_safe(ws, RoomJoinedMsg(room=room.info()).model_dump_json())
+                continue
+            if room is None:
+                # 帶 ?room= 連上但還沒進房：其餘訊息一律忽略（先 register）
+                continue
+            roster, arena, soccer = room.roster, room.arena, room.soccer
             match valid:
-                case RegisterMsg():
-                    await roster.register(record, valid.name, valid.emoji)
                 case ProgressMsg():
                     await roster.progress(record, valid.levelId)
                 case CompleteLevelMsg():
@@ -211,30 +258,54 @@ async def _student_endpoint(ws: WebSocket) -> None:
         # 斷線清理必須完整跑完（賽局移除 → 前鋒遞補 → 名冊更新），否則老師端狀態會殘缺。
         # 連線 task 可能被 cancel（server shutdown / TestClient 收尾），故 shield 保護
         with anyio.CancelScope(shield=True):
-            # 賽局先清（前鋒遞補 / 排行更新要在名冊移除前算），再走名冊斷線流程
-            await arena.drop(record)
-            await soccer.drop(record)
-            await roster.remove_student(record)
+            if room is not None:
+                # 賽局先清（前鋒遞補 / 排行更新要在名冊移除前算），再走名冊斷線流程
+                await room.arena.drop(record)
+                await room.soccer.drop(record)
+                await room.roster.remove_student(record)
+
+
+def _join_check(
+    target: Room | None, current: Room | None, record: StudentRecord, msg: RegisterMsg
+) -> RejectReason | None:
+    """register 門檢：房不存在 → not_found；換房或首次報到 → 該房 reject_reason；
+    已在房內的重新 register（改名 / 換 emoji）不再檢查。回 None = 放行。"""
+    if target is None:
+        return "not_found"
+    if target is not current or record.name == "?":
+        return target.reject_reason(record, msg.name, msg.roomPassword)
+    return None
+
+
+async def _send_rejected(ws: WebSocket, reason: RejectReason) -> None:
+    await send_safe(ws, RoomRejectedMsg(reason=reason).model_dump_json())
+
+
+async def _leave_room(room: Room, record: StudentRecord) -> None:
+    """學生換房：從舊房的賽局與名冊整筆移出（連線不動）。"""
+    await room.arena.drop(record)
+    await room.soccer.drop(record)
+    await room.roster.detach(record)
 
 
 # ---------- 老師連線 ----------
 
 
 async def _teacher_endpoint(ws: WebSocket) -> None:
-    """老師 WS：Origin + ticket 驗證後收完整名冊，之後可下 broadcast 與賽局控制。
+    """老師 WS：Origin + ticket 驗證後收房間列表與預設房名冊，之後可下 broadcast / 賽局控制 /
+    房間管理。
 
+    帶 roomCode 的訊息路由到該房（不存在 → 丟棄並 log），缺省用目前選定的房。
     賽局控制訊息（arena_start / soccer_start …）只在這裡分派 ——
     ticket 機制已保證 /teacher 連線＝老師，學生 endpoint 收到一律驗證失敗丟棄。
     """
-    roster: Roster = ws.app.state.roster
-    arena: ArenaGame = ws.app.state.arena
-    soccer: SoccerGame = ws.app.state.soccer
+    rooms: RoomManager = ws.app.state.rooms
     if not await _origin_ok(ws):
         return
     if not await _teacher_ticket_ok(ws):
         return
     await ws.accept()
-    await roster.add_teacher(ws)
+    await rooms.add_teacher(ws)
     limiter = RateLimiter()
     try:
         while True:
@@ -245,10 +316,42 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                 # broadcast payload 不在白名單、欄位型別不符、或未知 type → 丟棄並 log
                 logger.info("[WS] 老師訊息驗證失敗，丟棄：type=%s", msg["type"])
                 continue
+            # ----- 房間管理（不需目標房或自帶 roomCode）-----
             match valid:
+                case RoomCreateMsg():
+                    try:
+                        room = rooms.create(valid.settings)
+                    except RoomLimitError as e:
+                        logger.info("[Room] 開房失敗：%s", e)
+                        continue
+                    await rooms.select(ws, room)  # 開完自動切過去
+                    rooms.notify()  # 其他老師的列表也要有新房
+                    continue
+                case RoomListReqMsg():
+                    await rooms.send_room_list(ws)
+                    continue
+            # 其餘訊息都要有目標房：roomCode 指定 → 該房；缺省 → 目前選定的房
+            code = getattr(valid, "roomCode", None)
+            room = rooms.get(code) if code else rooms.selected(ws)
+            if room is None:
+                logger.info("[Room] 房間 %s 不存在，丟棄老師訊息 type=%s", code, valid.type)
+                continue
+            roster, arena, soccer = room.roster, room.arena, room.soccer
+            match valid:
+                case RoomSelectMsg():
+                    await rooms.select(ws, room)
+                case RoomUpdateMsg():
+                    rooms.update(room, valid.settings)
+                case RoomKickMsg():
+                    target = roster.find(valid.studentId)
+                    if target is not None:
+                        await rooms.kick(room, target)
+                case RoomCloseMsg():
+                    if not await rooms.close(room):
+                        logger.info("[Room] 預設房 %s 不可關閉", room.code)
                 case TeacherBroadcastMsg():
                     # 老師廣播（load_level / set_mode / reset_all / race_start /
-                    # show_message / lock_level）
+                    # show_message / lock_level）→ 該房全體學生
                     if valid.payload.type in ("load_level", "race_start", "reset_all"):
                         # 智能停止：賽局（含倒數）進行中老師切關 → 先結束該賽局
                         # （end 廣播 reason:'level_switch'）再轉發關卡廣播。
@@ -259,7 +362,7 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                         # 記住課程關卡：鎖定中遲到 / 重整的學生連上時補載入
                         roster.current_level_id = valid.payload.levelId
                     if valid.payload.type == "lock_level":
-                        # 鎖定狀態存伺服器（遲到者補送），並回送全體老師同步開關 UI
+                        # 鎖定狀態存伺服器（遲到者補送），並回送看著這房的老師同步開關 UI
                         roster.level_locked = valid.payload.locked
                         await roster.send_raw_to_teachers(valid.payload.model_dump_json())
                     await roster.broadcast_to_students(valid.payload)
@@ -283,10 +386,11 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     await soccer.set_team(valid.studentId, valid.team)
                 case SoccerResetMsg():
                     await soccer.reset(valid.clearTeams)
+            rooms.notify()  # 賽局狀態 / 設定可能變了 → 房間列表（沒變不推）
     except WebSocketDisconnect:
         pass
     finally:
-        roster.remove_teacher(ws)
+        rooms.remove_teacher(ws)
 
 
 # ---------- 未知路徑 ----------
@@ -296,7 +400,7 @@ async def _reject_endpoint(ws: WebSocket, path: str) -> None:
     """未知 WS 路徑：拒絕連線（對齊 Node 版 close 1008）。"""
     logger.info("[WS] 未知路徑 /%s，拒絕連線", path)
     await ws.accept()
-    await ws.close(code=1008, reason="unknown path")
+    await ws.close(code=WS_CLOSE_POLICY_VIOLATION, reason="unknown path")
 
 
 def register_ws_routes(app: FastAPI) -> None:

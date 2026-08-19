@@ -8,7 +8,7 @@ import math
 from fastapi.testclient import TestClient
 
 from app.games.base import SPEED_LIMIT, STRIKE_SUSPECT_LIMIT
-from tests.conftest import FakeClock, recv_until, settle
+from tests.conftest import FakeClock, recv_until, settle, teacher_connect
 
 # 模組層 sanity check：速度上限 = 12 單位/秒 × 1.5 裕度（門檻改了這裡會先叫）
 assert SPEED_LIMIT == 18.0
@@ -26,7 +26,7 @@ def _register_and_join(ws, t, name: str, game: str) -> None:
 def test_arena座標clamp到場地邊界(client: TestClient, teacher_ticket: str) -> None:
     """超界座標不丟棄、用 clamp 值（x/z ±22、y 0~20）。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register_and_join(s, t, "小明", "arena")
@@ -40,7 +40,7 @@ def test_soccer座標clamp到場地邊界(client: TestClient, teacher_ticket: st
     """足球場地邊界隨設定換算（預設 x ±10、z ±20、y 0~15）。"""
     soccer = client.app.state.soccer
     f = soccer.field
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register_and_join(s, t, "小明", "soccer")
@@ -55,7 +55,7 @@ def test_超速回報忽略且strike累積標suspect(
 ) -> None:
     """瞬移回報被忽略（位置不動）；累積 5 次 strike → roster 標 suspect、老師即時收到。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register_and_join(s, t, "小明", "arena")
@@ -88,7 +88,7 @@ def test_超速回報忽略且strike累積標suspect(
 def test_合法移動不記strike(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """接近極速（9 單位/秒）但在上限（18）內的移動不觸發 strike。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register_and_join(s, t, "小明", "arena")
@@ -108,7 +108,7 @@ def test_合法移動不記strike(client: TestClient, teacher_ticket: str, clock
 def test_pop距離驗證strike(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """沒回報過位置（原點）就宣稱戳到遠處氣球 → 丟棄 + strike，分數不變。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register_and_join(s, t, "小明", "arena")

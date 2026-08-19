@@ -1,4 +1,4 @@
-// Overlay 元件：登入 modal（名字 + emoji）、關卡 intro、3-2-1 倒數、關卡選單、
+// Overlay 元件：登入 modal（名字 + emoji + 房間碼）、關卡 intro、3-2-1 倒數、關卡選單、
 // header 按鈕列（模式切換 / 回家 / 視角 / 全螢幕 / 改名）與 Blockly 工具列按鈕。
 import { bus, toast } from '../core/events';
 import { flags } from '../core/droneState';
@@ -11,11 +11,34 @@ import { iconHtml, mountIcons } from './icons';
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
 // =============================================================================
-// 玩家（登入 / 顯示名稱）
+// 玩家（登入 / 顯示名稱 / 房間）
 // =============================================================================
-export const player = { name: '', emoji: '' };
+/**
+ * 玩家身分：名字 + 動物 + 房間碼（老師開房給的 4 碼；空字串 = 預設房，向後相容）+ 密碼。
+ * net/ws.ts 的 register 直接讀這裡（重連時自動帶同一組）。
+ */
+export const player = { name: '', emoji: '', roomCode: '', roomPassword: '' };
 
 const LS_PLAYER = 'creafly_player';
+/** 最後一次成功送出的房間碼（下次開啟預填；被踢 / 關房時清掉，避免重整又自動進同房） */
+const LS_ROOM = 'creafly_room';
+/** 房間密碼只留在本分頁（重整可自動重進有密碼的房；關分頁即忘） */
+const SS_ROOM_PW = 'creafly_room_pw';
+/** 進房等待逾時：伺服器沒回 room_joined / room_rejected（離線教室）→ 先放行單機遊玩 */
+const JOIN_TIMEOUT_MS = 6000;
+
+/** 房間碼正規化：去空白、大寫、只留英數、最多 4 碼 */
+export function normalizeRoomCode(raw: string): string {
+  return raw.replace(/[^0-9a-zA-Z]/g, '').toUpperCase().slice(0, 4);
+}
+
+const REJECT_TEXT: Record<string, string> = {
+  not_found: '找不到這個房間，確認一下老師給的 4 碼',
+  locked: '老師已鎖房，暫不開放加入',
+  full: '房間已滿',
+  bad_password: '密碼不對',
+  closed: '房間已關閉',
+};
 
 function loadPlayer(): boolean {
   try {
@@ -25,6 +48,8 @@ function loadPlayer(): boolean {
       if (p.name && p.emoji) {
         player.name = p.name;
         player.emoji = p.emoji;
+        player.roomCode = normalizeRoomCode(localStorage.getItem(LS_ROOM) ?? '');
+        player.roomPassword = player.roomCode ? sessionStorage.getItem(SS_ROOM_PW) ?? '' : '';
         return true;
       }
     }
@@ -40,12 +65,65 @@ function savePlayer(): void {
       LS_PLAYER,
       JSON.stringify({ name: player.name, emoji: player.emoji, createdAt: new Date().toISOString() }),
     );
+    if (player.roomCode) localStorage.setItem(LS_ROOM, player.roomCode);
+    else localStorage.removeItem(LS_ROOM);
+    if (player.roomPassword) sessionStorage.setItem(SS_ROOM_PW, player.roomPassword);
+    else sessionStorage.removeItem(SS_ROOM_PW);
   } catch {
     /* ignore */
   }
 }
 
-function showLoginModal(): void {
+/** 被踢 / 關房：忘掉房間碼（重整不自動進同房），名字動物保留 */
+function forgetRoom(): void {
+  player.roomCode = '';
+  player.roomPassword = '';
+  try {
+    localStorage.removeItem(LS_ROOM);
+    sessionStorage.removeItem(SS_ROOM_PW);
+  } catch {
+    /* ignore */
+  }
+}
+
+// ---- 登入 modal 元素 ----
+const roomInput = (): HTMLInputElement | null => $('login-room') as HTMLInputElement | null;
+const roomPwInput = (): HTMLInputElement | null => $('login-room-pw') as HTMLInputElement | null;
+
+function setRoomError(text: string | null, field: 'code' | 'pw' | null = null): void {
+  const err = $('login-room-error');
+  const form = document.querySelector('#login-modal .login-form');
+  if (err) {
+    err.textContent = text ?? '';
+    err.hidden = !text;
+  }
+  form?.classList.toggle('has-error', field === 'code');
+  form?.classList.toggle('has-error-pw', field === 'pw');
+}
+
+/** URL ?room= 帶入 → 欄位唯讀鎖定；被拒 / 點「換房」時解鎖 */
+function setRoomLocked(locked: boolean): void {
+  const input = roomInput();
+  const hint = $('login-room-hint');
+  if (input) input.readOnly = locked;
+  if (hint) hint.textContent = locked ? '房間碼由老師的網址帶入（點房間碼可修改）' : '沒有房間碼？留空即可';
+}
+
+/** 進房等待態：按鈕「加入中…」+ disabled；逾時放行 */
+let joinTimer: number | null = null;
+function setJoinPending(on: boolean): void {
+  const btn = $('login-start') as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = on;
+    btn.textContent = on ? '加入中…' : '開始飛行';
+  }
+  if (!on && joinTimer) {
+    clearTimeout(joinTimer);
+    joinTimer = null;
+  }
+}
+
+function showLoginModal(opts: { focusRoom?: boolean } = {}): void {
   const modal = $('login-modal');
   if (!modal) return;
   const nameInput = $('login-name') as HTMLInputElement | null;
@@ -53,11 +131,24 @@ function showLoginModal(): void {
   document.querySelectorAll('.emoji-btn').forEach((b) => {
     b.classList.toggle('selected', b.getAttribute('data-emoji') === player.emoji);
   });
+  const rc = roomInput();
+  if (rc) rc.value = player.roomCode;
+  const pw = roomPwInput();
+  if (pw) pw.value = player.roomPassword;
+  setJoinPending(false);
   modal.classList.add('show');
+  if (opts.focusRoom) {
+    setRoomLocked(false); // 主動換房 → 解除 URL 鎖定
+    rc?.focus();
+    rc?.select();
+  } else if (!player.name) {
+    nameInput?.focus();
+  }
 }
 
 function hideLoginModal(): void {
   $('login-modal')?.classList.remove('show');
+  setJoinPending(false);
   const hud = $('player-hud');
   const display = $('player-name-display');
   if (hud && display) {
@@ -68,7 +159,29 @@ function hideLoginModal(): void {
   if (av) av.textContent = player.emoji || '🙂';
 }
 
-export function initPlayer(onReady: () => void): void {
+/** header 房間標籤：「房名 · 房碼」；名稱等於房碼時只顯示房碼 */
+function setRoomTag(room: { code: string; name: string } | null): void {
+  const tag = $('room-tag');
+  if (!tag) return;
+  if (!room) {
+    tag.style.display = 'none';
+    return;
+  }
+  const name = $('room-tag-name');
+  const code = $('room-tag-code');
+  if (name) name.textContent = room.name && room.name !== room.code ? room.name : '';
+  if (code) code.textContent = room.code;
+  tag.title = `房間：${room.name || room.code}（點擊換房）`;
+  tag.style.display = 'inline-flex';
+}
+
+/**
+ * 登入 / 進房流程。onJoin：以目前 player 身分（重新）連線並 register（main 傳 net/ws.rejoin）。
+ * - 沒填房間碼 → 立刻收 modal、進預設房（向後相容；離線也能玩）
+ * - 有填房間碼 → modal 留著等 room_joined（成功收起）/ room_rejected（顯示文案讓使用者改）；
+ *   逾時（伺服器沒回）先放行單機遊玩，連上後 register 會自動再進房
+ */
+export function initPlayer(onJoin: () => void): void {
   document.querySelectorAll('.emoji-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.emoji-btn').forEach((b) => b.classList.remove('selected'));
@@ -76,23 +189,116 @@ export function initPlayer(onReady: () => void): void {
       player.emoji = btn.getAttribute('data-emoji') ?? '';
     });
   });
+
+  // 房間碼：自動大寫 / 只留英數；改動就清錯誤
+  roomInput()?.addEventListener('input', (e) => {
+    const el = e.target as HTMLInputElement;
+    const v = normalizeRoomCode(el.value);
+    if (el.value !== v) el.value = v;
+    setRoomError(null);
+  });
+  roomPwInput()?.addEventListener('input', () => setRoomError(null));
+  // 唯讀（URL 帶入）時點一下就解鎖可改
+  roomInput()?.addEventListener('click', () => {
+    if (roomInput()?.readOnly) setRoomLocked(false);
+  });
+  // Enter 送出
+  document.querySelectorAll<HTMLInputElement>('#login-modal input').forEach((el) =>
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') ($('login-start') as HTMLButtonElement | null)?.click();
+    }),
+  );
+
+  /** modal 收起 + 通知（新手引導等） */
+  const finishLogin = (): void => {
+    hideLoginModal();
+    bus.emit('player-ready', {});
+  };
+
   $('login-start')?.addEventListener('click', () => {
     const name = ((($('login-name') as HTMLInputElement | null)?.value) ?? '').trim();
     if (!name) {
       toast('請輸入名字', 'error');
+      $('login-name')?.focus();
       return;
     }
     if (!player.emoji) {
       toast('請選一個動物', 'error');
       return;
     }
+    const code = normalizeRoomCode(roomInput()?.value ?? '');
+    if (code && code.length < 4) {
+      setRoomError('房間碼是 4 碼英數（老師給的），或留空進預設房', 'code');
+      roomInput()?.focus();
+      return;
+    }
+    const roomChanged = code !== player.roomCode;
     player.name = name;
+    player.roomCode = code;
+    player.roomPassword = code ? (roomPwInput()?.value ?? '') : '';
     savePlayer();
-    hideLoginModal();
-    toast(`✓ 歡迎 ${player.name}${player.emoji}！`, 'success');
-    bus.emit('player-ready', {});
-    setTimeout(onReady, 200);
+    setRoomError(null);
+    if (roomChanged) {
+      // 換房：先退出大亂鬥 / 足球等接管型模式（賽局屬於舊房）
+      bus.emit('mode-takeover', { mode: 'level' });
+      setRoomTag(null);
+    }
+    if (!code) {
+      // 預設房：不等伺服器（離線也要能玩）
+      finishLogin();
+      toast(`✓ 歡迎 ${player.name}${player.emoji}！`, 'success');
+      setTimeout(onJoin, 200);
+      return;
+    }
+    // 指定房間：等 room_joined / room_rejected；逾時放行
+    setJoinPending(true);
+    onJoin();
+    joinTimer = window.setTimeout(() => {
+      joinTimer = null;
+      if (!$('login-modal')?.classList.contains('show')) return;
+      finishLogin();
+      toast('⚠️ 還沒連上老師伺服器，連上後會自動加入房間', 'warning');
+    }, JOIN_TIMEOUT_MS);
   });
+
+  // ---- 房間事件（net/ws.ts）----
+  bus.on('room-joined', ({ room }) => {
+    setRoomTag(room);
+    if ($('login-modal')?.classList.contains('show')) {
+      finishLogin();
+      toast(`✓ 已加入 ${room.name || room.code}，歡迎 ${player.name}${player.emoji}！`, 'success');
+    }
+  });
+  bus.on('room-rejected', ({ reason }) => {
+    setRoomTag(null);
+    const shown = $('login-modal')?.classList.contains('show');
+    if (!shown) showLoginModal({ focusRoom: true });
+    setJoinPending(false);
+    setRoomLocked(false); // URL 帶入的碼也可能是錯的 → 解鎖讓使用者改
+    setRoomError(REJECT_TEXT[reason] ?? '無法加入房間', reason === 'bad_password' ? 'pw' : 'code');
+    if (reason === 'bad_password') {
+      const pw = roomPwInput();
+      pw?.focus();
+      pw?.select();
+    } else {
+      const rc = roomInput();
+      rc?.focus();
+      rc?.select();
+    }
+  });
+  bus.on('room-left', () => {
+    // 被踢 / 關房：清房間碼、回登入 modal（房間碼欄位清空並聚焦）；不自動重連（ws 已 stopped）
+    forgetRoom();
+    setRoomTag(null);
+    showLoginModal({ focusRoom: true });
+    setRoomError(null);
+    const rc = roomInput();
+    if (rc) rc.value = '';
+    const pw = roomPwInput();
+    if (pw) pw.value = '';
+  });
+  // header 房間標籤：點擊換房
+  $('room-tag')?.addEventListener('click', () => showLoginModal({ focusRoom: true }));
 
   // 頭像下拉 + 改名
   const hud = $('player-hud');
@@ -110,8 +316,9 @@ export function initPlayer(onReady: () => void): void {
   });
 
   // 開發後門：?autologin=1 直接以測試身分登入（headless 截圖 / demo 用；
-  // 可用 &name= / &emoji= 指定身分 → 多開視窗驗多人時避免同名擠下線）
+  // 可用 &name= / &emoji= 指定身分 → 多開視窗驗多人時避免同名擠下線；&room= / &roompw= 指定房間）
   const qs = new URLSearchParams(location.search);
+  const urlRoom = normalizeRoomCode(qs.get('room') ?? '');
   if (qs.get('autologin') === '1' && !loadPlayer()) {
     player.name = qs.get('name') || '測試';
     player.emoji = qs.get('emoji') || '🐬';
@@ -119,10 +326,23 @@ export function initPlayer(onReady: () => void): void {
   }
 
   if (loadPlayer()) {
+    if (urlRoom) {
+      // 老師投影的網址帶碼 → 覆蓋上次的房間碼直接進房（密碼由 &roompw= 或 modal 補）
+      if (urlRoom !== player.roomCode) player.roomPassword = '';
+      player.roomCode = urlRoom;
+      if (qs.get('roompw')) player.roomPassword = qs.get('roompw') ?? '';
+      savePlayer();
+    }
     hideLoginModal();
     bus.emit('player-ready', {});
-    setTimeout(onReady, 200); // 已登入（重新整理）也要自動連線
+    setTimeout(onJoin, 200); // 已登入（重新整理）也要自動連線
   } else {
+    if (urlRoom) {
+      player.roomCode = urlRoom;
+      const rc = roomInput();
+      if (rc) rc.value = urlRoom;
+      setRoomLocked(true);
+    }
     showLoginModal();
   }
 }

@@ -2,11 +2,11 @@
 
 from fastapi.testclient import TestClient
 
-from tests.conftest import recv_until
+from tests.conftest import recv_until, teacher_connect
 
 
 def test_lock廣播到學生並回送老師(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             recv_until(s, "welcome")
@@ -17,7 +17,7 @@ def test_lock廣播到學生並回送老師(client: TestClient, teacher_ticket: 
 
 
 def test_鎖定中遲到學生連上補送鎖定與課程關卡(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         t.send_json({"type": "broadcast", "payload": {"type": "load_level", "levelId": "1-3"}})
         t.send_json({"type": "broadcast", "payload": {"type": "lock_level", "locked": True}})
@@ -30,7 +30,7 @@ def test_鎖定中遲到學生連上補送鎖定與課程關卡(client: TestClie
 
 
 def test_解除鎖定後遲到學生不再補送(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         t.send_json({"type": "broadcast", "payload": {"type": "lock_level", "locked": True}})
         t.send_json({"type": "broadcast", "payload": {"type": "lock_level", "locked": False}})
@@ -47,7 +47,7 @@ def test_解除鎖定後遲到學生不再補送(client: TestClient, teacher_tic
 
 
 def test_lock_level欄位型別不符整則丟棄(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             recv_until(s, "welcome")
@@ -60,18 +60,18 @@ def test_lock_level欄位型別不符整則丟棄(client: TestClient, teacher_ti
 
 
 def test_鎖定中老師重連收到鎖定狀態(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         t.send_json({"type": "broadcast", "payload": {"type": "lock_level", "locked": True}})
         recv_until(t, "lock_level")
     # 老師重整 / 換裝置重連 → 名冊後補送鎖定狀態，開關 UI 同步
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t2:
+    with teacher_connect(client, teacher_ticket) as t2:
         recv_until(t2, "student_list")
         assert recv_until(t2, "lock_level") == {"type": "lock_level", "locked": True}
 
 
 def test_race_start也記住課程關卡(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         t.send_json({"type": "broadcast", "payload": {"type": "race_start", "levelId": "1-4"}})
         t.send_json({"type": "broadcast", "payload": {"type": "lock_level", "locked": True}})

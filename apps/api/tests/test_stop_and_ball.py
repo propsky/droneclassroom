@@ -12,7 +12,7 @@ tick 相關流程全部用假時鐘（conftest.clock）＋ 手動 tick（conftes
 from fastapi.testclient import TestClient
 
 from app.games.soccer import BALL_RADIUS
-from tests.conftest import FakeClock, recv_until, settle, tick
+from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
 def _register(ws, t, name: str) -> None:
@@ -63,7 +63,7 @@ def _types_until(ws, msg_type: str) -> list[str]:
 def test_arena_stop_倒數中(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """倒數中 arena_stop → arena_end reason:'teacher_stop'、回 idle、不會 GO。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")
@@ -88,7 +88,7 @@ def test_arena_stop_進行中含排行(
 ) -> None:
     """進行中 arena_stop → arena_end 含當下排行、回 idle。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")
@@ -109,7 +109,7 @@ def test_arena_stop_進行中含排行(
 def test_soccer_stop_倒數中(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """倒數中 soccer_stop → soccer_end reason:'teacher_stop'（0:0 → draw）、回 idle。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -135,7 +135,7 @@ def test_soccer_stop_進行中依當下比分判勝(
 ) -> None:
     """進行中 soccer_stop → winner 依當下比分（紅領先 → red）。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -164,7 +164,7 @@ def test_智能停止_load_level_先end再轉發(
 ) -> None:
     """arena 進行中收 load_level → 學生先收到 arena_end(level_switch) 再收到 load_level。"""
     arena = client.app.state.arena
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")
@@ -188,7 +188,7 @@ def test_智能停止_race_start_足球倒數中(
 ) -> None:
     """soccer 倒數中收 race_start → 先 soccer_end(level_switch) 再 race_start。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -213,7 +213,7 @@ def test_智能停止_race_start_足球倒數中(
 
 def test_智能停止_reset_all(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """arena 進行中收 reset_all → 先 arena_end(level_switch) 再 reset_all。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")
@@ -229,7 +229,7 @@ def test_智能停止_reset_all(client: TestClient, teacher_ticket: str, clock: 
 
 def test_智能停止_賽局idle時不發end(client: TestClient, teacher_ticket: str) -> None:
     """兩個賽局都 idle 時切關 → 不多發 end，學生直接收到 load_level。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
             _register(s, t, "小明")
@@ -256,7 +256,7 @@ def test_ball模式_開賽下發場地與球_推球位移與廣播(
 ) -> None:
     """soccer_start 未帶 mode → 預設 ball；GO 下發 field/ball；貼近球 → 推球位移 + soccer_ball。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")  # 藍隊
@@ -282,7 +282,7 @@ def test_ball模式_開賽下發場地與球_推球位移與廣播(
 def test_ball模式_牆反彈(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
     """球衝向側牆 → 位置 clamp 在 halfX - r、法向速度反向 ×0.7。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -303,7 +303,7 @@ def test_ball模式_進球烏龍與重置(
     """球心過門面且在門環內 → 攻方得分；守方最後觸球 = 烏龍（own=true 得分仍歸對隊）；
     進球後球重置中場、進球隊 armed=false。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")  # 藍隊
@@ -341,7 +341,7 @@ def test_ball模式_門環外撞端牆反彈不進球(
 ) -> None:
     """球撞端牆但不在門環半徑內 → 反彈、不得分。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")
@@ -364,7 +364,7 @@ def test_ball模式_client進球上報忽略(
 ) -> None:
     """ball 模式下 client 的 soccer_goal 一律忽略（進門由伺服器球物理判定）。"""
     soccer = client.app.state.soccer
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
             _register(s1, t, "小明")  # 藍隊前鋒

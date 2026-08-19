@@ -2,7 +2,9 @@
 
 import asyncio
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -83,6 +85,42 @@ def tick(client: TestClient) -> None:
     settle(client)  # 先消化未處理完的進站訊息，tick 才看得到最新位置
     client.portal.call(client.app.state.arena.tick)
     client.portal.call(client.app.state.soccer.tick)
+
+
+class TeacherWS:
+    """老師 WS 包裝：receive_json 自動略過 room_list。
+
+    多房間之後老師連線會穿插收到房間列表推送（連上 / 人數 / 賽局狀態變動時），
+    既有測試對名冊 / 賽局訊息流逐則斷言，故在這層濾掉；房間測試改用 recv_until(t, "room_list")。
+    """
+
+    def __init__(self, ws) -> None:
+        self._ws = ws
+
+    def send_json(self, data: Any) -> None:
+        self._ws.send_json(data)
+
+    def send_text(self, data: str) -> None:
+        self._ws.send_text(data)
+
+    def receive_json(self) -> dict:
+        while True:
+            msg = self._ws.receive_json()
+            if msg["type"] != "room_list":
+                return msg
+
+    def receive_text(self) -> str:
+        return self._ws.receive_text()
+
+    def close(self, code: int = 1000) -> None:
+        self._ws.close(code)
+
+
+@contextmanager
+def teacher_connect(client: TestClient, ticket: str) -> Iterator[TeacherWS]:
+    """連老師 WS（帶 ticket），回傳略過 room_list 的包裝。"""
+    with client.websocket_connect(f"/teacher?ticket={ticket}") as ws:
+        yield TeacherWS(ws)
 
 
 def recv_until(ws, msg_type: str) -> dict:

@@ -17,10 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import TeacherAuth, generate_pin
 from .config import Settings
-from .games import ArenaGame, SoccerField, SoccerGame
 from .rest import known_level_ids, load_levels
 from .rest import router as rest_router
-from .roster import Roster
+from .rooms import RoomManager
 from .static import no_store_middleware, register_static_routes
 from .ws import register_ws_routes
 
@@ -28,15 +27,15 @@ logger = logging.getLogger("creafly.api")
 
 
 async def _game_tick_loop(app: FastAPI, interval: float) -> None:
-    """賽局主迴圈：固定週期推進 arena / soccer（legacy setInterval 80ms 的對應）。
+    """賽局主迴圈：固定週期推進所有房間的 arena / soccer（legacy setInterval 80ms 的對應），
+    順帶檢查閒置房自動關閉（RoomManager.tick）。
 
     tick 內任何例外只 log 不讓 task 死掉 —— 一場賽局出錯不能拖垮整堂課。
     """
     while True:
         await asyncio.sleep(interval)
         try:
-            await app.state.arena.tick()
-            await app.state.soccer.tick()
+            await app.state.rooms.tick()
         except Exception:  # noqa: BLE001 — 見 docstring
             logger.exception("[Games] tick 發生例外，略過本輪")
 
@@ -61,11 +60,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        # 所有可變狀態封裝在 app.state（測試隔離：每個 create_app 一份名冊 / 賽局）
-        app.state.roster = Roster(known_levels=known_level_ids(levels))
-        app.state.arena = ArenaGame(app.state.roster)
+        # 所有可變狀態封裝在 app.state（測試隔離：每個 create_app 一份房間管理器）。
+        # 房間模型見 rooms.py：每房一份名冊 + 賽局；預設房啟動即存在（不帶房間碼 = 舊流程）。
         # 足球場地尺寸資料驅動（環境變數 SOCCER_HALF_X … 可調，見 config.py）
-        app.state.soccer = SoccerGame(app.state.roster, field=SoccerField.from_settings(cfg))
+        app.state.rooms = RoomManager(cfg, known_levels=known_level_ids(levels))
+        # 向後相容別名 = 預設房的名冊 / 賽局（既有測試與單房部署直接用）
+        app.state.roster = app.state.rooms.default.roster
+        app.state.arena = app.state.rooms.default.arena
+        app.state.soccer = app.state.rooms.default.soccer
         # 賽局主迴圈（interval=0 → 不啟動，測試手動 tick）
         ticker: asyncio.Task[None] | None = None
         if cfg.game_tick_interval > 0:

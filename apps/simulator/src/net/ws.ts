@@ -1,7 +1,9 @@
 // 學生 WebSocket client — 協定與 legacy server 線上格式相容（@creafly/shared/protocol）。
-// 指數退避重連 3s→30s；close code 4000（同名擠下線）不重連；斷線不影響單機遊玩。
-import type { ServerToClient, SoccerBallMsg, StudentToServer } from '@creafly/shared';
-import { WS_CLOSE_REPLACED } from '@creafly/shared';
+// 指數退避重連 3s→30s；close code 4000（同名擠下線）/ 4001（被踢 / 關房）不重連；斷線不影響單機遊玩。
+// 房間：register 帶 roomCode/roomPassword（缺省 = 預設房），room_joined / room_rejected / room_closed
+// 只轉成 bus 事件給 ui/overlays.ts 的登入 modal 與 header 房間標籤處理。
+import type { RegisterMsg, RoomInfo, ServerToClient, SoccerBallMsg, StudentToServer } from '@creafly/shared';
+import { WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
 import { armLevelStart, loadLevel, levelState, resetMission } from '../core/level';
@@ -15,8 +17,10 @@ export const wsState = {
   backoffMs: 3000, // 3s → 6s → 12s → 24s → 30s 封頂
   everConnected: false,
   wasDown: false,
-  stopped: false, // close 4000 後不再重連
+  stopped: false, // close 4000 / 4001 / 進房被拒後不再重連（使用者重送登入表單才連）
   myId: '' as string,
+  /** 目前所在房間（room_joined 後有值；被踢 / 關房 / 斷線清空） */
+  room: null as RoomInfo | null,
 };
 
 /** 送訊息給伺服器（未連線時靜默丟棄 — 單機遊玩不受影響） */
@@ -68,7 +72,13 @@ export function connectToTeacher(): void {
     wsState.backoffMs = 3000; // 成功連線 → 退避歸零
     console.log('[WS] 已連線到老師 server');
     if (player.name && player.emoji) {
-      send({ type: 'register', name: player.name, emoji: player.emoji });
+      // 房間碼缺省 = 預設房（向後相容）；重連時自動帶同一組
+      const reg: RegisterMsg = { type: 'register', name: player.name, emoji: player.emoji };
+      if (player.roomCode) {
+        reg.roomCode = player.roomCode;
+        if (player.roomPassword) reg.roomPassword = player.roomPassword;
+      }
+      send(reg);
     }
     // 重連後補報當前關卡進度
     if (levelState.current) send({ type: 'progress', levelId: levelState.current.id });
@@ -103,11 +113,67 @@ export function connectToTeacher(): void {
       toast('⚠️ 此名稱已在其他裝置登入', 'error');
       return;
     }
+    if (ev.code === WS_CLOSE_KICKED) {
+      // 老師踢人 / 關房（伺服器可能先送 room_closed 再關；已處理過的話 wsState.ws 已被清空、走不到這）
+      onRoomLeft('kicked');
+      return;
+    }
     if (wsState.everConnected) wsState.wasDown = true;
     scheduleReconnect();
   };
 
   ws.onerror = (e) => console.warn('[WS] 錯誤', e);
+}
+
+/**
+ * 以目前身分（名字 / 動物 / 房間碼 / 密碼）重新連線並 register：
+ * 登入表單送出時呼叫（首次登入、重整、改名、換房、被踢後重進）。
+ * 有既有連線就先關掉再開新的（同一條 WS 換房 / 改名不在協定內）；沒有連線就直接連。
+ */
+export function rejoin(): void {
+  wsState.stopped = false;
+  if (wsState.reconnectTimer) {
+    clearTimeout(wsState.reconnectTimer);
+    wsState.reconnectTimer = null;
+  }
+  const old = wsState.ws;
+  if (old) {
+    wsState.ws = null; // 先解除綁定 → 舊連線的 onclose 不會觸發重連 / 提示
+    wsState.connected = false;
+    wsState.room = null;
+    try {
+      old.close(1000);
+    } catch {
+      /* ignore */
+    }
+  }
+  wsState.backoffMs = 3000;
+  wsState.wasDown = false; // 主動重連不算「恢復連線」
+  connectToTeacher();
+}
+
+/** 被關房 / 被踢：斷線、不自動重連進同房、退出多人模式、通知 UI 回登入 modal */
+function onRoomLeft(reason: 'closed' | 'kicked'): void {
+  wsState.stopped = true;
+  wsState.room = null;
+  wsState.connected = false;
+  wsState.wasDown = false;
+  if (wsState.reconnectTimer) {
+    clearTimeout(wsState.reconnectTimer);
+    wsState.reconnectTimer = null;
+  }
+  const ws = wsState.ws;
+  wsState.ws = null;
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    try {
+      ws.close(1000);
+    } catch {
+      /* ignore */
+    }
+  }
+  bus.emit('mode-takeover', { mode: 'level' }); // 大亂鬥 / 足球中被踢 → 先退出多人模式
+  toast(reason === 'kicked' ? '🚪 你已被移出房間' : '🚪 老師已關閉房間', 'warning');
+  bus.emit('room-left', { reason });
 }
 
 function scheduleReconnect(): void {
@@ -136,6 +202,19 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
   switch (msg.type) {
     case 'welcome':
       wsState.myId = msg.id;
+      break;
+    case 'room_joined':
+      wsState.room = msg.room;
+      bus.emit('room-joined', { room: msg.room });
+      break;
+    case 'room_rejected':
+      // 被拒不重試同一組（否則伺服器若斷線會無限重連被拒）；使用者改完再送出 → rejoin()
+      wsState.stopped = true;
+      wsState.room = null;
+      bus.emit('room-rejected', { reason: msg.reason });
+      break;
+    case 'room_closed':
+      onRoomLeft(msg.reason);
       break;
     case 'load_level': {
       if (levelState.levels.length === 0) {

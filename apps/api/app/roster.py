@@ -1,19 +1,22 @@
-"""roster.py — in-memory 學生名冊 / 進度 / 老師扇出。
+"""roster.py — in-memory 學生名冊 / 進度 / 老師扇出（每個房間一份，見 rooms.py）。
 
 行為對齊 apps/server/src/students.ts：
-- 學生連上先發 welcome { id: "s<n>" }（遞增計數）
-- register 同名 = 重連：踢掉舊連線（close code 4000）、繼承進度
+- 學生連上先發 welcome { id: "s<n>" }（id 由 RoomManager 全域遞增配發，
+  因為帶 ?room= 的學生要到 register 才知道進哪一房）
+- register 同名 = 重連：踢掉舊連線（close code 4000）、繼承進度（同名只在同一房內比對）
 - progress / complete_level → 對所有老師扇出 student_update
 - 名冊變動（上線 / 註冊 / 斷線）→ 對所有老師扇出完整 student_list
 - 學生斷線：已註冊者保留名冊、標記 connected=False（供重連繼承）；
   未註冊者（name 仍為 '?'）直接移除，避免老師後台堆積幽靈列
+- 這裡的「老師」= 目前選定本房為作用房的老師連線（RoomManager.select 進出）
 
-所有狀態封裝在本類別（掛在 app.state.roster），無模組級全域可變狀態。
+所有狀態封裝在本類別（一房一份，掛在 Room.roster），無模組級全域可變狀態。
 """
 
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket
@@ -28,7 +31,6 @@ from .protocol import (
     StudentListMsg,
     StudentUpdateMsg,
     TeacherBroadcastPayload,
-    WelcomeMsg,
 )
 
 logger = logging.getLogger("creafly.api.roster")
@@ -70,12 +72,17 @@ class StudentRecord:
 class Roster:
     """學生名冊 + 老師連線集合；所有扇出對 dead socket 的 send 皆 try/except 清理。"""
 
-    def __init__(self, known_levels: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self,
+        known_levels: frozenset[str] = frozenset(),
+        on_change: Callable[[], None] | None = None,
+    ) -> None:
         self._students: list[StudentRecord] = []
         self._teachers: set[WebSocket] = set()
-        self._student_counter = 0
         # 已知關卡 id（來自 /api/levels 快取）：complete_level 帶未知 levelId → suspect
         self._known_levels = known_levels
+        # 名冊人數變動時的回呼（RoomManager 用來推房間列表）；None = 不通知
+        self._on_change = on_change
         # 老師鎖定關卡選擇（伺服器記住 → 遲到學生連上時補送鎖定狀態與課程關卡）
         self.level_locked = False
         # 老師最後一次廣播的關卡（load_level / race_start）；鎖定中遲到者補載入用
@@ -83,28 +90,38 @@ class Roster:
 
     # ---------- 連線生命週期 ----------
 
-    async def add_student(self, ws: WebSocket) -> StudentRecord:
-        """學生連上：配發 id、發 welcome、通知老師。
+    @property
+    def students(self) -> tuple[StudentRecord, ...]:
+        """名冊快照（含斷線保留的）；RoomManager 算人數 / 找學生用。"""
+        return tuple(self._students)
+
+    def find(self, student_id: str) -> StudentRecord | None:
+        """依 id 找名冊上的學生（踢人用）。"""
+        return next((s for s in self._students if s.id == student_id), None)
+
+    def _notify_change(self) -> None:
+        if self._on_change is not None:
+            self._on_change()
+
+    async def add_student(self, record: StudentRecord) -> None:
+        """學生進房（record 已配發 id 並收過 welcome）：掛上名冊、通知老師。
 
         老師鎖定關卡中 → 補送鎖定狀態與課程關卡（遲到 / 重整的學生跟上全班進度）。
         """
-        self._student_counter += 1
-        record = StudentRecord(id=f"s{self._student_counter}", ws=ws)
         self._students.append(record)
-        await send_safe(ws, WelcomeMsg(id=record.id).model_dump_json())
-        if self.level_locked:
+        if record.ws is not None and self.level_locked:
             await send_safe(
-                ws, LockLevelPayload(type="lock_level", locked=True).model_dump_json()
+                record.ws, LockLevelPayload(type="lock_level", locked=True).model_dump_json()
             )
             if self.current_level_id is not None:
                 await send_safe(
-                    ws,
+                    record.ws,
                     LoadLevelPayload(
                         type="load_level", levelId=self.current_level_id
                     ).model_dump_json(),
                 )
         await self.broadcast_to_teachers(self._student_list_payload())
-        return record
+        self._notify_change()
 
     async def remove_student(self, record: StudentRecord) -> None:
         """學生斷線：已註冊者標記離線保留名冊；未註冊者移除；通知老師。
@@ -119,6 +136,15 @@ class Roster:
             # 從未 register 的連線沒有可繼承的進度，直接移除
             self._students.remove(record)
         await self.broadcast_to_teachers(self._student_list_payload())
+        self._notify_change()
+
+    async def detach(self, record: StudentRecord) -> None:
+        """把學生整筆移出名冊（換房 / 被踢），連線本身不動；不在名冊上則不動作。"""
+        if record not in self._students:
+            return
+        self._students.remove(record)
+        await self.broadcast_to_teachers(self._student_list_payload())
+        self._notify_change()
 
     async def add_teacher(self, ws: WebSocket) -> None:
         """老師連上：先給一份完整名冊；鎖定中再補送鎖定狀態（重整 / 多裝置同步開關）。
@@ -162,6 +188,7 @@ class Roster:
             logger.info("[WS] %s%s 重連，取代舊連線 %s", record.name, record.emoji, other.id)
         logger.info("[WS] 學生上線：%s%s (%s)", record.name, record.emoji, record.id)
         await self.broadcast_to_teachers(self._student_list_payload())
+        self._notify_change()
 
     async def progress(self, record: StudentRecord, level_id: str) -> None:
         """progress：更新目前關卡 + 記下伺服器觀察的開始時間（防作弊比對用）。"""

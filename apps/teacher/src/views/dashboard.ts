@@ -1,11 +1,14 @@
 // 儀表板 — 版面資訊架構依 docs/design-system.md §5.1：
-// topbar（品牌 + 連線狀態膠囊含學生數 + 登出）＋ 左欄 380px 學生名冊常駐卡 ＋ 右欄 tab 分區卡片。
+// topbar（品牌 + 連線狀態膠囊含學生數 + 登出）＋ 房間列（跨兩欄）＋ 左欄 380px 學生名冊常駐卡 ＋ 右欄 tab 分區卡片。
+// 房間：房間列選房（room_select）→ 名冊卡頭＝選定房（大字房碼 / 鎖房 / 設定 / 關閉）；roomCode 由 ws.ts 統一補，這裡不帶。
 // 每張卡片固定結構：卡頭（標題＋賽局狀態膠囊＋停止鈕〔進行中才出現〕）→ 控件區（label 在上）→ 動作列（右對齊，primary 最右）。
 // 大亂鬥與足球對齊舊版 teacher.html 的功能：排行榜 / 隊伍名單 / 倒數時鐘 / 勝負 toast。
 import type {
   ArenaScoreEntry,
   InfoResponse,
   LevelsResponse,
+  RoomInfo,
+  RoomSettings,
   SoccerMode,
   SoccerPlayerState,
   SoccerTeam,
@@ -26,6 +29,8 @@ export interface DashboardView {
   onSoccerMsg(msg: TeacherSoccerMsg): void;
   /** 關卡鎖定狀態（伺服器回送為準）→ 鎖定按鈕 UI */
   setLevelLock(locked: boolean): void;
+  /** 房間列表 + 選定房（伺服器 room_list）→ 房間列 / 名冊卡頭 / 連線位址 */
+  setRooms(rooms: RoomInfo[], selected: string | null): void;
 }
 
 export interface DashboardOptions {
@@ -33,9 +38,23 @@ export interface DashboardOptions {
   levels: LevelsResponse | null;
   /** 廣播給全班；未連線時回 false */
   send(payload: TeacherBroadcastPayload): boolean;
-  /** 賽局控制訊息（大亂鬥 / 足球）；未連線時回 false */
+  /** 賽局控制 / 房間管理訊息（大亂鬥 / 足球 / room_*）；未連線時回 false。roomCode 由 ws 層統一補 */
   sendGame(msg: TeacherToServer): boolean;
   onLogout(): void;
+}
+
+/** 預設房間（伺服器開機即存在、不可關閉；學生舊網址不帶 ?room= 就進這間）：房碼由伺服器設定（預設 MAIN），
+ *  協定沒有 isDefault 欄位 → 以「最早建立」判定（預設房在開機時建立，永遠最早） */
+function defaultRoomCode(rooms: RoomInfo[]): string | null {
+  let first: RoomInfo | null = null;
+  for (const r of rooms) if (!first || r.createdAt < first.createdAt) first = r;
+  return first?.code ?? null;
+}
+
+/** 房間內有賽局在倒數/進行中（房間列小紅點） */
+function roomLive(r: RoomInfo): boolean {
+  const live = (s: string): boolean => s === 'countdown' || s === 'running';
+  return live(r.arenaStatus) || live(r.soccerStatus);
 }
 
 function esc(text: string): string {
@@ -138,26 +157,85 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     </header>
 
     <div class="layout">
+      <section class="room-strip" aria-label="房間列表">
+        <div class="room-strip-row">
+          <span class="room-strip-label">房間</span>
+          <div class="room-chips" id="room-chips"><span class="room-chips-empty">連線後顯示房間</span></div>
+          <button class="btn btn-primary btn-sm" id="btn-room-new">${ICONS.plus}開新房間</button>
+        </div>
+        <p class="room-hint" id="room-hint" hidden>目前只有預設房間；開新房間可分組或多班同時上課</p>
+        <form class="room-form" id="room-form" hidden>
+          <div class="ctl-grid">
+            <div class="field">
+              <label class="field-label" for="rf-name">房間名稱</label>
+              <input id="rf-name" type="text" maxlength="30" placeholder="例：三年二班（留空用房間碼）">
+            </div>
+            <div class="field">
+              <label class="field-label" for="rf-pass">加入密碼</label>
+              <input id="rf-pass" type="text" maxlength="30" autocomplete="off" placeholder="留空 = 不需密碼">
+            </div>
+            <div class="field">
+              <label class="field-label" for="rf-max">人數上限</label>
+              <input id="rf-max" type="number" min="1" max="200" placeholder="預設 ${esc(maxStudents)}">
+            </div>
+          </div>
+          <div class="room-form-actions">
+            <button type="button" class="btn btn-ghost" id="rf-cancel">取消</button>
+            <button type="submit" class="btn btn-primary">${ICONS.plus}建立房間</button>
+          </div>
+        </form>
+      </section>
+
       <aside class="side-col">
         <section class="card roster-card">
-          <div class="card-head">
-            <h2 class="card-title">學生名冊</h2>
-            <span class="count-pill"><strong class="roster-count mono">0</strong><span class="count-max">/ ${esc(maxStudents)}</span></span>
+          <div class="card-head room-head">
+            <button type="button" class="room-code mono" id="room-code" title="點擊複製房間碼" disabled>—</button>
+            <div class="room-meta">
+              <span class="room-name" id="room-name">學生名冊</span>
+              <span class="room-sub"><strong class="roster-count mono">0</strong><span id="room-max"> / ${esc(maxStudents)} 人</span><span class="room-flags" id="room-flags"></span></span>
+            </div>
+            <div class="room-tools" id="room-tools" hidden>
+              <button class="btn btn-ghost btn-sm" id="btn-room-lock" title="鎖房後新學生無法加入，已在房內的不受影響">${ICONS.lockOpen}鎖房</button>
+              <button class="btn btn-ghost btn-sm" id="btn-room-settings" aria-haspopup="dialog">${ICONS.settings}設定</button>
+              <span class="tip-wrap" id="room-close-wrap"><button class="btn btn-danger btn-sm" id="btn-room-close">${ICONS.doorClosed}關閉房間</button></span>
+            </div>
+            <div class="room-pop" id="room-pop" role="dialog" aria-label="房間設定" hidden>
+              <div class="room-pop-title">房間設定</div>
+              <div class="field">
+                <label class="field-label" for="rs-name">房間名稱</label>
+                <input id="rs-name" type="text" maxlength="30" placeholder="例：三年二班">
+              </div>
+              <div class="field">
+                <label class="field-label" for="rs-pass">加入密碼</label>
+                <input id="rs-pass" type="text" maxlength="30" autocomplete="off" placeholder="留空 = 不需密碼">
+                <label class="check-row" id="rs-clear-wrap" hidden><input type="checkbox" id="rs-clear">移除目前密碼</label>
+              </div>
+              <div class="field">
+                <label class="field-label" for="rs-max">人數上限</label>
+                <input id="rs-max" type="number" min="1" max="200">
+              </div>
+              <div class="room-pop-actions">
+                <button type="button" class="btn btn-ghost btn-sm" id="rs-cancel">取消</button>
+                <button type="button" class="btn btn-primary btn-sm" id="rs-save">${ICONS.check}儲存</button>
+              </div>
+            </div>
           </div>
           <div class="card-body">
             <button type="button" class="lan-bar" id="lan-addr" title="點擊複製連線位址">
               <span class="lan-label">學生連線位址（點擊複製）</span>
-              <span class="lan-row"><span class="lan-url mono">${esc(lanText)}</span>${ICONS.copy}</span>
+              <span class="lan-row"><span class="lan-url mono" id="lan-url">${esc(lanText)}</span>${ICONS.copy}</span>
             </button>
           </div>
-          <table class="roster-table">
-            <thead>
-              <tr><th>#</th><th>學生</th><th>關卡</th><th class="right">成績</th></tr>
-            </thead>
-            <tbody id="student-tbody">
-              <tr><td colspan="4" class="empty">尚無學生連線</td></tr>
-            </tbody>
-          </table>
+          <div class="roster-scroll">
+            <table class="roster-table">
+              <thead>
+                <tr><th>#</th><th>學生</th><th>關卡</th><th class="right">成績</th><th class="row-act"></th></tr>
+              </thead>
+              <tbody id="student-tbody">
+                <tr><td colspan="5" class="empty">尚無學生連線</td></tr>
+              </tbody>
+            </table>
+          </div>
         </section>
       </aside>
 
@@ -364,23 +442,30 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     btn?.classList.toggle('live', on);
   };
 
-  // ---- 名冊卡：連線位址列點擊複製 ----
+  /** 複製到剪貼簿（clipboard API 失敗 → execCommand 後備）並 toast 結果 */
+  const copyText = (text: string, okText: string): void => {
+    void (async () => {
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        ok = legacyCopy(text);
+      }
+      toast(ok ? okText : '複製失敗，請手動抄寫', ok ? 'success' : 'error');
+    })();
+  };
+
+  // ---- 名冊卡：連線位址列點擊複製（選定房間時附 ?room=房碼，學生開網址直接進該房） ----
   const lanBtn = root.querySelector<HTMLButtonElement>('#lan-addr')!;
+  const lanUrlEl = root.querySelector<HTMLElement>('#lan-url')!;
+  let lanUrl = lanText;
   lanBtn.addEventListener('click', () => {
     if (lanText === '—') {
       toast('讀不到區網位址', 'error');
       return;
     }
-    void (async () => {
-      let ok = false;
-      try {
-        await navigator.clipboard.writeText(lanText);
-        ok = true;
-      } catch {
-        ok = legacyCopy(lanText);
-      }
-      toast(ok ? `已複製 ${lanText}` : '複製失敗，請手動抄寫位址', ok ? 'success' : 'error');
-    })();
+    copyText(lanUrl, `已複製 ${lanUrl}`);
   });
 
   // ---- 廣播控制（全部走 broadcast / TeacherBroadcastPayload）----
@@ -700,11 +785,235 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         : '';
   };
 
+  // ---- 房間管理：房間列（切房 / 開新房）＋ 名冊卡頭（房碼 / 鎖房 / 設定 / 關閉）＋ 名冊移出 ----
+  // 狀態以伺服器 room_list 為準；roomCode 由 ws 層對賽局/廣播訊息統一補上，這裡只在 room_* 訊息帶目標房碼。
+  let rooms: RoomInfo[] = [];
+  let selectedRoom: string | null = null;
+  const knownCodes = new Set<string>();
+  let pendingCreate = false;
+  const currentRoom = (): RoomInfo | null => rooms.find((r) => r.code === selectedRoom) ?? null;
+
+  const rosterCard = root.querySelector<HTMLElement>('.roster-card')!;
+  const tbody = root.querySelector<HTMLElement>('#student-tbody')!;
+  const chipsEl = root.querySelector<HTMLElement>('#room-chips')!;
+  const roomHintEl = root.querySelector<HTMLElement>('#room-hint')!;
+  const roomForm = root.querySelector<HTMLFormElement>('#room-form')!;
+  const rfName = root.querySelector<HTMLInputElement>('#rf-name')!;
+  const rfPass = root.querySelector<HTMLInputElement>('#rf-pass')!;
+  const rfMax = root.querySelector<HTMLInputElement>('#rf-max')!;
+  const roomCodeBtn = root.querySelector<HTMLButtonElement>('#room-code')!;
+  const roomNameEl = root.querySelector<HTMLElement>('#room-name')!;
+  const roomMaxEl = root.querySelector<HTMLElement>('#room-max')!;
+  const roomFlagsEl = root.querySelector<HTMLElement>('#room-flags')!;
+  const roomTools = root.querySelector<HTMLElement>('#room-tools')!;
+  const roomLockBtn = root.querySelector<HTMLButtonElement>('#btn-room-lock')!;
+  const roomCloseBtn = root.querySelector<HTMLButtonElement>('#btn-room-close')!;
+  const roomCloseWrap = root.querySelector<HTMLElement>('#room-close-wrap')!;
+  const roomPop = root.querySelector<HTMLElement>('#room-pop')!;
+  const rsName = root.querySelector<HTMLInputElement>('#rs-name')!;
+  const rsPass = root.querySelector<HTMLInputElement>('#rs-pass')!;
+  const rsClear = root.querySelector<HTMLInputElement>('#rs-clear')!;
+  const rsClearWrap = root.querySelector<HTMLElement>('#rs-clear-wrap')!;
+  const rsMax = root.querySelector<HTMLInputElement>('#rs-max')!;
+
+  /** 房間列 chip：房名（與房碼不同時另列 mono 房碼）＋ 人數 n/max ＋ 需密碼/鎖房圖標 ＋ 賽局進行中紅點 */
+  const chipHtml = (r: RoomInfo): string => {
+    const named = r.name && r.name !== r.code;
+    return `<button type="button" class="room-chip${r.code === selectedRoom ? ' active' : ''}" data-code="${esc(r.code)}" aria-pressed="${r.code === selectedRoom}" title="切換到「${esc(r.name || r.code)}」">
+      ${roomLive(r) ? '<span class="chip-live" title="賽局進行中"></span>' : ''}
+      ${named ? `<span class="chip-name">${esc(r.name)}</span>` : ''}
+      <span class="chip-code">${esc(r.code)}</span>
+      <span class="chip-count">${r.studentCount}/${r.maxStudents}</span>
+      ${r.hasPassword ? `<span class="chip-flag" title="需密碼">${ICONS.key}</span>` : ''}
+      ${r.locked ? `<span class="chip-flag flag-locked" title="已鎖房">${ICONS.lock}</span>` : ''}
+    </button>`;
+  };
+
+  /** 名冊卡頭：大字房碼（點擊複製）＋ 房名 ＋ 人數上限 ＋ 旗標；工具列（鎖房 / 設定 / 關閉）只在有房間資訊時出現 */
+  const drawRoomHead = (): void => {
+    const r = currentRoom();
+    rosterCard.classList.toggle('rooms-on', !!r);
+    roomTools.hidden = !r;
+    if (!r) {
+      roomCodeBtn.textContent = '—';
+      roomCodeBtn.disabled = true;
+      roomNameEl.textContent = '學生名冊';
+      roomMaxEl.textContent = ` / ${maxStudents} 人`;
+      roomFlagsEl.innerHTML = '';
+      return;
+    }
+    roomCodeBtn.textContent = r.code;
+    roomCodeBtn.disabled = false;
+    const isDefault = r.code === defaultRoomCode(rooms);
+    roomNameEl.textContent = r.name && r.name !== r.code ? r.name : isDefault ? '預設房間' : '未命名房間';
+    roomMaxEl.textContent = ` / ${r.maxStudents} 人`;
+    roomFlagsEl.innerHTML =
+      (r.hasPassword ? `<span title="需密碼">${ICONS.key}</span>` : '') +
+      (r.locked ? `<span class="flag-locked" title="已鎖房：新學生無法加入">${ICONS.lock}</span>` : '');
+    roomLockBtn.innerHTML = r.locked ? `${ICONS.lock}開放` : `${ICONS.lockOpen}鎖房`;
+    roomLockBtn.classList.toggle('btn-warning', r.locked);
+    roomLockBtn.title = r.locked ? '目前鎖房中（新學生無法加入）；點擊開放加入' : '鎖房後新學生無法加入，已在房內的不受影響';
+    roomCloseBtn.disabled = isDefault;
+    roomCloseWrap.title = isDefault ? '預設房間無法關閉' : `關閉房間 ${r.code}（房內學生會被移出）`;
+  };
+
+  /** 學生連線位址：有選定房 → 加 ?room=房碼 */
+  const drawLan = (): void => {
+    const r = currentRoom();
+    lanUrl = lanText === '—' || !r ? lanText : `${lanText}/?room=${encodeURIComponent(r.code)}`;
+    lanUrlEl.textContent = lanUrl;
+  };
+
+  const drawRooms = (): void => {
+    chipsEl.innerHTML =
+      rooms.length > 0
+        ? rooms.map(chipHtml).join('')
+        : '<span class="room-chips-empty">尚未取得房間資訊（伺服器連線後顯示）</span>';
+    // 空狀態：只有預設房 → 提示可開新房分組 / 多班
+    roomHintEl.hidden = !(rooms.length === 1);
+    drawRoomHead();
+    drawLan();
+  };
+
+  /** 切房後先把名冊 / 賽局面板清成空狀態，等伺服器補送的 student_list + arena/soccer 快照重繪 */
+  const resetForRoomSwitch = (): void => {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">載入名冊中…</td></tr>';
+    renderArena([], 'idle', 0, 'balloon');
+    soccer.scores = { blue: 0, red: 0 };
+    soccer.armed = { blue: true, red: true };
+    soccer.status = 'idle';
+    soccer.endTime = 0;
+    renderSoccerRoster([]);
+    renderSoccerScore();
+  };
+
+  // 房間列：點 chip 切房（樂觀高亮；伺服器 room_list 回來為準）
+  chipsEl.addEventListener('click', (ev) => {
+    const chip = (ev.target as HTMLElement).closest<HTMLElement>('.room-chip');
+    const code = chip?.dataset['code'];
+    if (!code || code === selectedRoom) return;
+    if (!sendGame({ type: 'room_select', roomCode: code })) return;
+    selectedRoom = code;
+    resetForRoomSwitch();
+    drawRooms();
+  });
+
+  // 開新房間：內嵌表單（名稱 / 密碼 / 上限）→ room_create；伺服器回 room_list（新房已 selected）
+  const showRoomForm = (show: boolean): void => {
+    roomForm.hidden = !show;
+    if (show) rfName.focus();
+    else roomForm.reset();
+  };
+  on('btn-room-new', () => showRoomForm(roomForm.hidden));
+  on('rf-cancel', () => showRoomForm(false));
+  roomForm.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const settings: RoomSettings = {};
+    const name = rfName.value.trim();
+    const password = rfPass.value.trim();
+    const max = Number.parseInt(rfMax.value, 10);
+    if (name) settings.name = name;
+    if (password) settings.password = password;
+    if (Number.isFinite(max) && max > 0) settings.maxStudents = max;
+    if (!sendGame({ type: 'room_create', settings })) return;
+    pendingCreate = true;
+    showRoomForm(false);
+  });
+
+  // 卡頭：房碼點擊複製（老師投影 / 口頭報碼）
+  roomCodeBtn.addEventListener('click', () => {
+    const r = currentRoom();
+    if (r) copyText(r.code, `已複製房間碼 ${r.code}`);
+  });
+
+  // 鎖房 / 開放 toggle
+  roomLockBtn.addEventListener('click', () => {
+    const r = currentRoom();
+    if (!r) return;
+    const locked = !r.locked;
+    sendGame(
+      { type: 'room_update', roomCode: r.code, settings: { locked } },
+      locked ? `已鎖房 ${r.code}：新學生無法加入` : `已開放 ${r.code} 加入`,
+    );
+  });
+
+  // 關閉房間（預設房停用）：confirm 含房名與人數
+  roomCloseBtn.addEventListener('click', () => {
+    const r = currentRoom();
+    if (!r || r.code === defaultRoomCode(rooms)) return;
+    const label = r.name && r.name !== r.code ? `${r.name}（${r.code}）` : r.code;
+    if (!confirm(`確定關閉房間「${label}」？\n房內 ${r.studentCount} 位學生會被移出並回到進房畫面。${gameWarn()}`)) return;
+    sendGame({ type: 'room_close', roomCode: r.code }, `已關閉房間 ${r.code}`);
+  });
+
+  // 設定 popover：改名 / 密碼 / 上限 → room_update（只送有變更的欄位；密碼欄空白 = 不動，勾「移除」才清）
+  const openRoomPop = (): void => {
+    const r = currentRoom();
+    if (!r) return;
+    rsName.value = r.name && r.name !== r.code ? r.name : '';
+    rsPass.value = '';
+    rsPass.placeholder = r.hasPassword ? '已設定；輸入新密碼可更換' : '留空 = 不需密碼';
+    rsClear.checked = false;
+    rsClearWrap.hidden = !r.hasPassword;
+    rsMax.value = String(r.maxStudents);
+    roomPop.hidden = false;
+    rsName.focus();
+  };
+  const closeRoomPop = (): void => {
+    roomPop.hidden = true;
+  };
+  on('btn-room-settings', () => (roomPop.hidden ? openRoomPop() : closeRoomPop()));
+  on('rs-cancel', closeRoomPop);
+  on('rs-save', () => {
+    const r = currentRoom();
+    if (!r) return;
+    const settings: RoomSettings = {};
+    const name = rsName.value.trim();
+    if (name && name !== r.name) settings.name = name;
+    if (rsClear.checked) settings.password = '';
+    else if (rsPass.value.trim()) settings.password = rsPass.value.trim();
+    const max = Number.parseInt(rsMax.value, 10);
+    if (Number.isFinite(max) && max > 0 && max !== r.maxStudents) settings.maxStudents = max;
+    if (Object.keys(settings).length === 0) {
+      toast('沒有變更', 'info');
+      closeRoomPop();
+      return;
+    }
+    if (sendGame({ type: 'room_update', roomCode: r.code, settings }, `已更新房間 ${r.code} 設定`)) closeRoomPop();
+  });
+  roomPop.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closeRoomPop();
+    if (ev.key === 'Enter' && (ev.target as HTMLElement).tagName === 'INPUT') {
+      ev.preventDefault();
+      root.querySelector<HTMLButtonElement>('#rs-save')!.click();
+    }
+  });
+  // 點 popover 以外處收起
+  document.addEventListener('mousedown', (ev) => {
+    if (roomPop.hidden) return;
+    const t = ev.target as Node;
+    if (roomPop.contains(t) || root.querySelector('#btn-room-settings')!.contains(t)) return;
+    closeRoomPop();
+  });
+
+  // 名冊每列 hover「移出」→ room_kick（confirm 含學生名）
+  tbody.addEventListener('click', (ev) => {
+    const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('.row-kick');
+    if (!btn) return;
+    const r = currentRoom();
+    const id = btn.dataset['id'];
+    if (!r || !id) return;
+    const name = btn.dataset['name'] || '?';
+    if (!confirm(`確定將「${name}」移出房間 ${r.code}？\n該生會回到進房畫面，可重新加入（鎖房時除外）。`)) return;
+    sendGame({ type: 'room_kick', roomCode: r.code, studentId: id }, `已將 ${name} 移出`);
+  });
+
+  drawRooms();
+
   // ---- 動態更新 ----
   const wsStatusEl = root.querySelector<HTMLElement>('#ws-status')!;
   const countEl = root.querySelector<HTMLElement>('#student-count')!;
   const rosterCountEl = root.querySelector<HTMLElement>('.roster-count')!;
-  const tbody = root.querySelector<HTMLElement>('#student-tbody')!;
 
   return {
     onArenaMsg(msg: TeacherArenaMsg): void {
@@ -806,6 +1115,20 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       levelLocked = locked;
       drawLockBtn();
     },
+    setRooms(list: RoomInfo[], selected: string | null): void {
+      rooms = list;
+      selectedRoom = selected;
+      // 新房出現（自己剛建立）→ toast 報房碼；房間被關閉的收合由 room_list 自然反映
+      const created = list.filter((r) => !knownCodes.has(r.code) && knownCodes.size > 0);
+      knownCodes.clear();
+      for (const r of list) knownCodes.add(r.code);
+      if (pendingCreate && created.length > 0) {
+        toast(`已開新房間 ${created.map((r) => r.code).join('、')}`, 'success');
+        pendingCreate = false;
+      }
+      if (!roomPop.hidden && !currentRoom()) closeRoomPop(); // 正在編輯的房被關掉
+      drawRooms();
+    },
     setWsStatus(connected: boolean): void {
       wsStatusEl.className = connected ? 'ws-on' : 'ws-off';
       wsStatusEl.innerHTML = `<span class="status-dot ${connected ? 'on' : 'off'}"></span>${connected ? '已連線' : '未連線'}`;
@@ -822,7 +1145,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       countEl.textContent = online; // topbar 膠囊
       rosterCountEl.textContent = online; // 名冊卡頭
       if (sorted.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty">尚無學生連線</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">尚無學生連線</td></tr>';
         return;
       }
       tbody.innerHTML = sorted
@@ -838,6 +1161,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
             <td><span class="student-cell" title="${s.connected ? '線上' : '離線'}">${avatarChip(s.emoji, !!s.connected)}<span class="student-name">${esc(s.name)}</span>${suspect}</span></td>
             <td>${esc(s.level ?? '—')}</td>
             <td class="right mono">${time}</td>
+            <td class="row-act"><button type="button" class="row-kick" data-id="${esc(s.id)}" data-name="${esc(s.name)}" title="將 ${esc(s.name)} 移出房間">移出</button></td>
           </tr>`;
         })
         .join('');

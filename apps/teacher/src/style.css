@@ -1,5 +1,5 @@
 /* CREAFLY 老師後台 — 版面資訊架構依 docs/design-system.md §5.1（tokens 見 tokens.css）。
-   骨架：topbar（品牌＋連線膠囊＋登出）→ 雙欄（左 380px 名冊常駐卡｜右 tab＋分區卡片）。
+   骨架：topbar（品牌＋連線膠囊＋登出）→ 房間列（跨兩欄）→ 雙欄（左 380px 名冊常駐卡｜右 tab＋分區卡片）。
    卡片鐵律：卡頭（標題＋狀態膠囊＋停止鈕）→ 控件區（label 在上、同列同高、不放按鈕）→ 動作列（右對齊，primary 最右）。 */
 @import './tokens.css';
 
@@ -209,7 +209,167 @@ body {
 .pill-clock { font-family: var(--font-mono); font-size: var(--fs-sm); }
 .pill-clock:empty { display: none; }
 
+/* ===== 房間列（topbar 下、跨兩欄）：橫向 chip 選房 ＋ 開新房間鈕（最右 primary）＋ 內嵌開房表單 ===== */
+.room-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+.room-strip-row { display: flex; align-items: center; gap: var(--sp-3); }
+.room-strip-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.room-chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.room-chips-empty { font-size: var(--fs-sm); color: var(--text-3); white-space: nowrap; }
+.room-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--ctl-h-sm);
+  padding: 0 var(--sp-3);
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s;
+}
+.room-chip:hover { background: var(--bg-3); color: var(--text-1); }
+.room-chip.active {
+  border-color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 12%, var(--bg-1));
+  color: var(--text-1);
+}
+.room-chip .chip-code { font-family: var(--font-mono); font-weight: 700; letter-spacing: 0.05em; }
+.room-chip .chip-count { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-3); }
+.room-chip .chip-flag { display: inline-flex; color: var(--text-3); }
+.room-chip .chip-flag.flag-locked { color: var(--warn); }
+.room-chip .chip-flag .icon { width: 14px; height: 14px; }
+/* 房內賽局進行中：紅色小圓點（與分頁 live-dot 同語彙） */
+.room-chip .chip-live {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--danger);
+  box-shadow: 0 0 4px var(--danger);
+  animation: live-pulse 1s infinite;
+  flex-shrink: 0;
+}
+.room-hint { margin: 0; font-size: var(--fs-xs); color: var(--text-3); }
+/* 開新房間內嵌表單：控件區（label 在上、同列同高）→ 動作列右對齊 primary 最右 */
+.room-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.room-form-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+
 /* ===== 名冊卡（左欄常駐） ===== */
+/* 卡頭 = 選定房間：大字房碼（mono，點擊複製）＋房名/人數；工具（鎖房 / 設定 / 關閉房間）靠右，欄窄時換列。
+   設定 popover 從卡頭下緣浮出 → 名冊卡本體 overflow 放開，表格改由 .roster-scroll 裁圓角。 */
+.roster-card { overflow: visible; }
+.roster-scroll { border-radius: 0 0 var(--r-md) var(--r-md); overflow: hidden; }
+.room-head {
+  position: relative;
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  padding-bottom: var(--sp-3);
+}
+.room-code {
+  height: auto;
+  padding: 0 var(--sp-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--brand);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background-color 0.18s, border-color 0.18s;
+}
+.room-code:hover:not(:disabled) { background: var(--bg-3); border-color: var(--brand); }
+.room-code:disabled { color: var(--text-3); cursor: default; }
+.room-meta { flex: 1 1 120px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.room-name {
+  font-size: var(--fs-md);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.room-sub strong { color: var(--text-1); font-size: var(--fs-sm); font-weight: 700; }
+.room-flags { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: var(--sp-1); }
+.room-flags .icon { width: 14px; height: 14px; }
+.room-flags .flag-locked { color: var(--warn); display: inline-flex; }
+/* 工具列：寬度夠就同列靠右；380px 欄放不下時整組換到第二列（仍靠右） */
+.room-tools { margin-left: auto; display: flex; justify-content: flex-end; gap: var(--sp-2); }
+/* 停用鈕的 title 由外層 span 提供（disabled 元素不一定顯示 tooltip） */
+.tip-wrap { display: inline-flex; }
+.room-pop {
+  position: absolute;
+  top: calc(100% - var(--sp-2));
+  right: var(--sp-4);
+  width: 300px;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+.room-pop-title { font-size: var(--fs-sm); font-weight: 700; }
+.room-pop-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.check-row input { margin: 0; accent-color: var(--brand); }
+
 .count-pill {
   margin-left: auto;
   display: inline-flex;
@@ -291,6 +451,32 @@ tbody tr.offline td { opacity: 0.55; }
 .roster-table td:first-child { padding-left: var(--sp-4); width: 36px; }
 .roster-table th:last-child,
 .roster-table td:last-child { padding-right: var(--sp-4); }
+/* 名冊「移出」鈕：列 hover / 鍵盤聚焦才出現；沒有房間資訊（舊伺服器）時整欄不顯示 */
+.roster-table th.row-act,
+.roster-table td.row-act { width: 52px; padding-left: 0; text-align: right; }
+.row-kick {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.18s, background-color 0.18s, color 0.18s;
+}
+.roster-table tbody tr:hover .row-kick,
+.row-kick:focus-visible { opacity: 1; }
+.row-kick:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+.roster-card:not(.rooms-on) .row-kick,
+.roster-card:not(.rooms-on) .row-act { display: none; }
+.roster-card:not(.rooms-on) .roster-table th:nth-last-child(2),
+.roster-card:not(.rooms-on) .roster-table td:nth-last-child(2) { padding-right: var(--sp-4); }
+
 /* 排行榜卡（右欄）：儲存格對齊卡片內距、排名欄固定窄欄 */
 .table-card th:first-child,
 .table-card td:first-child { padding-left: var(--sp-5); width: 80px; }
@@ -441,6 +627,7 @@ tbody tr.offline td { opacity: 0.55; }
 
 select,
 input[type='text'],
+input[type='number'],
 input[type='password'] {
   height: var(--ctl-h);
   width: 100%;
@@ -454,8 +641,10 @@ input[type='password'] {
   transition: border-color 0.18s;
 }
 select:disabled { opacity: 0.5; cursor: not-allowed; }
+input[type='number'] { color-scheme: dark; } /* 上下箭頭跟深色介面 */
 select:focus,
 input[type='text']:focus,
+input[type='number']:focus,
 input[type='password']:focus { outline: none; border-color: var(--brand); }
 select option,
 select optgroup { color: var(--text-1); background: var(--bg-1); }

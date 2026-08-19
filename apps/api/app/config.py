@@ -29,6 +29,11 @@ class Settings(BaseSettings):
       足球場地尺寸（資料驅動：伺服器以 SoccerFieldDef 下發，client 據此渲染；
       環境變數 SOCCER_HALF_X … 可調）。預設 20×40（約舊版兩倍）、
       門環中心高 4.5、半徑 3.0（直徑 6m，無人機球框 0.8 輕鬆穿）、天花板 15
+    - room_code_length / room_code_alphabet：房間碼長度與字元集（預設 4 碼、去 0/O/1/I 防混淆）
+    - default_room_code：預設房代碼（啟動即存在、不可關閉；不帶房間碼的學生走這裡 = 舊流程）
+    - room_default_max_students：新房預設人數上限；None = 沿用 max_students
+    - room_idle_close_sec：非預設房 0 人且無賽局進行超過此秒數 → 自動關房（預設 1 小時）
+    - room_max_rooms：同時存在的房間數上限（含預設房），防濫開
     """
 
     model_config = SettingsConfigDict(env_prefix="", extra="ignore")
@@ -52,6 +57,12 @@ class Settings(BaseSettings):
     soccer_goal_y: float = 4.5
     soccer_goal_r: float = 3.0
     soccer_ceil: float = 15.0
+    room_code_length: int = 4
+    room_code_alphabet: str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    default_room_code: str = "MAIN"
+    room_default_max_students: int | None = None
+    room_idle_close_sec: float = 3600
+    room_max_rooms: int = 20
 
     @property
     def allowed_origins_set(self) -> frozenset[str]:

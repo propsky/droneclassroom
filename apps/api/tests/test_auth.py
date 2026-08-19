@@ -14,6 +14,7 @@ from app.auth import (
     generate_pin,
     origin_allowed,
 )
+from tests.conftest import teacher_connect
 
 TEACHER_PASSWORD = "test123"  # 與 conftest 的 client fixture 一致
 
@@ -69,7 +70,7 @@ def test_過期ticket連teacher_收4401(client: TestClient) -> None:
 
 
 def test_有效ticket連teacher_收到student_list(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as ws:
+    with teacher_connect(client, teacher_ticket) as ws:
         assert ws.receive_json() == {"type": "student_list", "students": []}
 
 

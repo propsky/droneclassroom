@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.ws import MAX_MESSAGES_PER_SEC, RateLimiter
+from tests.conftest import teacher_connect
 
 # ---------- welcome ----------
 
@@ -26,7 +27,7 @@ def test_welcome_遞增配發id(client: TestClient) -> None:
 
 
 def test_register_老師收到更新後的名冊(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         assert t.receive_json() == {"type": "student_list", "students": []}
         with client.websocket_connect("/") as s:
             s.receive_json()  # welcome
@@ -56,7 +57,7 @@ def test_register_老師收到更新後的名冊(client: TestClient, teacher_tic
 
 def test_register_欄位型別不符整則丟棄(client: TestClient, teacher_ticket: str) -> None:
     """name 不是字串 → 丟棄；隨後合法 register 正常生效。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             s.receive_json()
@@ -74,7 +75,7 @@ def test_register_欄位型別不符整則丟棄(client: TestClient, teacher_tic
 def test_progress與complete_level_老師收student_update(
     client: TestClient, teacher_ticket: str
 ) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             s.receive_json()
@@ -107,13 +108,14 @@ def test_progress與complete_level_老師收student_update(
 
 
 def test_同名register_舊連線被踢4000且繼承進度(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()  # 空名冊
         with client.websocket_connect("/") as ws1:
             ws1.receive_json()  # welcome s1
             t.receive_json()
             ws1.send_json({"type": "register", "name": "小明", "emoji": "🐱"})
             t.receive_json()
+            assert ws1.receive_json()["type"] == "room_joined"  # 進預設房
             ws1.send_json({"type": "progress", "levelId": "1-3"})
             t.receive_json()  # student_update
             ws1.send_json({"type": "complete_level", "levelId": "1-3", "timeMs": 42000})
@@ -146,7 +148,7 @@ def test_同名register_舊連線被踢4000且繼承進度(client: TestClient, t
 
 def test_斷線後同名重連_繼承保留的名冊進度(client: TestClient, teacher_ticket: str) -> None:
     """學生斷線 → connected: False 保留名冊；重連 register 繼承後移除舊列。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as ws1:
             ws1.receive_json()
@@ -191,7 +193,7 @@ def test_斷線後同名重連_繼承保留的名冊進度(client: TestClient, t
 
 
 def test_未註冊學生斷線_直接移出名冊(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             s.receive_json()
@@ -205,7 +207,7 @@ def test_未註冊學生斷線_直接移出名冊(client: TestClient, teacher_ti
 def test_broadcast_合法payload轉發全體學生(client: TestClient, teacher_ticket: str) -> None:
     with client.websocket_connect("/") as s:
         s.receive_json()
-        with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+        with teacher_connect(client, teacher_ticket) as t:
             t.receive_json()
             t.send_json({"type": "broadcast", "payload": {"type": "load_level", "levelId": "1-2"}})
             assert s.receive_json() == {"type": "load_level", "levelId": "1-2"}
@@ -220,7 +222,7 @@ def test_broadcast_合法payload轉發全體學生(client: TestClient, teacher_t
 def test_broadcast_非法payload丟棄不轉發(client: TestClient, teacher_ticket: str) -> None:
     with client.websocket_connect("/") as s:
         s.receive_json()
-        with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+        with teacher_connect(client, teacher_ticket) as t:
             t.receive_json()
             # payload.type 不在白名單 → 丟棄
             t.send_json({"type": "broadcast", "payload": {"type": "evil_exec", "code": "rm -rf"}})
@@ -238,7 +240,7 @@ def test_broadcast_非法payload丟棄不轉發(client: TestClient, teacher_tick
 
 
 def test_超過4KB的訊息丟棄(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             s.receive_json()
@@ -254,7 +256,7 @@ def test_超過4KB的訊息丟棄(client: TestClient, teacher_ticket: str) -> No
 
 
 def test_非JSON與非法賽局訊息忽略不斷線(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             s.receive_json()

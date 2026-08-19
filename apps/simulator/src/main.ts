@@ -48,7 +48,7 @@ import {
 } from './input/calibration';
 import { initAudio } from './ui/audio';
 import { initEndCountdown } from './ui/endCountdown';
-import { initWs, connectToTeacher } from './net/ws';
+import { initWs, rejoin } from './net/ws';
 import { initBlockly } from './blockly';
 import {
   initArena,
@@ -113,7 +113,7 @@ initSoccerHud(
 initEndCountdown(); // 賽局結束倒數 chip（§5.3；arena / soccer 共用 endTime）
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
-initPlayer(connectToTeacher);
+initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進：以目前身分（含房間碼）重新連線 register
 
 const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
 document.getElementById('view-btn')?.addEventListener('click', doToggleView);

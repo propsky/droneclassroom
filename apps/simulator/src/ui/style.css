@@ -111,6 +111,57 @@ body.mode-program #app {
   color: var(--text-3);
   white-space: nowrap;
 }
+/* 房間標籤（header 左；room_joined 後顯示「房名 · 房碼」，點擊換房） */
+.room-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  color: var(--text-1);
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, transparent);
+  border-radius: var(--r-full);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  max-width: 260px;
+  min-width: 0;
+  flex: 0 1 auto; /* header 擠時先縮這裡（房名 ellipsis） */
+  transition: background-color 0.18s, border-color 0.18s;
+}
+.room-tag .btn-ic,
+.room-tag-code {
+  flex: none;
+}
+.room-tag .btn-ic,
+.room-tag > svg.ic {
+  color: var(--brand);
+}
+.room-tag:hover {
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+  border-color: var(--brand);
+}
+.room-tag-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+.room-tag-name:not(:empty)::after {
+  content: ' ·';
+  color: var(--text-3);
+}
+.room-tag-code {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--brand);
+}
+@media (max-width: 900px) {
+  .room-tag-name {
+    display: none;
+  }
+}
 @media (max-width: 1440px) {
   #header .subtitle {
     display: none;
@@ -182,6 +233,8 @@ body.mode-program #app {
 .mode-toggle {
   display: inline-flex;
   align-items: center;
+  flex: none; /* 空間不夠時由房間標籤縮（名稱截斷），模式切換不換行 */
+  white-space: nowrap;
   height: 36px;
   padding: var(--sp-1);
   gap: var(--sp-1);
@@ -1147,28 +1200,118 @@ body.joystick-forced #joystick-layer {
 .guide-skip:hover {
   color: var(--text-1);
 }
-#login-name {
+/* 登入 modal：名字 / 動物 / 房間碼（+ 密碼）；欄位 label 在上、同列同高 */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-5);
+  text-align: left;
+}
+.login-label {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.login-form .login-label:not(:first-child) {
+  margin-top: var(--sp-2);
+}
+.login-form input {
   width: 100%;
   height: 40px;
   padding: 0 var(--sp-3);
-  margin: var(--sp-2) 0;
   font-size: var(--fs-md);
   font-family: inherit;
   border-radius: var(--r-sm);
   border: 1px solid var(--line);
   background: var(--bg-0);
   color: var(--text-1);
+  transition: border-color 0.18s, background-color 0.18s;
 }
-#login-name:focus {
+.login-form input:focus {
   outline: none;
   border-color: var(--brand);
+}
+.login-form input::placeholder {
+  color: var(--text-3);
 }
 #emoji-picker {
   display: flex;
   gap: var(--sp-2);
   flex-wrap: wrap;
-  margin-top: var(--sp-2);
   justify-content: center;
+}
+/* 房間碼列：4 碼大號 mono（老師投影／黑板抄的碼一眼對得上）＋ 密碼 */
+.login-room {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start; /* label 同列對齊；房間碼框刻意較高（48）*/
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  flex: 1 1 0;
+  min-width: 0;
+}
+.login-field .login-label {
+  margin-top: 0;
+}
+.login-field-code {
+  flex: 0 0 132px;
+}
+.login-form input.login-code {
+  height: 48px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 0 var(--sp-2);
+}
+.login-form input.login-code::placeholder {
+  letter-spacing: 0.25em;
+  font-weight: 500;
+}
+/* URL ?room= 帶入鎖定：唯讀降飽和（點「換房」或被拒後解鎖） */
+.login-form input.login-code[readonly] {
+  background: var(--bg-2);
+  color: var(--text-2);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.login-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+.login-error {
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  line-height: 1.5;
+}
+.login-error[hidden] {
+  display: none;
+}
+.login-form.has-error input.login-code,
+.login-form.has-error-pw #login-room-pw {
+  border-color: var(--danger);
+}
+.login-card .modal-btn[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+@media (max-width: 480px) {
+  .login-room {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .login-field-code {
+    flex: 1 1 auto;
+  }
 }
 .emoji-btn {
   background: var(--bg-2);

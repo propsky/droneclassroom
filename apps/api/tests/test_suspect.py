@@ -7,6 +7,7 @@
 from fastapi.testclient import TestClient
 
 from app.roster import Roster, StudentRecord
+from tests.conftest import teacher_connect
 
 
 def _register(ws, t, name: str = "小明") -> None:
@@ -23,7 +24,7 @@ def _student_record(client: TestClient) -> StudentRecord:
 
 
 def test_正常完成_不標記(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
@@ -36,7 +37,7 @@ def test_正常完成_不標記(client: TestClient, teacher_ticket: str) -> None
 
 def test_沒有progress就complete_標記(client: TestClient, teacher_ticket: str) -> None:
     """正常 client 一定先發 progress；直接 complete = 偽造訊息。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
@@ -46,7 +47,7 @@ def test_沒有progress就complete_標記(client: TestClient, teacher_ticket: st
 
 
 def test_用時小於1秒_標記(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
@@ -59,7 +60,7 @@ def test_用時小於1秒_標記(client: TestClient, teacher_ticket: str) -> Non
 
 def test_宣稱用時遠小於伺服器觀察_標記(client: TestClient, teacher_ticket: str) -> None:
     """把伺服器記的開始時間倒退 100 秒：宣稱 5 秒 < 100 秒的一半 - 2 秒 → 可疑。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
@@ -73,7 +74,7 @@ def test_宣稱用時遠小於伺服器觀察_標記(client: TestClient, teacher
 
 def test_宣稱用時與伺服器觀察相符_不標記(client: TestClient, teacher_ticket: str) -> None:
     """觀察 100 秒、宣稱 100 秒（甚至 60 秒）都在容忍範圍內。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
@@ -86,7 +87,7 @@ def test_宣稱用時與伺服器觀察相符_不標記(client: TestClient, teac
 
 
 def test_未知關卡_標記(client: TestClient, teacher_ticket: str) -> None:
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
@@ -100,7 +101,7 @@ def test_未知關卡_標記(client: TestClient, teacher_ticket: str) -> None:
 def test_標記不因重新register洗白(client: TestClient, teacher_ticket: str) -> None:
     """一旦 suspect 就跟著這個名字走：正常完成、重新 register、同名重連都不洗白
     （否則學生重整頁面即可清除標記）。清除只能靠老師人工處置後重啟伺服器。"""
-    with client.websocket_connect(f"/teacher?ticket={teacher_ticket}") as t:
+    with teacher_connect(client, teacher_ticket) as t:
         t.receive_json()
         with client.websocket_connect("/") as s:
             _register(s, t)
