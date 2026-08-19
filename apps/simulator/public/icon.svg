@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- CREAFLY 無人機模擬器 PWA 圖標：品牌青底 + 白色四軸無人機剪影（純填色，避免各家 SVG 渲染器對 stroke 支援不一） -->
+  <rect width="512" height="512" rx="96" fill="#00A3E0"/>
+  <!-- 機臂（X 型） -->
+  <polygon points="140.1,159.9 159.9,140.1 371.9,352.1 352.1,371.9" fill="#fff"/>
+  <polygon points="352.1,140.1 371.9,159.9 159.9,371.9 140.1,352.1" fill="#fff"/>
+  <!-- 四個螺旋槳環 -->
+  <circle cx="150" cy="150" r="70" fill="#fff"/><circle cx="150" cy="150" r="48" fill="#00A3E0"/>
+  <circle cx="362" cy="150" r="70" fill="#fff"/><circle cx="362" cy="150" r="48" fill="#00A3E0"/>
+  <circle cx="150" cy="362" r="70" fill="#fff"/><circle cx="150" cy="362" r="48" fill="#00A3E0"/>
+  <circle cx="362" cy="362" r="70" fill="#fff"/><circle cx="362" cy="362" r="48" fill="#00A3E0"/>
+  <!-- 機身 -->
+  <circle cx="256" cy="256" r="50" fill="#fff"/>
+  <circle cx="256" cy="256" r="20" fill="#00A3E0"/>
+</svg>

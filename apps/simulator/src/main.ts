@@ -77,6 +77,7 @@ import {
 } from './multiplayer/soccer';
 import { SoccerFieldVisuals } from './render/soccerField';
 import { initSoccerHud } from './ui/soccerHud';
+import { initPwa } from './pwa';
 
 // ---- 場景與渲染 ----
 const canvas = document.getElementById('scene-canvas') as HTMLCanvasElement;
@@ -183,6 +184,9 @@ window.CREAFLY = {
 
 // ---- 關卡資料 ----
 void loadChapters();
+
+// ---- 離線可玩：註冊 Service Worker（僅正式 build；docs/offline.md）----
+initPwa();
 
 // 觸控裝置首次提示
 if (isTouchDevice && !sessionStorage.getItem('creafly_hint_shown')) {
