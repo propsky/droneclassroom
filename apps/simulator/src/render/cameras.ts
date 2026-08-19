@@ -23,6 +23,17 @@ const TOPDOWN_FALLBACK_HALF = 8;
 /** 俯角比例：相機沿 +Z 偏移 = 視距 × 此值（legacy (1.5,21,3)→lookAt z-2.4 約 0.3，非正上方避免方向感喪失） */
 const TOPDOWN_TILT_RATIO = 0.3;
 
+// ---- 固定鏡位（topdown / orbit3d）的「機身出框保護」----
+// 畫畫教室的鏡頭是為繪圖高度（3m / 1m）取景的固定鏡位，學生若飛高（>12m 左右）機身會從鏡頭上方跑出畫面
+// （測試回報：兩章都在 ~13m 出框；第一章跟隨鏡頭不受影響）。保護策略：機身高度超過該鏡位的舒適上限時，
+// 鏡位等量抬升（維持原構圖比例、只是整體上移），回到範圍內時平滑降回。
+/** 俯視鏡位：機身可高出繪圖面多少（m）仍在框內（相機 tilt 0.3、fov 60° 下實測 ~10m 開始貼邊） */
+const FIXEDCAM_HEADROOM_TOPDOWN = 8;
+/** 環繞鏡位：機身可高出 orbit center 多少（m）仍在框內 */
+const FIXEDCAM_HEADROOM_ORBIT = 3;
+/** 抬升量的平滑係數（每幀逼近，避免機身上下時鏡頭跳動） */
+const FIXEDCAM_LIFT_SMOOTH = 0.08;
+
 // ---- 環繞（orbit3d）常數（legacy L3493–3496 的 fallback 與速度）----
 /** 慢速繞行角速度（rad/ms）— legacy performance.now() * 0.00025 */
 const ORBIT3D_SPEED_RAD_PER_MS = 0.00025;
@@ -70,6 +81,8 @@ export class CameraRig {
   private guideBounds: GuideBounds = { cx: 0, cz: 0, halfX: TOPDOWN_FALLBACK_HALF, halfZ: TOPDOWN_FALLBACK_HALF };
   /** ⚽ 足球窄邊定點視角：站哪個 z 端往場內看（+1 / -1）；null = 一般跟隨視角 */
   private soccerSign: number | null = null;
+  /** 固定鏡位的目前抬升量（m），平滑逼近目標；離開 draw 關自然歸零 */
+  private fixedCamLift = 0;
   /** ⚽ 足球視角模式：'follow' 跟隨（預設 — 定點視角會被門環/球/其他飛機擋住）｜'team' 窄邊全場 */
   private soccerCam: 'follow' | 'team' = 'follow';
 
@@ -142,13 +155,14 @@ export class CameraRig {
     // 畫畫教室：依 level.view 切到 topdown / orbit3d（都顯示機身）
     const level = levelState.current;
     if (level?.draw && level.view === 'topdown') {
-      this.updateTopdown(level);
+      this.updateTopdown(level, pos);
       return true;
     }
     if (level?.draw && level.view === 'orbit3d') {
-      this.updateOrbit3d(level);
+      this.updateOrbit3d(level, pos);
       return true;
     }
+    this.fixedCamLift = 0;
 
     // 第三人稱跟隨：offset (0,4,12) 依 yaw 旋轉
     const cos = Math.cos(yaw);
@@ -162,16 +176,25 @@ export class CameraRig {
     return true;
   }
 
+  /** 固定鏡位出框保護：機身高出 baseY + headroom 的部分 → 平滑轉成鏡位抬升量 */
+  private smoothLift(pos: Vector3, baseY: number, headroom: number): number {
+    const want = Math.max(0, pos.y - (baseY + headroom));
+    this.fixedCamLift += (want - this.fixedCamLift) * FIXEDCAM_LIFT_SMOOTH;
+    return this.fixedCamLift;
+  }
+
   /**
    * 俯視鏡頭：固定框住畫布、近乎正上方（圖才看得出來；不跟機身轉）。
    * 鏡位由 guide bounds 自動求：視距 = 取景半徑 / tan(fov/2)（含邊距係數、
    * 橫向依畫面長寬比換算），JSON topdownCam 存在時直接覆寫。
    */
-  private updateTopdown(level: LevelDef): void {
+  private updateTopdown(level: LevelDef, pos: Vector3): void {
+    const drawY0 = level.drawHeight ?? DRAW_HEIGHT_DEFAULT;
+    const lift = this.smoothLift(pos, drawY0, FIXEDCAM_HEADROOM_TOPDOWN);
     const cam = level.topdownCam;
     if (cam) {
-      this.camera.position.set(cam.x, cam.y, cam.z);
-      this.tmpTarget.set(cam.lookAt[0], cam.lookAt[1], cam.lookAt[2]);
+      this.camera.position.set(cam.x, cam.y + lift, cam.z);
+      this.tmpTarget.set(cam.lookAt[0], cam.lookAt[1] + lift, cam.lookAt[2]);
       this.camera.setTarget(this.tmpTarget);
       return;
     }
@@ -181,21 +204,21 @@ export class CameraRig {
     // 垂直方向裝 z 範圍、水平方向裝 x 範圍（除以 aspect 折算回垂直等效）
     const halfView = Math.max(b.halfZ, b.halfX / aspect, TOPDOWN_MIN_HALF_VIEW) * TOPDOWN_MARGIN;
     const dist = halfView / tanHalfFov; // 距繪圖面的視距
-    const drawY = level.drawHeight ?? DRAW_HEIGHT_DEFAULT;
-    this.camera.position.set(b.cx, drawY + dist, b.cz + dist * TOPDOWN_TILT_RATIO);
-    this.tmpTarget.set(b.cx, 0, b.cz);
+    this.camera.position.set(b.cx, drawY0 + dist + lift, b.cz + dist * TOPDOWN_TILT_RATIO);
+    this.tmpTarget.set(b.cx, lift, b.cz);
     this.camera.setTarget(this.tmpTarget);
   }
 
   /** 環繞鏡頭：慢慢繞著作品轉（立體感才出得來，像展示台）。參數全由 JSON orbit。 */
-  private updateOrbit3d(level: LevelDef): void {
+  private updateOrbit3d(level: LevelDef, pos: Vector3): void {
     const o = level.orbit ?? {};
     const c = o.center ?? ORBIT3D_DEFAULT_CENTER;
     const r = o.radius ?? ORBIT3D_DEFAULT_RADIUS;
     const h = o.height ?? ORBIT3D_DEFAULT_HEIGHT;
+    const lift = this.smoothLift(pos, c[1], FIXEDCAM_HEADROOM_ORBIT);
     const ang = performance.now() * ORBIT3D_SPEED_RAD_PER_MS;
-    this.camera.position.set(c[0] + Math.cos(ang) * r, c[1] + h, c[2] + Math.sin(ang) * r);
-    this.tmpTarget.set(c[0], c[1], c[2]);
+    this.camera.position.set(c[0] + Math.cos(ang) * r, c[1] + h + lift, c[2] + Math.sin(ang) * r);
+    this.tmpTarget.set(c[0], c[1] + lift, c[2]);
     this.camera.setTarget(this.tmpTarget);
   }
 
