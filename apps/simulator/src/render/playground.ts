@@ -7,7 +7,17 @@
 //   註冊進 HavokBackend（core/physics 的 tick 會與 SimpleBackend 的 AABB 掩體共存）。
 // - WASM 載入失敗 → console.warn + 降級 SimpleBackend（場景照樣顯示、只是可穿過結構）。
 // - 離開大亂鬥 → dispose 場景 mesh + 清空碰撞（重進會重新載入）。
-import { ImportMeshAsync, Vector3, VertexBuffer, type Scene, type AbstractMesh } from '@babylonjs/core';
+// - 效能（docs/perf-arena.md）：glb 有 764 顆獨立小 mesh、34 種材質，載入後依「材質 + 頂點屬性」
+//   分組 Mesh.MergeMeshes → 25 顆合併 mesh + 少數單顆；draw call 由 ~720 降到 ~130，視覺不變（材質原樣沿用）。
+//   碰撞 soup 在合併前用原始 mesh 烤（幾何相同，先後不影響結果）。
+import {
+  ImportMeshAsync,
+  Mesh,
+  Vector3,
+  VertexBuffer,
+  type Scene,
+  type AbstractMesh,
+} from '@babylonjs/core';
 import { registerBuiltInLoaders } from '@babylonjs/loaders/dynamic';
 import { bus, toast } from '../core/events';
 import { setMeshCollisionBackend } from '../core/physics';
@@ -101,6 +111,7 @@ export class PlaygroundScene {
         m.receiveShadows = true;
         m.isPickable = false;
       });
+      // 先讓原始 mesh 掛著（碰撞烤圖用），合併後再換成合併版
       this.meshes = result.meshes;
 
       // 載入期間已離場 / 切回格線 → 直接收掉，不掛碰撞
@@ -122,6 +133,9 @@ export class PlaygroundScene {
           console.warn('[Playground] glb 無可用碰撞幾何');
         }
       }
+
+      // ---- 靜態幾何合併：764 顆小 mesh → 依材質分組成數十顆（draw call / 逐 mesh 更新成本大減）----
+      this.meshes = mergeStaticMeshes(root, result.meshes);
       toast('🌆 遊樂場場景就緒！', 'success');
     } catch (e) {
       this.loading = false;
@@ -158,6 +172,47 @@ export class PlaygroundScene {
     if (ground) ground.isVisible = !playgroundOn;
     if (grid) grid.isVisible = !playgroundOn;
   }
+}
+
+/**
+ * 依「材質 + 頂點屬性組合」分組合併靜態 mesh（世界座標已烤進頂點；來源 mesh 會被 dispose，材質保留）。
+ * 回傳新的 mesh 清單（[0] 仍是 root，之後是合併後的 mesh；無法合併的組（單顆 / 合併失敗）保留原樣）。
+ * 只處理純靜態 glb（無骨架 / 動畫 / instance），playground_2b.glb 符合。
+ */
+export function mergeStaticMeshes(root: AbstractMesh, meshes: AbstractMesh[]): AbstractMesh[] {
+  const groups = new Map<string, Mesh[]>();
+  const kept: AbstractMesh[] = [root];
+  for (const m of meshes) {
+    if (m === root) continue;
+    // 只合併「有幾何的一般 Mesh」；有骨架 / instance / 無頂點的原樣保留
+    if (!(m instanceof Mesh) || m.isAnInstance || m.skeleton || !m.getTotalVertices()) {
+      kept.push(m);
+      continue;
+    }
+    const matKey = m.material ? m.material.uniqueId : -1;
+    const kinds = m.getVerticesDataKinds().slice().sort().join(',');
+    const key = `${matKey}|${kinds}|${m.sideOrientation}`;
+    const g = groups.get(key);
+    if (g) g.push(m);
+    else groups.set(key, [m]);
+  }
+  for (const g of groups.values()) {
+    if (g.length < 2) {
+      kept.push(...g);
+      continue;
+    }
+    // disposeSource=true 只 dispose mesh 本體、材質保留；allow32BitsIndices：單組可能超過 65k 頂點
+    const merged = Mesh.MergeMeshes(g, true, true);
+    if (merged) {
+      merged.receiveShadows = true;
+      merged.isPickable = false;
+      merged.freezeWorldMatrix(); // 靜態：世界矩陣不再每幀重算
+      kept.push(merged);
+    } else {
+      kept.push(...g); // 合併失敗（理論上不會）→ 保留原始 mesh，只損失效能不損失畫面
+    }
+  }
+  return kept;
 }
 
 /**

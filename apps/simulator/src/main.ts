@@ -77,6 +77,7 @@ import {
 } from './multiplayer/soccer';
 import { SoccerFieldVisuals } from './render/soccerField';
 import { initSoccerHud } from './ui/soccerHud';
+import { initFpsMeter } from './ui/fpsMeter';
 import { initPwa } from './pwa';
 
 // ---- 場景與渲染 ----
@@ -110,6 +111,7 @@ initSoccerHud(
   () => (soccerState.active ? exitSoccerMatch() : enterSoccerMatch()),
 );
 initEndCountdown(); // 賽局結束倒數 chip（§5.3；arena / soccer 共用 endTime）
+initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initPlayer(connectToTeacher);
 
