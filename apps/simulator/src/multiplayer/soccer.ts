@@ -444,7 +444,7 @@ function interpolateOthers(): void {
 function resolveDroneContacts(): void {
   const p = droneState.position;
   const v = droneState.velocity;
-  for (const o of soccerState.others.values()) {
+  for (const [id, o] of soccerState.others) {
     if (!o.hasPos) continue;
     let dx = p.x - o.pos.x;
     let dy = p.y - o.pos.y;
@@ -452,8 +452,11 @@ function resolveDroneContacts(): void {
     let d = Math.hypot(dx, dy, dz);
     if (d >= CONTACT_DIST) continue;
     if (d < 1e-6) {
-      // 完全重疊（出生點瞬移撞到人）：往 +x 推開，避免除以零
-      dx = 1; dy = 0; dz = 0; d = 1;
+      // 完全重疊（進場都站中場 (0,0.4,0) / 出生點瞬移撞到人）：沿 x 推開，避免除以零。
+      // 方向必須「兩端相反」— 若兩邊都往 +x，兩機會同步位移、永遠重疊、一路互推到邊牆
+      //（碰撞 QA 5a 復現：d 恆 0，兩機每 tick 同向漂 0.25m 直到牆邊）。
+      // 以 playerId 字典序決定：id 小的往 -x、id 大的往 +x → 兩客戶端各自算出相反方向，一 tick 分開。
+      dx = wsState.myId < id ? -1 : 1; dy = 0; dz = 0; d = 1;
     }
     const nx = dx / d;
     const ny = dy / d;

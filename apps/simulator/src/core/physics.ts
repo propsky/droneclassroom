@@ -180,6 +180,12 @@ export function resolveObstacleCollisions(): void {
   const { bumped } = simpleBackend.resolveCollisions(p, v, DRONE_RADIUS);
   if (bumped && droneState.isFlying) sound('bump');
   if (meshBackend) meshBackend.resolveCollisions(p, v, meshRadius);
+  // 地板 / 天花板護欄（碰撞 QA 6e / 3d 復現）：方塊底離地 < 球半徑（或頂離天花板 < 球半徑）
+  // 且高速切入時，AABB 最小穿透軸會選 y、把機身推到地板下 / 天花板上；下一 tick integrate 再 clamp
+  // 回來 → 兩個 clamp 每 tick 打架：位置在 0.3↔0.4 抖、還被 integrate 誤判「落地」（isFlying 變 false）。
+  // 這裡只修位置（不動速度 / 起降狀態、不播音效）：推出後的位置永遠不低於地板、不高於天花板。
+  if (p.y < HOME_POSITION.y) p.y = HOME_POSITION.y;
+  else if (p.y > CEILING_Y) p.y = CEILING_Y;
 }
 
 // =============================================================================
