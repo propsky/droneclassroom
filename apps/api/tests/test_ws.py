@@ -50,6 +50,7 @@ def test_register_老師收到更新後的名冊(client: TestClient, teacher_tic
                         "level": None,
                         "time": None,
                         "suspect": False,
+                        "studentId": None,
                     }
                 ],
             }
@@ -93,6 +94,7 @@ def test_progress與complete_level_老師收student_update(
                     "level": "1-2",
                     "time": None,
                     "suspect": False,
+                    "studentId": None,
                 },
             }
 
@@ -142,6 +144,7 @@ def test_同名register_舊連線被踢4000且繼承進度(client: TestClient, t
                         "level": "1-3",
                         "time": 42000,
                         "suspect": False,
+                        "studentId": None,
                     }
                 ]
 
@@ -171,6 +174,7 @@ def test_斷線後同名重連_繼承保留的名冊進度(client: TestClient, t
                 "level": "1-5",
                 "time": 60000,
                 "suspect": False,
+                "studentId": None,
             }
         ]
 
@@ -188,6 +192,7 @@ def test_斷線後同名重連_繼承保留的名冊進度(client: TestClient, t
                     "level": "1-5",
                     "time": 60000,
                     "suspect": False,
+                    "studentId": None,
                 }
             ]
 

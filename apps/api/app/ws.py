@@ -14,14 +14,21 @@
   才進房。register 可帶 roomCode / roomPassword，通過門檢（存在 / 未鎖 / 未滿 / 密碼）
   才進房並收 room_joined，被拒收 room_rejected 但不斷線（可改碼重試；連錯密碼
   MAX_BAD_PASSWORD_TRIES 次才斷，防暴力）。之後所有訊息路由到該房的名冊 / 賽局。
+  帳號模式：register 帶 studentToken → 名字 / emoji 以 DB 為準、自動進所屬班級的房
+  （roomCode 忽略、免房間密碼）；房沒開回 room_rejected reason:'closed'；
+  token 無效退回訪客路徑照舊處理（不斷線）。
 - 老師：一條 WS 管多間；帶 roomCode 的訊息路由到該房、缺省用目前選定的房。
   賽局控制訊息（arena_start / soccer_start …）只在老師 endpoint 分派 ——
   ticket 機制已保證 /teacher 連線＝老師。
+  有 DB 時老師開的房是持久化班級（rooms.py）：管理類訊息（room_update / room_close /
+  room_kick / room_open_team / room_archive_team）限班級擁有者，不是就忽略 + log；
+  預設房 MAIN 與無 DB 的記憶體房仍所有老師共用。
 """
 
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import anyio
@@ -29,8 +36,11 @@ from fastapi import FastAPI, WebSocket
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
+from .accounts import resolve_session, resolve_student_session
 from .auth import WS_CLOSE_BAD_ORIGIN, WS_CLOSE_UNAUTHORIZED, TeacherAuth, origin_allowed
 from .config import Settings
+from .db.models import Student, Teacher, Team
+from .progress import latest_completion, load_progress, progress_sync_msg, save_completion
 from .protocol import (
     STUDENT_MESSAGE_ADAPTER,
     TEACHER_MESSAGE_ADAPTER,
@@ -41,15 +51,18 @@ from .protocol import (
     ArenaStartMsg,
     ArenaStateReqMsg,
     ArenaStopMsg,
+    CompleteAckMsg,
     CompleteLevelMsg,
     ProgressMsg,
     RegisterMsg,
     RejectReason,
+    RoomArchiveTeamMsg,
     RoomCloseMsg,
     RoomCreateMsg,
     RoomJoinedMsg,
     RoomKickMsg,
     RoomListReqMsg,
+    RoomOpenTeamMsg,
     RoomRejectedMsg,
     RoomSelectMsg,
     RoomUpdateMsg,
@@ -159,9 +172,38 @@ async def _origin_ok(ws: WebSocket) -> bool:
 
 
 async def _teacher_ticket_ok(ws: WebSocket) -> bool:
-    """老師 WS 必須帶有效 ticket（?ticket=）：無效 / 過期 → accept 後以 4401 關閉。"""
-    auth: TeacherAuth = ws.app.state.auth
-    if auth.verify_ticket(ws.query_params.get("ticket", "")):
+    """老師 WS 必須帶有效 ticket（?ticket=）：無效 / 過期 → accept 後以 4401 關閉。
+
+    有資料庫：ticket = DB session token（/auth/teacher/login 發的），查 sessions 表
+    （未撤銷 / 未過期、老師 active），通過後 ws.state.teacher_id 記下老師 id
+    （班級擁有者判定 / 班級清單用）。
+    無資料庫：退回舊 HMAC ticket（POST /auth/teacher PIN 登入），ws.state.teacher_id = None。
+    """
+    ticket = ws.query_params.get("ticket", "")
+    ws.state.teacher_id = None
+    maker = ws.app.state.db_sessionmaker
+    if maker is None:
+        auth: TeacherAuth = ws.app.state.auth
+        ok = auth.verify_ticket(ticket)
+    else:
+        settings: Settings = ws.app.state.settings
+        async with maker() as session:
+            row = await resolve_session(
+                session,
+                ticket,
+                ttl=settings.session_ttl_sec,
+                touch_interval=settings.session_touch_interval_sec,
+            )
+            teacher = (
+                await session.get(Teacher, row.principal_id)
+                if row is not None and row.principal_type == "teacher"
+                else None
+            )
+            ok = teacher is not None and teacher.status == "active"
+            await session.commit()  # 滑動延長落地
+        if ok:
+            ws.state.teacher_id = teacher.id
+    if ok:
         return True
     logger.info("[WS] 老師連線 ticket 無效或過期，拒絕連線")
     await ws.accept()
@@ -202,9 +244,30 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 )
                 continue
             if isinstance(valid, RegisterMsg):
+                # ----- 帳號模式（studentToken）：名字 / emoji 以 DB 為準、自動進所屬班級的房；
+                #       token 無效退回訪客路徑照舊處理（不斷線）-----
+                name, emoji, student_id = valid.name, valid.emoji, None
+                skip_password = False
+                account = (
+                    await _resolve_student_token(ws, valid.studentToken)
+                    if valid.studentToken
+                    else None
+                )
+                if account is not None:
+                    student, team = account
+                    name, emoji, student_id = student.name, student.emoji, student.id
+                    skip_password = True  # token 已驗明身分（本來就是這班的學生），免房間密碼
+                    target = rooms.get_by_team(team.id)
+                    if target is None:
+                        # 班級的房沒開：老師開房學生才進得來（跟實體課一致）
+                        await _send_rejected(ws, "closed")
+                        continue
+                else:
+                    target = rooms.get(valid.roomCode or url_room)
                 # ----- 進房門檢 → 進房 / 換房 → 報到 -----
-                target = rooms.get(valid.roomCode or url_room)
-                reason = _join_check(target, room, record, valid)
+                reason = _join_check(
+                    target, room, record, name, valid.roomPassword, skip_password=skip_password
+                )
                 if reason is not None:
                     await _send_rejected(ws, reason)
                     bad_password_tries = bad_password_tries + 1 if reason == "bad_password" else 0
@@ -220,8 +283,26 @@ async def _student_endpoint(ws: WebSocket) -> None:
                         await _leave_room(room, record)
                     room = target
                     await room.roster.add_student(record)
-                await room.roster.register(record, valid.name, valid.emoji)
+                record.student_id = student_id
+                # ----- 帳號模式：撈歷史進度（progress 表）——
+                #       名冊初始 level / time 帶最近完成的關卡（老師看到延續的進度），
+                #       register 後下行 progress_sync（跨裝置成績同步）-----
+                progress_rows = (
+                    await load_progress(ws.app.state.db_sessionmaker, student_id)
+                    if student_id is not None
+                    else []
+                )
+                latest = latest_completion(progress_rows)
+                if latest is not None and record.level is None:
+                    record.level = latest.level_id
+                    record.time = (
+                        float(latest.best_time_ms) if latest.best_time_ms is not None else None
+                    )
+                await room.roster.register(record, name, emoji)
                 await send_safe(ws, RoomJoinedMsg(room=room.info()).model_dump_json())
+                if student_id is not None:
+                    # 空進度也送：client 以此確認同步完成（進房即知道哪些關已完成）
+                    await send_safe(ws, progress_sync_msg(progress_rows).model_dump_json())
                 continue
             if room is None:
                 # 帶 ?room= 連上但還沒進房：其餘訊息一律忽略（先 register）
@@ -231,7 +312,27 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 case ProgressMsg():
                     await roster.progress(record, valid.levelId)
                 case CompleteLevelMsg():
-                    await roster.complete_level(record, valid.levelId, valid.timeMs)
+                    reasons = await roster.complete_level(
+                        record, valid.levelId, valid.timeMs, offline=valid.offline
+                    )
+                    # 帳號學生且有 DB → 入庫（progress + 稽核）；落地才回 complete_ack。
+                    # 訪客 / 無 DB：行為與從前完全相同（不入庫、不回 ack）
+                    maker = ws.app.state.db_sessionmaker
+                    if record.student_id is not None and maker is not None:
+                        saved = await save_completion(
+                            maker,
+                            student_id=record.student_id,
+                            team_id=room.team_id,
+                            msg=valid,
+                            suspect_reasons=reasons,
+                        )
+                        if saved and valid.clientEventId:
+                            await send_safe(
+                                ws,
+                                CompleteAckMsg(
+                                    clientEventId=valid.clientEventId
+                                ).model_dump_json(),
+                            )
                 # ----- 大亂鬥 -----
                 case ArenaJoinMsg():
                     await soccer.leave(record)  # 與足球互斥（legacy 只有足球→大亂鬥單向，補齊雙向）
@@ -266,15 +367,47 @@ async def _student_endpoint(ws: WebSocket) -> None:
 
 
 def _join_check(
-    target: Room | None, current: Room | None, record: StudentRecord, msg: RegisterMsg
+    target: Room | None,
+    current: Room | None,
+    record: StudentRecord,
+    name: str,
+    password: str | None,
+    *,
+    skip_password: bool = False,
 ) -> RejectReason | None:
     """register 門檢：房不存在 → not_found；換房或首次報到 → 該房 reject_reason；
-    已在房內的重新 register（改名 / 換 emoji）不再檢查。回 None = 放行。"""
+    已在房內的重新 register（改名 / 換 emoji）不再檢查。回 None = 放行。
+
+    skip_password：帳號模式（studentToken 已驗明身分）免房間密碼。"""
     if target is None:
         return "not_found"
     if target is not current or record.name == "?":
-        return target.reject_reason(record, msg.name, msg.roomPassword)
+        return target.reject_reason(record, name, password, skip_password=skip_password)
     return None
+
+
+async def _resolve_student_token(ws: WebSocket, token: str) -> tuple[Student, Team] | None:
+    """register 的 studentToken → (學生, 班級)；順便滑動延長 session、更新 last_seen_at。
+
+    無 DB / token 無效 / 學生 removed / 班級封存 / DB 出錯 → None（呼叫端退回訪客路徑，
+    不斷線 —— 帳號解析失敗不能讓學生連不上課）。
+    """
+    maker = ws.app.state.db_sessionmaker
+    if maker is None:
+        return None
+    settings: Settings = ws.app.state.settings
+    try:
+        async with maker() as session:
+            resolved = await resolve_student_session(session, token, settings=settings)
+            if resolved is None:
+                return None
+            _, student, team = resolved
+            student.last_seen_at = datetime.now(UTC)
+            await session.commit()  # 滑動延長 + last_seen_at 落地
+            return student, team
+    except Exception:  # noqa: BLE001 — 見 docstring
+        logger.exception("[WS] studentToken 解析失敗，退回訪客路徑")
+        return None
 
 
 async def _send_rejected(ws: WebSocket, reason: RejectReason) -> None:
@@ -305,7 +438,8 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
     if not await _teacher_ticket_ok(ws):
         return
     await ws.accept()
-    await rooms.add_teacher(ws)
+    teacher_id: int | None = ws.state.teacher_id  # 帳號 id（有 DB）；無 DB 為 None
+    await rooms.add_teacher(ws, teacher_id)
     limiter = RateLimiter()
     try:
         while True:
@@ -320,12 +454,28 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
             match valid:
                 case RoomCreateMsg():
                     try:
-                        room = rooms.create(valid.settings)
+                        room = await rooms.create(valid.settings, teacher_id)
                     except RoomLimitError as e:
                         logger.info("[Room] 開房失敗：%s", e)
                         continue
                     await rooms.select(ws, room)  # 開完自動切過去
                     rooms.notify()  # 其他老師的列表也要有新房
+                    continue
+                case RoomOpenTeamMsg():
+                    # 班級載入成 Room（已開著只切換）；非擁有者 / 已封存 / 無 DB → 忽略
+                    try:
+                        room = await rooms.open_team(teacher_id, valid.teamId)
+                    except RoomLimitError as e:
+                        logger.info("[Room] 開班級 #%d 失敗：%s", valid.teamId, e)
+                        continue
+                    if room is None:
+                        continue
+                    await rooms.select(ws, room)
+                    rooms.notify()
+                    continue
+                case RoomArchiveTeamMsg():
+                    if await rooms.archive_team(teacher_id, valid.teamId):
+                        await rooms.send_room_list(ws)  # 班級清單變了（房沒變時 notify 不會推）
                     continue
                 case RoomListReqMsg():
                     await rooms.send_room_list(ws)
@@ -336,12 +486,23 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
             if room is None:
                 logger.info("[Room] 房間 %s 不存在，丟棄老師訊息 type=%s", code, valid.type)
                 continue
+            # 管理類訊息對班級房限擁有者（預設房 / 記憶體房所有老師共用）
+            if isinstance(valid, RoomUpdateMsg | RoomKickMsg | RoomCloseMsg) and not (
+                rooms.can_manage(room, teacher_id)
+            ):
+                logger.info(
+                    "[Room] 老師 %s 非班級房 %s 擁有者，忽略 type=%s",
+                    teacher_id,
+                    room.code,
+                    valid.type,
+                )
+                continue
             roster, arena, soccer = room.roster, room.arena, room.soccer
             match valid:
                 case RoomSelectMsg():
                     await rooms.select(ws, room)
                 case RoomUpdateMsg():
-                    rooms.update(room, valid.settings)
+                    await rooms.update(room, valid.settings, teacher_id)
                 case RoomKickMsg():
                     target = roster.find(valid.studentId)
                     if target is not None:

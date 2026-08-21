@@ -1,5 +1,5 @@
 /* CREAFLY 老師後台 — 版面資訊架構依 docs/design-system.md §5.1（tokens 見 tokens.css）。
-   骨架：topbar（品牌＋連線膠囊＋登出）→ 房間列（跨兩欄）→ 雙欄（左 380px 名冊常駐卡｜右 tab＋分區卡片）。
+   骨架：topbar（品牌＋連線膠囊＋帳號選單）→ 房間列（跨兩欄）→ 雙欄（左 380px 名冊常駐卡｜右 tab＋分區卡片）。
    卡片鐵律：卡頭（標題＋狀態膠囊＋停止鈕）→ 控件區（label 在上、同列同高、不放按鈕）→ 動作列（右對齊，primary 最右）。 */
 @import './tokens.css';
 
@@ -22,7 +22,7 @@ body {
 .mono { font-family: var(--font-mono); }
 .icon { flex-shrink: 0; }
 
-/* ===== Topbar：品牌字標 ＋ 連線狀態膠囊（含學生數）＋ 登出 ===== */
+/* ===== Topbar：品牌字標 ＋ 連線狀態膠囊（含學生數）＋ 帳號選單 ===== */
 .topbar {
   background: var(--bg-1);
   border-bottom: 1px solid var(--line);
@@ -209,7 +209,7 @@ body {
 .pill-clock { font-family: var(--font-mono); font-size: var(--fs-sm); }
 .pill-clock:empty { display: none; }
 
-/* ===== 房間列（topbar 下、跨兩欄）：橫向 chip 選房 ＋ 開新房間鈕（最右 primary）＋ 內嵌開房表單 ===== */
+/* ===== 班級列（topbar 下、跨兩欄）：橫向 chip（開著的房 / 沒開的班級 / 訪客房）＋ 新增班級鈕（最右 primary）＋ 內嵌表單 ===== */
 .room-strip {
   grid-column: 1 / -1;
   display: flex;
@@ -267,6 +267,30 @@ body {
 .room-chip .chip-flag { display: inline-flex; color: var(--text-3); }
 .room-chip .chip-flag.flag-locked { color: var(--warn); }
 .room-chip .chip-flag .icon { width: 14px; height: 14px; }
+/* 訪客房標（teamId 為空的預設房）：小 tag，與 chip 文字同列 */
+.room-chip .chip-tag {
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--bg-3);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 18px;
+}
+.room-chip.active .chip-tag { color: var(--text-2); }
+/* 沒開的班級：灰態（虛線邊、弱化文字）＋「點擊開啟」提示；hover 才亮起來示意可開 */
+.room-chip.closed {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-3);
+  font-weight: 500;
+}
+.room-chip.closed .chip-code { font-weight: 600; color: var(--text-3); }
+.room-chip.closed .chip-open { font-size: var(--fs-xs); color: var(--text-3); }
+.room-chip.closed:hover:not(:disabled) { background: var(--bg-3); border-color: var(--brand); color: var(--text-1); }
+.room-chip.closed:hover:not(:disabled) .chip-open,
+.room-chip.closed:hover:not(:disabled) .chip-code { color: var(--brand); }
+.room-chip.closed:disabled { cursor: progress; }
 /* 房內賽局進行中：紅色小圓點（與分頁 live-dot 同語彙） */
 .room-chip .chip-live {
   width: 6px;
@@ -339,8 +363,15 @@ body {
 .room-flags { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: var(--sp-1); }
 .room-flags .icon { width: 14px; height: 14px; }
 .room-flags .flag-locked { color: var(--warn); display: inline-flex; }
-/* 工具列：寬度夠就同列靠右；380px 欄放不下時整組換到第二列（仍靠右） */
-.room-tools { margin-left: auto; display: flex; justify-content: flex-end; gap: var(--sp-2); }
+/* 工具列：寬度夠就同列靠右；380px 欄放不下時整組換到第二列（仍靠右）、列內也可換行（管理名單加入後五顆鈕） */
+.room-tools {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  max-width: 100%;
+}
 /* 停用鈕的 title 由外層 span 提供（disabled 元素不一定顯示 tooltip） */
 .tip-wrap { display: inline-flex; }
 .room-pop {
@@ -526,6 +557,23 @@ tbody tr.offline td { opacity: 0.55; }
   flex-shrink: 0;
 }
 
+/* 名冊「已註冊」小 tag：check 圖標 + 綠字（班級名單內、帳號登入的學生；訪客無） */
+.reg-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: help;
+}
+.reg-tag .icon { width: 12px; height: 12px; }
+
 /* ===== 分頁：底線式 tab（右欄操作區入口） ===== */
 .tabs {
   display: flex;
@@ -641,6 +689,21 @@ input[type='password'] {
   transition: border-color 0.18s;
 }
 select:disabled { opacity: 0.5; cursor: not-allowed; }
+textarea {
+  width: 100%;
+  min-height: 96px;
+  background: var(--bg-1);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  resize: vertical;
+  transition: border-color 0.18s;
+}
+textarea:focus { outline: none; border-color: var(--brand); }
 input[type='number'] { color-scheme: dark; } /* 上下箭頭跟深色介面 */
 select:focus,
 input[type='text']:focus,
@@ -779,7 +842,7 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 .armed-ok { color: var(--accent); font-weight: 600; }
 .armed-no { color: var(--danger); font-weight: 600; }
 
-/* ===== 登入畫面：置中卡片套 modal 規格 ===== */
+/* ===== 登入畫面：置中卡片套 modal 規格（登入｜註冊 底線式 tab；表單 label 在上、控件高 40） ===== */
 .login-wrap {
   min-height: 100vh;
   display: flex;
@@ -788,28 +851,200 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
   padding: var(--sp-5);
 }
 .login-card {
-  width: 360px;
+  width: 400px;
+  max-width: 100%;
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--shadow-2);
   padding: var(--sp-5);
-  text-align: center;
 }
+.login-head { text-align: center; }
 .login-logo { font-size: var(--fs-xl); font-weight: 800; letter-spacing: 0.05em; }
 .login-logo .accent { color: var(--warn); }
 .login-card h1 { font-size: var(--fs-lg); margin: var(--sp-3) 0 var(--sp-1); color: var(--text-1); }
-.login-hint { font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 var(--sp-4); }
-.login-card form { display: flex; flex-direction: column; gap: var(--sp-3); }
-/* PIN：大號 mono 置中輸入 */
-.login-card input {
-  height: var(--ctl-h-lg);
-  font-family: var(--font-mono);
-  font-size: var(--fs-xl);
-  text-align: center;
-  letter-spacing: 0.3em;
+.login-hint { font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 var(--sp-4); line-height: 1.6; }
+/* 開頁提示（登入已過期等）：卡片內資訊條，3px 左邊線著色（與 toast 同語彙） */
+.login-notice {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-4);
+  font-size: var(--fs-sm);
+  color: var(--text-1);
 }
-.login-error { color: var(--danger); font-size: var(--fs-sm); font-weight: 600; }
+.login-tabs { margin-bottom: var(--sp-4); }
+.login-tabs .tab-btn { flex: 1; justify-content: center; }
+.login-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.login-error { color: var(--danger); font-size: var(--fs-sm); font-weight: 600; line-height: 1.5; }
+.login-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-1); }
+.login-actions .btn-lg { width: 100%; }
+.login-actions-split { justify-content: space-between; }
+.btn-lg { height: var(--ctl-h-lg); font-size: var(--fs-md); }
+/* 免登入測試模式：表單下方一條分隔 + 說明 + ghost 小鈕 */
+.login-dev {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.login-dev-text { font-size: var(--fs-xs); color: var(--text-3); }
+/* 離線畫面：狀態列（紅點 + 自動重試文字） */
+.offline-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* ===== topbar 帳號選單：老師名稱鈕 → 下拉（更改密碼 / 登出） ===== */
+.account { position: relative; }
+.account-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.menu-pop {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  min-width: 220px;
+  z-index: var(--z-modal);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+}
+.menu-head { padding: var(--sp-2) var(--sp-3) var(--sp-3); border-bottom: 1px solid var(--line); margin-bottom: var(--sp-2); }
+.menu-name { font-size: var(--fs-sm); font-weight: 700; color: var(--text-1); }
+.menu-sub { font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--sp-1); word-break: break-all; }
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--ctl-h);
+  padding: 0 var(--sp-3);
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.18s, color 0.18s;
+}
+.menu-item:hover { background: var(--bg-3); }
+.menu-item-danger { color: var(--danger); }
+
+/* ===== Modal（更改密碼）：遮罩 rgba(4,10,20,.7) + 實色卡片、--r-md、--shadow-2、內距 --sp-5、主按鈕靠右 ===== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-5);
+  background: rgba(4, 10, 20, 0.7);
+}
+.modal {
+  width: 400px;
+  max-width: 100%;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-5);
+}
+.modal-title { font-size: var(--fs-xl); font-weight: 700; margin: 0 0 var(--sp-2); }
+.modal-desc { font-size: var(--fs-sm); color: var(--text-2); margin: 0 0 var(--sp-4); line-height: 1.6; }
+.modal-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2); }
+
+/* ===== 學生名單管理 modal（寬版：名單表 + 批次新增） ===== */
+.modal-lg {
+  width: 720px;
+  max-height: calc(100vh - var(--sp-6) * 2);
+  overflow-y: auto;
+}
+/* modal 卡頭：標題/說明在左，「關閉」工具鈕靠右（卡頭工具列語彙） */
+.modal-head { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.modal-head-text { flex: 1; min-width: 0; }
+.modal-head-text .modal-desc { margin-bottom: 0; }
+.modal-head .btn { flex-shrink: 0; }
+.stu-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-5);
+}
+.stu-section-head { display: flex; align-items: center; gap: var(--sp-3); }
+.stu-section-title {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+}
+.stu-count { margin-left: var(--sp-1); color: var(--text-2); }
+.stu-section-head .btn { margin-left: auto; }
+/* 名單表：外框圓角 + 內部捲動（modal 內不讓表格無限長高） */
+.stu-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.stu-table th, .stu-table td { height: var(--row-h); }
+.stu-table th:first-child, .stu-table td:first-child { padding-left: var(--sp-4); }
+.stu-table th:last-child, .stu-table td:last-child { padding-right: var(--sp-4); }
+/* 學生碼：mono 大字（老師要投影 / 唸給學生抄） */
+.stu-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--brand);
+  width: 80px;
+}
+.stu-email { color: var(--text-2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+/* 邀請狀態 tag：未寄（灰）/ 已寄（黃）/ 已加入（綠） */
+.invite-tag {
+  display: inline-block;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.invite-none { color: var(--text-3); background: var(--bg-3); }
+.invite-sent { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.invite-accepted { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.stu-act { white-space: nowrap; }
+.stu-act .btn { margin-left: var(--sp-2); }
+/* 解析錯誤：3px 左邊線著色（與 toast / 登入提示同語彙），逐行列出 */
+.stu-errors {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--danger);
+  line-height: 1.7;
+}
 
 /* ===== Toast：底部置中，3px 左邊線著色（純文字，零 emoji） ===== */
 .toast {

@@ -1,6 +1,7 @@
 # @creafly/api — CREAFLY 教室無人機模擬器 FastAPI 後端
 #
 # 啟動：uv run creafly-api（或 PORT=3000 uv run uvicorn app.main:app --host 0.0.0.0 --port 3000）
+# 資料庫 migration：uv run creafly-migrate（= alembic upgrade head；需 DATABASE_URL）
 # 測試：uv run pytest
 # Lint：uv run ruff check .
 
@@ -9,13 +10,19 @@ name = "api"
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.19.1",
+    "argon2-cffi>=25.1.0",
+    "asyncpg>=0.31.0",
+    "boto3>=1.43.75",
     "fastapi>=0.139.0",
     "pydantic-settings>=2.14.2",
+    "sqlalchemy[asyncio]>=2.0.52",
     "uvicorn[standard]>=0.51.0",
 ]
 
 [project.scripts]
 creafly-api = "app.main:run"
+creafly-migrate = "app.db.cli:main"
 
 [dependency-groups]
 dev = [

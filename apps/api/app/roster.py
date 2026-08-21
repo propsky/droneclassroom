@@ -59,6 +59,8 @@ class StudentRecord:
     emoji: str = "?"
     level: str | None = None
     time: float | None = None
+    # 帳號模式進場的學生（students 表 id）；訪客為 None。ws.py register 時設定
+    student_id: int | None = None
     # 防作弊：一旦標記保留到重新 register；levelId → 收到 progress 的 monotonic 秒
     suspect: bool = False
     level_started_at: dict[str, float] = field(default_factory=dict)
@@ -196,29 +198,43 @@ class Roster:
         record.level_started_at[level_id] = time.monotonic()
         await self.broadcast_to_teachers(self._student_update_payload(record))
 
-    async def complete_level(self, record: StudentRecord, level_id: str, time_ms: float) -> None:
-        """complete_level：記錄關卡 + 用時；先過防作弊判定（標記不阻擋）。"""
-        self._flag_if_suspect(record, level_id, time_ms)
+    async def complete_level(
+        self, record: StudentRecord, level_id: str, time_ms: float, *, offline: bool = False
+    ) -> list[str]:
+        """complete_level：記錄關卡 + 用時；先過防作弊判定（標記不阻擋）。
+
+        回傳本次的可疑原因清單（空 = 乾淨）—— 帳號模式入庫時進稽核 payload。
+        """
+        reasons = self._flag_if_suspect(record, level_id, time_ms, offline=offline)
         record.level = level_id
         record.time = time_ms
         logger.info(
             "[WS] %s%s 完成 %s 用時 %.1fs", record.name, record.emoji, level_id, time_ms / 1000
         )
         await self.broadcast_to_teachers(self._student_update_payload(record))
+        return reasons
 
-    def _flag_if_suspect(self, record: StudentRecord, level_id: str, time_ms: float) -> None:
-        """防作弊判定：任一條件成立就把該生標成 suspect（保留到重新 register）。"""
+    def _flag_if_suspect(
+        self, record: StudentRecord, level_id: str, time_ms: float, *, offline: bool = False
+    ) -> list[str]:
+        """防作弊判定：任一條件成立就把該生標成 suspect（保留到重新 register）；回傳原因清單。
+
+        offline = 離線補傳：完成當下不在線，伺服器無從對時 —— 跳過「沒收到 progress」與
+        經過時間比對（兩者都靠伺服器觀察計時），稽核 payload 留 offline 痕跡由呼叫端負責；
+        與對時無關的規則（未知關卡、< 1 秒）照擋。
+        """
         reasons: list[str] = []
         if level_id not in self._known_levels:
             reasons.append(f"未知關卡 {level_id}")
         started = record.level_started_at.get(level_id)
-        if started is None:
-            # 正常 client 一定先發 progress 才 complete；直接 complete = 偽造訊息
-            reasons.append("沒有先收到 progress")
-        else:
-            elapsed_ms = (time.monotonic() - started) * 1000
-            if time_ms < elapsed_ms * SUSPECT_ELAPSED_RATIO - SUSPECT_ELAPSED_SLACK_MS:
-                reasons.append(f"宣稱用時 {time_ms:.0f}ms 但伺服器觀察 {elapsed_ms:.0f}ms")
+        if not offline:
+            if started is None:
+                # 正常 client 一定先發 progress 才 complete；直接 complete = 偽造訊息
+                reasons.append("沒有先收到 progress")
+            else:
+                elapsed_ms = (time.monotonic() - started) * 1000
+                if time_ms < elapsed_ms * SUSPECT_ELAPSED_RATIO - SUSPECT_ELAPSED_SLACK_MS:
+                    reasons.append(f"宣稱用時 {time_ms:.0f}ms 但伺服器觀察 {elapsed_ms:.0f}ms")
         if time_ms < SUSPECT_MIN_TIME_MS:
             reasons.append(f"用時 {time_ms:.0f}ms < {SUSPECT_MIN_TIME_MS:.0f}ms")
         if reasons:
@@ -230,6 +246,7 @@ class Roster:
                 level_id,
                 "；".join(reasons),
             )
+        return reasons
 
     # ---------- 賽局防作弊（games/ 呼叫）----------
 
@@ -273,6 +290,7 @@ class Roster:
                     level=s.level,
                     time=s.time,
                     suspect=s.suspect,
+                    studentId=s.student_id,
                 )
                 for s in self._students
             ]
@@ -281,7 +299,13 @@ class Roster:
     def _student_update_payload(self, s: StudentRecord) -> StudentUpdateMsg:
         return StudentUpdateMsg(
             student=StudentBrief(
-                id=s.id, name=s.name, emoji=s.emoji, level=s.level, time=s.time, suspect=s.suspect
+                id=s.id,
+                name=s.name,
+                emoji=s.emoji,
+                level=s.level,
+                time=s.time,
+                suspect=s.suspect,
+                studentId=s.student_id,
             )
         )
 

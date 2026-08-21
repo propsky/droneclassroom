@@ -65,6 +65,8 @@
                     <span id="player-name-display"></span>
                     <button id="player-rename" title="改名"><span class="btn-ic" data-icon="pencil"></span><span>改名</span></button>
                     <button id="player-guide" title="重看新手引導"><span class="btn-ic" data-icon="map"></span><span>新手引導</span></button>
+                    <!-- 有學生帳號 token 時才顯示（ui/overlays.ts syncAccountUi） -->
+                    <button id="player-logout" title="登出學生帳號，回訪客模式" style="display:none;"><span class="btn-ic" data-icon="log-out"></span><span>登出帳號</span></button>
                 </div>
             </div>
         </div>
@@ -218,10 +220,16 @@
     </div>
 </div>
 
-<!-- 學生登入：名字 + 動物 + 房間碼（老師開房給的 4 碼；留空 = 預設房） -->
+<!-- 學生登入：快速進場（名字 + 動物 + 房間碼，訪客）｜我有學生帳號（班級碼+學生碼 / email+密碼） -->
 <div id="login-modal" class="modal-overlay">
     <div class="modal-card login-card">
         <div class="level-intro-title">歡迎來到 CREAFLY</div>
+        <!-- 模式切換：底線式 tab（設計系統 §3）；預設快速進場 = 既有訪客流程 -->
+        <div class="login-tabs" role="tablist">
+            <button id="login-tab-guest" class="login-tab active" type="button" role="tab" aria-selected="true">快速進場</button>
+            <button id="login-tab-account" class="login-tab" type="button" role="tab" aria-selected="false">我有學生帳號</button>
+        </div>
+        <div id="login-pane-guest">
         <div class="login-form">
             <label class="login-label" for="login-name">你的名字（給老師跟同學看）</label>
             <input id="login-name" type="text" maxlength="10" placeholder="例：小翔" autocomplete="off">
@@ -255,6 +263,76 @@
             <div id="login-room-error" class="login-error" role="alert" hidden></div>
         </div>
         <button id="login-start" class="modal-btn">開始飛行</button>
+        </div>
+        <!-- 帳號分頁：班級碼 + 學生碼（密碼欄預設隱藏，伺服器說需要才展開）；小連結切 email 登入 -->
+        <div id="login-pane-account" hidden>
+            <div class="login-form">
+                <div id="acct-code-fields" class="acct-fields">
+                    <div class="login-room login-room-acct">
+                        <div class="login-field login-field-code">
+                            <label class="login-label" for="acct-team-code">班級碼</label>
+                            <input id="acct-team-code" class="login-code" type="text" maxlength="4" inputmode="text"
+                                   autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD">
+                        </div>
+                        <div class="login-field login-field-code login-field-code-sm">
+                            <label class="login-label" for="acct-student-code">學生碼</label>
+                            <input id="acct-student-code" class="login-code" type="text" maxlength="2" inputmode="numeric"
+                                   autocomplete="off" spellcheck="false" placeholder="01">
+                        </div>
+                    </div>
+                    <div id="acct-code-pw-field" class="login-field" hidden>
+                        <label class="login-label" for="acct-code-pw">密碼</label>
+                        <input id="acct-code-pw" type="password" maxlength="64" autocomplete="current-password">
+                    </div>
+                    <div class="login-hint">班級碼＋學生碼在老師發的小卡上，大多數帳號不需要密碼</div>
+                </div>
+                <div id="acct-email-fields" class="acct-fields" hidden>
+                    <div class="login-field">
+                        <label class="login-label" for="acct-email">Email</label>
+                        <input id="acct-email" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com">
+                    </div>
+                    <div class="login-field">
+                        <label class="login-label" for="acct-email-pw">密碼</label>
+                        <input id="acct-email-pw" type="password" maxlength="64" autocomplete="current-password">
+                    </div>
+                </div>
+                <div id="acct-error" class="login-error" role="alert" hidden></div>
+            </div>
+            <div class="login-actions">
+                <button id="acct-mode-switch" class="login-link" type="button">用 email 登入</button>
+                <button id="acct-login-btn" class="modal-btn">登入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 邀請連結設密碼（?invite=TOKEN）：蓋在登入 modal 之上（DOM 順序在後 → 同層疊在上面） -->
+<div id="invite-modal" class="modal-overlay">
+    <div class="modal-card login-card">
+        <div id="invite-loading" class="level-intro-body">邀請載入中…</div>
+        <div id="invite-valid" hidden>
+            <div class="level-intro-title">設定你的密碼</div>
+            <div id="invite-welcome" class="level-intro-body"></div>
+            <div class="login-form">
+                <div class="acct-fields">
+                    <div class="login-field">
+                        <label class="login-label" for="invite-pw">設定密碼（至少 8 碼）</label>
+                        <input id="invite-pw" type="password" maxlength="64" autocomplete="new-password">
+                    </div>
+                    <div class="login-field">
+                        <label class="login-label" for="invite-pw2">再輸入一次確認</label>
+                        <input id="invite-pw2" type="password" maxlength="64" autocomplete="new-password">
+                    </div>
+                </div>
+                <div id="invite-error" class="login-error" role="alert" hidden></div>
+            </div>
+            <button id="invite-submit" class="modal-btn">完成設定，開始飛行</button>
+        </div>
+        <div id="invite-invalid" hidden>
+            <div class="level-intro-title">邀請連結已失效</div>
+            <div class="level-intro-body">這個邀請連結已失效或已使用過，請老師重寄一封新的邀請信。</div>
+            <button id="invite-close" class="modal-btn modal-btn-ghost">回登入頁</button>
+        </div>
     </div>
 </div>
 

@@ -37,6 +37,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     - teacher_password 固定 test123（不設定會走隨機 PIN，測試無法登入）
     - levels_dir 用預設（repo 內 apps/simulator/public/levels 三章）
     - game_tick_interval=0：不起賽局主迴圈，賽局測試注入假時鐘、手動 tick
+    - database_url=None：既有測試一律無資料庫模式（即使本機 .env 有 DATABASE_URL 也不連）；
+      需要真實資料庫的測試見 test_db.py
     """
     static_dir = tmp_path / "dist"
     static_dir.mkdir()
@@ -47,6 +49,7 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
         teacher_dist=tmp_path / "no-teacher-dist",
         teacher_password=TEACHER_PASSWORD,
         game_tick_interval=0,
+        database_url=None,
     )
     app = create_app(settings)
     with TestClient(app) as c:

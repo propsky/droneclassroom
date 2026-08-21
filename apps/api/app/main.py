@@ -14,13 +14,17 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from .auth import TeacherAuth, generate_pin
 from .config import Settings
+from .db.session import create_engine, create_sessionmaker
+from .mailer import Mailer
 from .rest import known_level_ids, load_levels
 from .rest import router as rest_router
 from .rooms import RoomManager
 from .static import no_store_middleware, register_static_routes
+from .students_api import router as students_router
 from .ws import register_ws_routes
 
 logger = logging.getLogger("creafly.api")
@@ -44,10 +48,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """組裝 FastAPI app；settings 可注入（測試用），預設讀環境變數。"""
     cfg = settings or Settings()
 
-    # 教師密碼：TEACHER_PASSWORD 未設定 → 啟動隨機產生 6 位數 PIN（lifespan 印出）；
+    # 教師 PIN（只在無資料庫模式使用，有 DATABASE_URL 時走 /auth/teacher/login 帳號登入）：
+    # TEACHER_PASSWORD 未設定 → 啟動隨機產生 6 位數 PIN（lifespan 印出）；
     # TEACHER_AUTH_DISABLED=1 → 免登入模式（測試用），不產 PIN、密碼檢查全放行
     generated_pin = (
-        generate_pin() if not cfg.teacher_password and not cfg.teacher_auth_disabled else None
+        generate_pin()
+        if not cfg.teacher_password and not cfg.teacher_auth_disabled and not cfg.database_url
+        else None
     )
     auth = TeacherAuth(
         password=cfg.teacher_password or generated_pin or "",
@@ -60,10 +67,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # 資料庫（選配）：有 DATABASE_URL 才建 engine；連不上只 log 不擋啟動
+        # （教室現場沒網路也要能上課；/api/health 的 db 欄位會反映 error）
+        if cfg.database_url:
+            app.state.db_engine = create_engine(cfg.database_url)
+            app.state.db_sessionmaker = create_sessionmaker(app.state.db_engine)
+            try:
+                async with app.state.db_engine.connect() as conn:
+                    await conn.execute(text("SELECT 1"))
+                logger.info("資料庫已連線")
+            except Exception:  # noqa: BLE001 — 見上方註解
+                logger.exception("資料庫連線失敗（伺服器照常啟動，資料庫功能暫不可用）")
+        else:
+            logger.info("未設定 DATABASE_URL，以無資料庫模式啟動")
         # 所有可變狀態封裝在 app.state（測試隔離：每個 create_app 一份房間管理器）。
-        # 房間模型見 rooms.py：每房一份名冊 + 賽局；預設房啟動即存在（不帶房間碼 = 舊流程）。
+        # 房間模型見 rooms.py：每房一份名冊 + 賽局；預設房啟動即存在（不帶房間碼 = 舊流程）；
+        # 有 DB 時老師開的房持久化為班級（teams 表），故把 sessionmaker 注入。
         # 足球場地尺寸資料驅動（環境變數 SOCCER_HALF_X … 可調，見 config.py）
-        app.state.rooms = RoomManager(cfg, known_levels=known_level_ids(levels))
+        app.state.rooms = RoomManager(
+            cfg, known_levels=known_level_ids(levels), db=app.state.db_sessionmaker
+        )
         # 向後相容別名 = 預設房的名冊 / 賽局（既有測試與單房部署直接用）
         app.state.roster = app.state.rooms.default.roster
         app.state.arena = app.state.rooms.default.arena
@@ -80,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if cfg.teacher_auth_disabled:
             logger.warning(
                 "⚠️ 教師後台免登入模式（TEACHER_AUTH_DISABLED=1）— 僅供測試，正式環境請關閉"
+                + ("；任意帳密皆登入預設老師 dev@local" if cfg.database_url else "")
             )
         if generated_pin:
             logger.warning("=" * 50)
@@ -91,11 +115,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ticker.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await ticker
+        if app.state.db_engine is not None:
+            await app.state.db_engine.dispose()
 
     app = FastAPI(title="CREAFLY Classroom API", lifespan=lifespan, openapi_url=None)
     app.state.settings = cfg
+    app.state.mailer = Mailer(cfg)
     app.state.auth = auth
     app.state.levels = levels
+    # 資料庫 engine / sessionmaker：lifespan 內依 database_url 建立；None = 無資料庫模式
+    app.state.db_engine = None
+    app.state.db_sessionmaker = None
 
     app.middleware("http")(no_store_middleware)
 
@@ -117,12 +147,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=allow_origins,
             allow_origin_regex="|".join(wildcard_patterns) or None,
-            allow_methods=["GET", "POST"],
-            allow_headers=["content-type"],
+            # DELETE：移除學生；authorization：Bearer session token（老師 / 學生端點）
+            allow_methods=["GET", "POST", "DELETE"],
+            allow_headers=["content-type", "authorization"],
         )
 
     register_ws_routes(app)
     app.include_router(rest_router)
+    app.include_router(students_router)
     register_static_routes(app, cfg)
     return app
 

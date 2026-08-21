@@ -91,6 +91,10 @@ export const ICONS = {
   doorClosed: svg(
     '<path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14"/><path d="M2 20h20"/><path d="M14 12v.01"/>',
   ),
+  /** 封存班級 */
+  archive: svg(
+    '<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
+  ),
   /** 房間需密碼 */
   key: svg(
     '<path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/>' +
@@ -103,4 +107,8 @@ export const ICONS = {
   ),
   /** 儲存 / 確認 */
   check: svg('<path d="M20 6 9 17l-5-5"/>'),
+  /** 帳號（topbar 老師名稱鈕） */
+  user: svg('<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>'),
+  /** 下拉指示 */
+  chevronDown: svg('<path d="m6 9 6 6 6-6"/>'),
 } as const;

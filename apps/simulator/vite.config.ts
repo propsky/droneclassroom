@@ -20,6 +20,9 @@ export default defineConfig(({ mode }) => {
           ws: true,
           rewrite: () => '/',
         },
+        // REST（學生帳號登入等）：同網域（API_BASE=''）時代理到本機後端，與部署行為一致
+        '/auth': { target: 'http://localhost:3000' },
+        '/api': { target: 'http://localhost:3000' },
       },
     },
     build: {

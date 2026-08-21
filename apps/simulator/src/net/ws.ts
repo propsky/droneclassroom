@@ -6,6 +6,8 @@ import type { RegisterMsg, RoomInfo, ServerToClient, SoccerBallMsg, StudentToSer
 import { WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
+import { handleCompleteAck, handleProgressSync, initProgressQueue, reportComplete } from './progressQueue';
+import { getStudentToken } from './studentAuth';
 import { armLevelStart, loadLevel, levelState, resetMission } from '../core/level';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
@@ -35,8 +37,27 @@ const send = sendToServer;
 let pendingLevelId: string | null = null;
 
 export function initWs(): void {
-  // 過關 / 切關 → 上報老師後台
-  bus.on('level-complete', ({ levelId, timeMs }) => send({ type: 'complete_level', levelId, timeMs }));
+  // 登出學生帳號（頭像下拉）：主動斷線、不自動重連（token 已清；使用者重送登入表單才連 → rejoin）
+  bus.on('student-logout', () => {
+    wsState.stopped = true;
+    wsState.room = null;
+    wsState.connected = false;
+    wsState.wasDown = false;
+    if (wsState.reconnectTimer) {
+      clearTimeout(wsState.reconnectTimer);
+      wsState.reconnectTimer = null;
+    }
+    const ws = wsState.ws;
+    wsState.ws = null; // 先解除綁定 → onclose 不觸發重連 / 提示
+    try {
+      ws?.close(1000);
+    } catch {
+      /* ignore */
+    }
+  });
+  // 過關 / 切關 → 上報老師後台（帳號模式帶冪等鍵、離線先入佇列；訪客照舊直送 — net/progressQueue.ts）
+  initProgressQueue();
+  bus.on('level-complete', ({ levelId, timeMs }) => reportComplete(levelId, timeMs));
   bus.on('level-loaded', ({ level }) => send({ type: 'progress', levelId: level.id }));
   bus.on('levels-ready', () => {
     if (pendingLevelId) {
@@ -74,7 +95,12 @@ export function connectToTeacher(): void {
     if (player.name && player.emoji) {
       // 房間碼缺省 = 預設房（向後相容）；重連時自動帶同一組
       const reg: RegisterMsg = { type: 'register', name: player.name, emoji: player.emoji };
-      if (player.roomCode) {
+      const studentToken = getStudentToken();
+      if (studentToken) {
+        // 帳號模式：伺服器以 token 解析身分（name/emoji 以 DB 為準）並自動進所屬班級的房；
+        // token 失效時伺服器回退訪客，身分驗證由 overlays 的 fetchStudentMe 負責清 token
+        reg.studentToken = studentToken;
+      } else if (player.roomCode) {
         reg.roomCode = player.roomCode;
         if (player.roomPassword) reg.roomPassword = player.roomPassword;
       }
@@ -215,6 +241,14 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       break;
     case 'room_closed':
       onRoomLeft(msg.reason);
+      break;
+    case 'complete_ack':
+      // 帳號模式：成績入庫確認 → 佇列移除該筆 + 本地標記進度（net/progressQueue.ts）
+      handleCompleteAck(msg.clientEventId);
+      break;
+    case 'progress_sync':
+      // 帳號模式進房後下行：歷史進度（關卡選單勾勾、跨裝置同步）
+      handleProgressSync(msg.progress);
       break;
     case 'load_level': {
       if (levelState.levels.length === 0) {

@@ -1,22 +1,44 @@
 """rest.py — REST 端點，對齊 packages/shared/src/rest.ts。
 
-- POST /auth/teacher：教師登入（密碼 → HMAC ticket），含 Origin 檢查與登入限流
+- 老師帳號（需 DATABASE_URL，否則 503）：
+  POST /auth/teacher/register / login → 發 DB session token（回應欄位仍叫 ticket）
+  GET  /auth/teacher/me、POST /auth/teacher/logout、POST /auth/teacher/password（Bearer）
+- POST /auth/teacher：舊 PIN 登入（密碼 → HMAC ticket），只在無資料庫模式有效
 - GET  /api/levels：三章關卡清單（老師後台下拉選單 / 廣播用），啟動時載入一次快取
 - GET  /api/info：教室現場資訊（LAN IP / port / 人數上限 / 版本）
+- GET  /api/health：健檢（伺服器存活 + 資料庫狀態 ok / disabled / error）
 """
 
 import contextlib
 import ipaddress
 import json
 import logging
+import secrets
 import socket
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from .accounts import (
+    CurrentSession,
+    CurrentTeacher,
+    DbSession,
+    hash_password,
+    issue_session,
+    revoke_all_sessions_for,
+    revoke_session,
+    verify_password,
+)
 from .auth import TeacherAuth, origin_allowed
 from .config import Settings
+from .db.audit import record_event
+from .db.models import Organization, Teacher
 
 logger = logging.getLogger("creafly.api.rest")
 
@@ -28,17 +50,62 @@ router = APIRouter()
 # ---------- 回應模型（欄位名對齊 rest.ts，camelCase）----------
 
 
-class TeacherLoginRequest(BaseModel):
-    """POST /auth/teacher 請求。"""
+class TeacherPinLoginRequest(BaseModel):
+    """POST /auth/teacher 請求（舊 PIN 登入，無資料庫模式）。"""
 
     password: str
 
 
-class TeacherLoginResponse(BaseModel):
+class TeacherPinLoginResponse(BaseModel):
     """POST /auth/teacher 回應（401 時無 body）。"""
 
     ticket: str
     expiresIn: int  # noqa: N815 — 線上格式沿用 camelCase
+
+
+class TeacherMe(BaseModel):
+    """老師身分（rest.ts TeacherMe）。"""
+
+    id: int
+    email: str
+    name: str
+    role: Literal["teacher", "org_admin"]
+    orgId: int  # noqa: N815
+    orgName: str  # noqa: N815
+
+
+class TeacherRegisterRequest(BaseModel):
+    """POST /auth/teacher/register 請求；密碼長度下限由 Settings.password_min_length 檢查。"""
+
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(max_length=1024)
+    name: str = Field(min_length=1, max_length=100)
+
+
+class TeacherLoginRequest(BaseModel):
+    """POST /auth/teacher/login 請求。"""
+
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=1024)
+
+
+class TeacherLoginResponse(BaseModel):
+    """註冊 / 登入共同回應：session token（欄位名沿用 ticket）+ 有效秒數 + 身分。"""
+
+    ticket: str
+    expiresIn: int  # noqa: N815
+    me: TeacherMe
+
+
+class TeacherLogoutResponse(BaseModel):
+    ok: Literal[True] = True
+
+
+class TeacherChangePasswordRequest(BaseModel):
+    """POST /auth/teacher/password 請求。"""
+
+    currentPassword: str = Field(max_length=1024)  # noqa: N815
+    newPassword: str = Field(max_length=1024)  # noqa: N815
 
 
 class LevelBrief(BaseModel):
@@ -71,6 +138,14 @@ class InfoResponse(BaseModel):
     version: str
     # 免登入模式（測試用）：前端據此跳過登入畫面自動取票
     teacherAuthDisabled: bool = False  # noqa: N815
+
+
+class HealthResponse(BaseModel):
+    """GET /api/health 回應。"""
+
+    status: Literal["ok"]
+    # ok = SELECT 1 成功；disabled = 未設定 DATABASE_URL；error = 設了但連不上
+    db: Literal["ok", "disabled", "error"]
 
 
 # ---------- 關卡載入（啟動時一次，關卡是靜態資料、改檔重啟即可）----------
@@ -133,27 +208,265 @@ def lan_addresses() -> list[str]:
     return sorted(result)
 
 
-# ---------- 端點 ----------
+# ---------- 老師帳號（DB session）----------
+
+# 免登入模式（TEACHER_AUTH_DISABLED）有 DB 時自動建立的預設老師
+DEV_TEACHER_EMAIL = "dev@local"
+DEV_TEACHER_NAME = "測試老師"
 
 
-@router.post("/auth/teacher")
-async def teacher_login(request: Request, body: TeacherLoginRequest) -> TeacherLoginResponse:
-    """教師登入：Origin 檢查 → 同 IP 限流 → 密碼比對 → 發 ticket。"""
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+def _login_guard(request: Request) -> str:
+    """登入類端點共用前置：Origin 白名單（403）→ 同 IP 限流（429）。回傳 IP 供 log / audit。"""
     settings: Settings = request.app.state.settings
     auth: TeacherAuth = request.app.state.auth
     if not origin_allowed(
         request.headers.get("origin"), request.headers.get("host"), settings.allowed_origins_set
     ):
         raise HTTPException(status_code=403, detail="Origin 不在白名單")
-    ip = request.client.host if request.client else "?"
+    ip = _client_ip(request)
     if not auth.allow_login_attempt(ip):
         logger.warning("[AUTH] 登入嘗試過於頻繁，暫時封鎖（IP：%s）", ip)
         raise HTTPException(status_code=429, detail="登入嘗試過於頻繁，請一分鐘後再試")
+    return ip
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+async def _default_org(session: AsyncSession) -> Organization:
+    """預設單位（slug=default，migration 0001 已植入）；所有自行註冊的老師先掛這裡。"""
+    org = (
+        await session.execute(select(Organization).where(Organization.slug == "default"))
+    ).scalar_one_or_none()
+    if org is None:
+        raise HTTPException(status_code=500, detail="預設單位不存在，請先執行 creafly-migrate")
+    return org
+
+
+async def _teacher_me(session: AsyncSession, teacher: Teacher) -> TeacherMe:
+    org = await session.get(Organization, teacher.org_id)
+    return TeacherMe(
+        id=teacher.id,
+        email=teacher.email,
+        name=teacher.name,
+        role=teacher.role,  # type: ignore[arg-type] — DB CHECK 已限定兩值
+        orgId=teacher.org_id,
+        orgName=org.name if org else "",
+    )
+
+
+async def _issue_login(
+    request: Request, session: AsyncSession, teacher: Teacher
+) -> TeacherLoginResponse:
+    """發 session + 組回應（註冊 / 登入共用）。不 commit。"""
+    settings: Settings = request.app.state.settings
+    token = await issue_session(
+        session,
+        principal_type="teacher",
+        principal_id=teacher.id,
+        ttl=settings.session_ttl_sec,
+        user_agent=request.headers.get("user-agent"),
+    )
+    return TeacherLoginResponse(
+        ticket=token, expiresIn=settings.session_ttl_sec, me=await _teacher_me(session, teacher)
+    )
+
+
+async def _find_teacher_by_email(session: AsyncSession, email: str) -> Teacher | None:
+    return (
+        await session.execute(select(Teacher).where(func.lower(Teacher.email) == email))
+    ).scalar_one_or_none()
+
+
+@router.post("/auth/teacher/register", status_code=201)
+async def teacher_register(
+    request: Request, body: TeacherRegisterRequest, session: DbSession
+) -> TeacherLoginResponse:
+    """老師自行註冊（掛預設單位）→ 註冊即登入、發 session。重複 email 409。"""
+    settings: Settings = request.app.state.settings
+    ip = _login_guard(request)
+    email = _normalize_email(body.email)
+    if "@" not in email:
+        raise HTTPException(status_code=422, detail="email 格式不正確")
+    if len(body.password) < settings.password_min_length:
+        raise HTTPException(
+            status_code=422, detail=f"密碼至少 {settings.password_min_length} 個字元"
+        )
+    org = await _default_org(session)
+    teacher = Teacher(
+        org_id=org.id,
+        email=email,
+        password_hash=hash_password(body.password),
+        name=body.name.strip(),
+    )
+    session.add(teacher)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # LOWER(email) 唯一索引撞到 → 已有人用這個 email
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="這個 email 已經註冊過") from None
+    teacher.last_login_at = datetime.now(UTC)
+    result = await _issue_login(request, session, teacher)
+    await record_event(
+        session,
+        event_type="teacher.register",
+        actor_type="teacher",
+        actor_id=teacher.id,
+        org_id=teacher.org_id,
+        payload={"ip": ip},
+    )
+    await session.commit()
+    logger.info("[AUTH] 老師註冊成功：id=%s（IP：%s）", teacher.id, ip)
+    return result
+
+
+async def _dev_teacher(session: AsyncSession) -> Teacher:
+    """免登入模式的預設老師（dev@local）：沒有就自動建（密碼隨機、不可用帳密登入）。"""
+    teacher = await _find_teacher_by_email(session, DEV_TEACHER_EMAIL)
+    if teacher is None:
+        org = await _default_org(session)
+        teacher = Teacher(
+            org_id=org.id,
+            email=DEV_TEACHER_EMAIL,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            name=DEV_TEACHER_NAME,
+        )
+        session.add(teacher)
+        await session.flush()
+    return teacher
+
+
+@router.post("/auth/teacher/login")
+async def teacher_account_login(
+    request: Request, body: TeacherLoginRequest, session: DbSession
+) -> TeacherLoginResponse:
+    """老師登入：Origin → 限流 → 帳密比對 → 發 session。
+
+    失敗一律 401、不區分「帳號不存在」與「密碼錯誤」（防枚舉）；audit teacher.login_failed。
+    TEACHER_AUTH_DISABLED=1：任意帳密皆登入預設老師 dev@local（測試期免註冊；正式拿掉旗標）。
+    """
+    settings: Settings = request.app.state.settings
+    ip = _login_guard(request)
+    email = _normalize_email(body.email)
+    if settings.teacher_auth_disabled:
+        teacher = await _dev_teacher(session)
+    else:
+        teacher = await _find_teacher_by_email(session, email)
+        ok = (
+            teacher is not None
+            and teacher.status == "active"
+            and verify_password(teacher.password_hash, body.password)
+        )
+        if not ok:
+            await record_event(
+                session,
+                event_type="teacher.login_failed",
+                actor_type="teacher",
+                actor_id=teacher.id if teacher else None,
+                org_id=teacher.org_id if teacher else None,
+                payload={"ip": ip, "email": email},
+            )
+            await session.commit()
+            logger.info("[AUTH] 老師登入失敗（IP：%s）", ip)
+            raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
+        assert teacher is not None
+    teacher.last_login_at = datetime.now(UTC)
+    result = await _issue_login(request, session, teacher)
+    await record_event(
+        session,
+        event_type="teacher.login",
+        actor_type="teacher",
+        actor_id=teacher.id,
+        org_id=teacher.org_id,
+        payload={"ip": ip, "dev_mode": settings.teacher_auth_disabled},
+    )
+    await session.commit()
+    logger.info("[AUTH] 老師登入成功：id=%s（IP：%s）", teacher.id, ip)
+    return result
+
+
+@router.get("/auth/teacher/me")
+async def teacher_me(teacher: CurrentTeacher, session: DbSession) -> TeacherMe:
+    """開頁驗 token + 取身分；get_current_session 已順便滑動延長。"""
+    return await _teacher_me(session, teacher)
+
+
+@router.post("/auth/teacher/logout")
+async def teacher_logout(
+    request: Request, teacher: CurrentTeacher, current: CurrentSession, session: DbSession
+) -> TeacherLogoutResponse:
+    """撤銷目前 session。"""
+    await revoke_session(session, current)
+    await record_event(
+        session,
+        event_type="teacher.logout",
+        actor_type="teacher",
+        actor_id=teacher.id,
+        org_id=teacher.org_id,
+        payload={"ip": _client_ip(request), "session_id": current.id},
+    )
+    await session.commit()
+    return TeacherLogoutResponse()
+
+
+@router.post("/auth/teacher/password")
+async def teacher_change_password(
+    request: Request,
+    body: TeacherChangePasswordRequest,
+    teacher: CurrentTeacher,
+    current: CurrentSession,
+    session: DbSession,
+) -> TeacherLogoutResponse:
+    """換密碼：驗舊密碼 → 換新 → 撤銷該老師其他所有 session（當前保留，不用重登）。"""
+    settings: Settings = request.app.state.settings
+    if not verify_password(teacher.password_hash, body.currentPassword):
+        raise HTTPException(status_code=401, detail="目前密碼錯誤")
+    if len(body.newPassword) < settings.password_min_length:
+        raise HTTPException(
+            status_code=422, detail=f"新密碼至少 {settings.password_min_length} 個字元"
+        )
+    teacher.password_hash = hash_password(body.newPassword)
+    revoked = await revoke_all_sessions_for(session, "teacher", teacher.id, except_id=current.id)
+    await record_event(
+        session,
+        event_type="teacher.password_changed",
+        actor_type="teacher",
+        actor_id=teacher.id,
+        org_id=teacher.org_id,
+        payload={"ip": _client_ip(request), "revoked_sessions": revoked},
+    )
+    await session.commit()
+    logger.info("[AUTH] 老師換密碼：id=%s，撤銷其他 session %d 個", teacher.id, revoked)
+    return TeacherLogoutResponse()
+
+
+# ---------- 舊 PIN 登入（無資料庫模式）----------
+
+
+@router.post("/auth/teacher")
+async def teacher_login(request: Request, body: TeacherPinLoginRequest) -> TeacherPinLoginResponse:
+    """舊教師登入：Origin 檢查 → 同 IP 限流 → PIN 比對 → 發 HMAC ticket。
+
+    只在無 DATABASE_URL 時有效（離線 / 測試部署）；有資料庫時回 410，請改走 /auth/teacher/login。
+    """
+    if request.app.state.db_sessionmaker is not None:
+        raise HTTPException(status_code=410, detail="請改用 /auth/teacher/login 帳號登入")
+    auth: TeacherAuth = request.app.state.auth
+    ip = _login_guard(request)
     if not auth.check_password(body.password):
         logger.info("[AUTH] 教師登入失敗：密碼錯誤（IP：%s）", ip)
         raise HTTPException(status_code=401, detail="密碼錯誤")
     logger.info("[AUTH] 教師登入成功（IP：%s）", ip)
-    return TeacherLoginResponse(ticket=auth.issue_ticket(), expiresIn=auth.ttl)
+    return TeacherPinLoginResponse(ticket=auth.issue_ticket(), expiresIn=auth.ttl)
+
+
+# ---------- 其他端點 ----------
 
 
 @router.get("/api/levels")
@@ -174,3 +487,18 @@ async def get_info(request: Request) -> InfoResponse:
         version=API_VERSION,
         teacherAuthDisabled=settings.teacher_auth_disabled,
     )
+
+
+@router.get("/api/health")
+async def get_health(request: Request) -> HealthResponse:
+    """健檢：永遠 200（無資料庫也能上課）；db 欄位反映資料庫狀態。"""
+    engine = request.app.state.db_engine
+    if engine is None:
+        return HealthResponse(status="ok", db="disabled")
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception:  # noqa: BLE001 — 健檢只回報狀態，任何連線錯誤都算 error
+        logger.warning("[REST] /api/health 資料庫健檢失敗", exc_info=True)
+        return HealthResponse(status="ok", db="error")
+    return HealthResponse(status="ok", db="ok")

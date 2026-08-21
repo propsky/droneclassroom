@@ -11,6 +11,8 @@ export interface RegisterMsg {
   roomCode?: string;
   /** 房間密碼（該房有設時必填） */
   roomPassword?: string;
+  /** 學生帳號 token（帳號模式）：伺服器以此解析身分，name/emoji 以 DB 為準、自動進所屬班級的房 */
+  studentToken?: string;
 }
 export interface ProgressMsg {
   type: 'progress';
@@ -20,6 +22,12 @@ export interface CompleteLevelMsg {
   type: 'complete_level';
   levelId: string;
   timeMs: number;
+  /** 冪等鍵（uuid）：帳號模式一律帶；離線補傳/重送靠它去重 */
+  clientEventId?: string;
+  /** client 端完成時間（ms epoch）：離線補傳時保留真實完成時刻；稽核雙時間戳用 */
+  clientTs?: number;
+  /** 離線補傳標記：true = 完成當下不在線（伺服器無法對時驗證，稽核留痕不硬標可疑） */
+  offline?: boolean;
 }
 export interface ArenaJoinMsg { type: 'arena_join' }
 export interface ArenaLeaveMsg { type: 'arena_leave' }
@@ -104,7 +112,29 @@ export interface RoomInfo {
   arenaStatus: string;
   soccerStatus: string;
   createdAt: number;
+  /** 持久化班級（teams 表）id；訪客預設房與無 DB 模式為 null */
+  teamId?: number | null;
 }
+
+/**
+ * 老師的班級（teams 表，持久化）：code 固定、重啟不消失。
+ * 「開房」= 把班級載入成記憶體 Room；`open` 表示目前是否開著（有對應 RoomInfo）。
+ */
+export interface TeamInfo {
+  id: number;
+  code: string;
+  name: string;
+  hasPassword: boolean;
+  maxStudents: number;
+  locked: boolean;
+  createdAt: number;
+  open: boolean;
+}
+
+/** 老師開某個班級的房（載入成 Room）；無 DB 模式不支援（伺服器忽略） */
+export interface RoomOpenTeamMsg { type: 'room_open_team'; teamId: number }
+/** 封存班級（archived_at；列表不再顯示、紀錄保留）；若開著先關房 */
+export interface RoomArchiveTeamMsg { type: 'room_archive_team'; teamId: number }
 
 export interface RoomCreateMsg { type: 'room_create'; settings?: RoomSettings }
 export interface RoomCloseMsg { type: 'room_close'; roomCode: string }
@@ -123,7 +153,8 @@ export type TeacherToServer =
   | (ArenaStartMsg & RoomScoped) | (ArenaStateReqMsg & RoomScoped) | (ArenaStopMsg & RoomScoped)
   | (SoccerStartMsg & RoomScoped) | (SoccerStateReqMsg & RoomScoped) | (SoccerStopMsg & RoomScoped)
   | (SoccerSetStrikerMsg & RoomScoped) | (SoccerSetTeamMsg & RoomScoped) | (SoccerResetMsg & RoomScoped)
-  | RoomCreateMsg | RoomCloseMsg | RoomUpdateMsg | RoomKickMsg | RoomSelectMsg | RoomListReqMsg;
+  | RoomCreateMsg | RoomCloseMsg | RoomUpdateMsg | RoomKickMsg | RoomSelectMsg | RoomListReqMsg
+  | RoomOpenTeamMsg | RoomArchiveTeamMsg;
 
 // ---------- Server → Client ----------
 
@@ -139,6 +170,8 @@ export interface StudentInfo {
   time?: number | null;
   /** 防作弊標記：成績與伺服器觀察到的經過時間差距離譜（老師端顯示 ⚠️，不阻擋） */
   suspect?: boolean;
+  /** 已註冊學生（帳號模式進場）：students 表 id；訪客為 null/缺省 */
+  studentId?: number | null;
 }
 
 export interface WelcomeMsg { type: 'welcome'; id: string }
@@ -151,8 +184,21 @@ export interface RoomRejectedMsg {
 }
 /** 房間被老師關閉 / 被踢：學生端回到進房畫面 */
 export interface RoomClosedMsg { type: 'room_closed'; reason: 'closed' | 'kicked' }
+/** 帳號模式：complete_level 的入庫確認（client 收到即從離線佇列移除該筆） */
+export interface CompleteAckMsg { type: 'complete_ack'; clientEventId: string }
+/** 帳號模式進房後下行：歷史進度（關卡選單標記已完成、跨裝置成績同步） */
+export interface ProgressSyncMsg {
+  type: 'progress_sync';
+  progress: Record<string, { bestTimeMs: number | null; attempts: number }>;
+}
 /** 老師端：房間列表（建立/關閉/設定變更/人數變動時推送） */
-export interface RoomListMsg { type: 'room_list'; rooms: RoomInfo[]; selected: string | null }
+export interface RoomListMsg {
+  type: 'room_list';
+  rooms: RoomInfo[];
+  selected: string | null;
+  /** 老師的班級清單（持久化；含未開房的）。無 DB 模式為空陣列 */
+  teams?: TeamInfo[];
+}
 export interface StudentListMsg { type: 'student_list'; students: StudentInfo[] }
 export interface StudentUpdateMsg { type: 'student_update'; student: StudentInfo }
 
@@ -307,6 +353,7 @@ export type SoccerServerMsg =
 export type ServerToClient =
   | WelcomeMsg | StudentListMsg | StudentUpdateMsg
   | RoomJoinedMsg | RoomRejectedMsg | RoomClosedMsg | RoomListMsg
+  | CompleteAckMsg | ProgressSyncMsg
   | TeacherBroadcastPayload
   | ArenaStateMsg | ArenaCountdownMsg | ArenaGoMsg | ArenaPlayersMsg
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg

@@ -17,6 +17,7 @@ import type {
   StudentInfo,
   TeacherBroadcastPayload,
   TeacherToServer,
+  TeamInfo,
 } from '@creafly/shared';
 import { WS_CLOSE_UNAUTHORIZED } from '@creafly/shared';
 
@@ -37,8 +38,9 @@ export interface TeacherWsHandlers {
   onSoccer(msg: TeacherSoccerMsg): void;
   /** 關卡鎖定狀態（連上時伺服器補送 + 廣播後回送 → 開關 UI 以伺服器為準） */
   onLock(locked: boolean): void;
-  /** 房間列表 + 目前選定房間（建立/關閉/設定/人數變動/切房時伺服器推送） */
-  onRooms(rooms: RoomInfo[], selected: string | null): void;
+  /** 房間列表 + 目前選定房間（建立/關閉/設定/人數變動/切房時伺服器推送）；
+   *  teams = 老師的持久化班級清單（含未開房的）；舊伺服器 / 無 DB 缺省 → undefined */
+  onRooms(rooms: RoomInfo[], selected: string | null, teams?: TeamInfo[]): void;
   /** ticket 無效或已過期 → 上層清 sessionStorage 回登入畫面 */
   onUnauthorized(): void;
 }
@@ -206,7 +208,7 @@ export class TeacherWs {
         break;
       case 'room_list':
         this.selectedRoom = msg.selected;
-        this.handlers.onRooms(msg.rooms, msg.selected);
+        this.handlers.onRooms(msg.rooms, msg.selected, msg.teams);
         break;
       default:
         break; // 其餘（學生端專用的 arena_go / soccer_countdown …）老師端不需處理

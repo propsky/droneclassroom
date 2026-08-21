@@ -32,6 +32,9 @@ class RegisterMsg(_StrictModel):
 
     roomCode 缺省 = 連線 URL 的 ?room=，再缺省 = 預設房（向後相容既有 URL / 流程）；
     roomPassword 該房有設密碼時必填。
+
+    studentToken（帳號模式）：伺服器以此解析學生身分，name / emoji 以 DB 為準、
+    自動進所屬班級的房（roomCode 忽略）；token 無效退回訪客路徑照舊處理（不斷線）。
     """
 
     type: Literal["register"]
@@ -39,6 +42,7 @@ class RegisterMsg(_StrictModel):
     emoji: str
     roomCode: str | None = None
     roomPassword: str | None = None
+    studentToken: str | None = None
 
 
 class ProgressMsg(_StrictModel):
@@ -54,6 +58,12 @@ class CompleteLevelMsg(_StrictModel):
     type: Literal["complete_level"]
     levelId: str
     timeMs: FiniteFloat
+    # 冪等鍵（uuid）：帳號模式一律帶；離線補傳 / 重送靠它去重
+    clientEventId: str | None = None
+    # client 端完成時間（ms epoch）：離線補傳時保留真實完成時刻；稽核雙時間戳用
+    clientTs: FiniteFloat | None = None
+    # 離線補傳標記：true = 完成當下不在線（伺服器無法對時驗證，稽核留痕不硬標可疑）
+    offline: bool = False
 
 
 # ---------- 學生 → 伺服器：賽局（arena 大亂鬥 / soccer 足球）----------
@@ -286,7 +296,8 @@ class SoccerResetMsg(_RoomScopedModel):
 
 
 # ---------- 老師 → 伺服器：房間（Room）管理 ----------
-# 一位老師一條 WS 管多間房：開房 / 關房 / 改設定 / 踢人 / 切換作用房 / 要列表。
+# 一位老師一條 WS 管多間房：開房 / 關房 / 改設定 / 踢人 / 切換作用房 / 要列表；
+# 有資料庫時另有班級（teams 表）操作：開班級的房 / 封存班級。
 
 
 class RoomSettingsIn(_StrictModel):
@@ -344,6 +355,20 @@ class RoomListReqMsg(_StrictModel):
     type: Literal["room_list_req"]
 
 
+class RoomOpenTeamMsg(_StrictModel):
+    """開某個班級（teams 表）的房：載入成 Room 並切過去；已開著只切換。無 DB 模式忽略。"""
+
+    type: Literal["room_open_team"]
+    teamId: int
+
+
+class RoomArchiveTeamMsg(_StrictModel):
+    """封存班級（archived_at；列表不再顯示、紀錄保留）；開著的先關房。無 DB 模式忽略。"""
+
+    type: Literal["room_archive_team"]
+    teamId: int
+
+
 TeacherMessage = Annotated[
     TeacherBroadcastMsg
     | ArenaStartMsg
@@ -360,7 +385,9 @@ TeacherMessage = Annotated[
     | RoomUpdateMsg
     | RoomKickMsg
     | RoomSelectMsg
-    | RoomListReqMsg,
+    | RoomListReqMsg
+    | RoomOpenTeamMsg
+    | RoomArchiveTeamMsg,
     Field(discriminator="type"),
 ]
 TEACHER_MESSAGE_ADAPTER: TypeAdapter[
@@ -380,6 +407,8 @@ TEACHER_MESSAGE_ADAPTER: TypeAdapter[
     | RoomKickMsg
     | RoomSelectMsg
     | RoomListReqMsg
+    | RoomOpenTeamMsg
+    | RoomArchiveTeamMsg
 ] = TypeAdapter(TeacherMessage)
 
 # ---------- 伺服器 → 客戶端 ----------
@@ -395,6 +424,8 @@ class StudentInfo(BaseModel):
     level: str | None
     time: float | None
     suspect: bool = False  # 防作弊標記（標記不阻擋，老師後台顯示用）
+    # 已註冊學生（帳號模式進場）：students 表 id；訪客為 None
+    studentId: int | None = None
 
 
 class StudentBrief(BaseModel):
@@ -406,6 +437,7 @@ class StudentBrief(BaseModel):
     level: str | None
     time: float | None
     suspect: bool = False
+    studentId: int | None = None
 
 
 class WelcomeMsg(BaseModel):
@@ -444,6 +476,21 @@ class RoomInfo(BaseModel):
     arenaStatus: str  # 房內賽局狀態摘要（idle / countdown / running / …）
     soccerStatus: str
     createdAt: float  # epoch 毫秒（與 Date.now() 同制）
+    # 持久化班級（teams 表）id；預設房與無 DB 模式的記憶體房為 None
+    teamId: int | None = None
+
+
+class TeamInfo(BaseModel):
+    """老師的班級（teams 表，持久化）：code 固定、重啟不消失；open = 目前是否載入成 Room。"""
+
+    id: int
+    code: str
+    name: str
+    hasPassword: bool
+    maxStudents: int
+    locked: bool
+    createdAt: float  # epoch 毫秒
+    open: bool
 
 
 class RoomJoinedMsg(BaseModel):
@@ -470,9 +517,32 @@ class RoomClosedMsg(BaseModel):
     reason: Literal["closed", "kicked"]
 
 
+class CompleteAckMsg(BaseModel):
+    """帳號模式：complete_level 的入庫確認（client 收到即從離線佇列移除該筆）。"""
+
+    type: Literal["complete_ack"] = "complete_ack"
+    clientEventId: str
+
+
+class ProgressEntry(BaseModel):
+    """progress_sync 的一關：最佳成績 + 嘗試次數（progress 表一列）。"""
+
+    bestTimeMs: float | None
+    attempts: int
+
+
+class ProgressSyncMsg(BaseModel):
+    """帳號模式進房後下行：歷史進度（關卡選單標記已完成、跨裝置成績同步）。"""
+
+    type: Literal["progress_sync"] = "progress_sync"
+    progress: dict[str, ProgressEntry]
+
+
 class RoomListMsg(BaseModel):
     """老師端房間列表（連上 / 建立 / 關閉 / 設定變更 / 人數與賽局狀態變動時推送）。"""
 
     type: Literal["room_list"] = "room_list"
     rooms: list[RoomInfo]
     selected: str | None
+    # 該老師的班級清單（含未開房的）；無 DB 模式為空陣列
+    teams: list[TeamInfo] = []

@@ -9,9 +9,11 @@ WORKDIR /app
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# 程式碼、內建靜態頁（/lesson、teacher fallback）、關卡資料
+# 程式碼、內建靜態頁（/lesson、teacher fallback）、關卡資料、資料庫 migration
 COPY apps/api/app ./app
 COPY apps/api/static ./static
+COPY apps/api/alembic.ini ./alembic.ini
+COPY apps/api/alembic ./alembic
 COPY apps/simulator/public/levels ./levels
 RUN uv sync --frozen --no-dev
 
@@ -20,4 +22,6 @@ ENV PORT=3000
 ENV LEVELS_DIR=/app/levels
 EXPOSE 3000
 
+# 資料庫 migration 不在啟動時自動跑：部署時另外執行
+#   docker run --rm --env-file creafly.env <image> uv run creafly-migrate
 CMD ["uv", "run", "creafly-api"]

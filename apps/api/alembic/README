@@ -1,0 +1,2 @@
+CREAFLY 後端資料庫 migration（Alembic，async / asyncpg）。
+規格：docs/db-schema.md；操作方式見該文件 §5（uv run creafly-migrate / alembic revision --autogenerate）。

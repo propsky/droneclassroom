@@ -330,7 +330,9 @@ body:not(.gamepad-connected) .header-btn-calib {
   font-size: var(--fs-md);
   font-weight: 700;
 }
-#player-dropdown #player-rename {
+#player-dropdown #player-rename,
+#player-dropdown #player-guide,
+#player-dropdown #player-logout {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
@@ -342,7 +344,9 @@ body:not(.gamepad-connected) .header-btn-calib {
   height: 32px;
   font-size: var(--fs-sm);
 }
-#player-dropdown #player-rename:hover {
+#player-dropdown #player-rename:hover,
+#player-dropdown #player-guide:hover,
+#player-dropdown #player-logout:hover {
   background: var(--bg-3);
 }
 
@@ -449,6 +453,15 @@ body:not(.gamepad-connected) .header-btn-calib {
 }
 .level-btn.active .btn-ic,
 .level-btn.active > svg.ic {
+  color: #fff;
+}
+/* 已完成勾勾（帳號模式 progress_sync / complete_ack）：綠色小勾靠右 */
+.level-btn .lvl-check {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--accent);
+}
+.level-btn.active .lvl-check {
   color: #fff;
 }
 
@@ -1313,6 +1326,85 @@ body.joystick-forced #joystick-layer {
     flex: 1 1 auto;
   }
 }
+/* 登入模式切換：底線式 tab（設計系統 §3 — active 2px --brand 底線 + --text-1，不做膠囊漸層） */
+.login-tabs {
+  display: flex;
+  gap: var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--sp-4);
+}
+.login-tab {
+  position: relative;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  font-size: var(--fs-md);
+  padding: 0 var(--sp-1) var(--sp-2);
+  transition: color 0.18s;
+}
+.login-tab::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: transparent;
+}
+.login-tab:hover {
+  color: var(--text-2);
+}
+.login-tab.active {
+  color: var(--text-1);
+  font-weight: 700;
+}
+.login-tab.active::after {
+  background: var(--brand);
+}
+
+/* hidden 屬性優先於元件自身的 display:flex（分頁面板 / 密碼欄展開邏輯靠它） */
+.login-card [hidden],
+#invite-modal [hidden] {
+  display: none !important;
+}
+
+/* 帳號分頁：欄位群（碼登入 / email 登入共用垂直節奏）；邀請 overlay 的欄位也用這組 */
+.acct-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+/* 班級碼 + 學生碼列：沿用 .login-room 的排版但不要分隔線（帳號分頁沒有上方名字區） */
+.login-room-acct {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+/* 學生碼 2 碼：窄欄 */
+.login-field-code-sm {
+  flex: 0 0 96px;
+}
+/* 帳號分頁動作列：左小連結（切 email 登入）、右主按鈕 */
+.login-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.login-link {
+  background: transparent;
+  border: none;
+  padding: var(--sp-1) 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.18s;
+}
+.login-link:hover {
+  color: var(--text-1);
+}
+
 .emoji-btn {
   background: var(--bg-2);
   border: 2px solid transparent;

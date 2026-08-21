@@ -45,3 +45,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 apps/simulator/scripts/.cache/
+
+# 機密：環境變數與 MCP 設定（含資料庫密碼）— 絕不進版控
+.env
+.env.*
+!.env.example
+.mcp.json

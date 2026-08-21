@@ -67,6 +67,10 @@ export interface CoreEventMap {
   'room-rejected': { reason: RoomRejectedMsg['reason'] };
   /** 被老師關房 / 踢出（room_closed 或 close code 4001）：退出多人模式、回登入 modal、不自動重連 */
   'room-left': { reason: 'closed' | 'kicked' };
+  /** 登出學生帳號（ui/overlays.ts 頭像下拉）：net/ws.ts 收到後斷線、不自動重連（回訪客要重送登入表單） */
+  'student-logout': Record<string, never>;
+  /** 學生歷史進度更新（progress_sync 下發或 complete_ack 本地併入）：UI 重畫關卡選單勾勾（資料在 net/progressQueue.ts 的 progressState） */
+  'progress-updated': Record<string, never>;
   /** 伺服器 arena_* 訊息（ws 只分派、不處理） */
   'arena-message': { msg: ArenaServerMsg };
   /** 進入大亂鬥（render 建場地、UI 切 HUD） */
