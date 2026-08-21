@@ -312,11 +312,11 @@ def test_ball模式_進球烏龍與重置(
             _join(s2, "soccer")
             _start_ball_game(client, t, clock, s1, s2)
 
-            # 藍隊員最後觸球、球飛進 +z 門（藍隊攻門）→ 藍得分、非烏龍
+            # 藍隊員最後觸球、球由場內穿越 +z 門面（goal_z=16，藍隊攻門）→ 藍得分、非烏龍
             ball = soccer.ball
             ball.last_touch = soccer.players["s1"]
-            ball.x, ball.y, ball.z, ball.vz = 0.0, 4.5, 19.5, 10.0
-            tick(client)  # z: 19.5 + 0.8 = 20.3 ≥ 20 且在門環內
+            ball.x, ball.y, ball.z, ball.vz = 0.0, 4.5, 15.5, 10.0
+            tick(client)  # z: 15.5 + 0.8 = 16.3，跨越門面 16 且在門環內
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["own"] is False
             assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 0}
@@ -329,7 +329,7 @@ def test_ball模式_進球烏龍與重置(
 
             # 藍隊員把球推進自家（-z）門 → 烏龍球：得分歸紅隊、own=true、by=觸球者
             b.last_touch = soccer.players["s1"]
-            b.x, b.y, b.z, b.vz = 0.0, 4.5, -19.5, -10.0
+            b.x, b.y, b.z, b.vz = 0.0, 4.5, -15.5, -10.0
             tick(client)
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "red" and ok["own"] is True

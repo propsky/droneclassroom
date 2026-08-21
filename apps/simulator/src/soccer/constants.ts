@@ -15,13 +15,13 @@ export const SOCCER_FIELD = {
   halfX: 10,
   /** 半長（z 邊界 ±20） */
   halfZ: 20,
-  /** 天花板高度 */
-  top: 12,
+  /** 天花板高度（與伺服器預設 soccer_ceil 一致，單人／多人垂直空間同手感） */
+  top: 15,
   /** 球門面 z（兩端 ±16 = halfZ - GOAL_INSET；門後留退場空間） */
   goalZ: 16,
   /** 球門中心高度 */
   goalY: 4.5,
-  /** 球門環半徑（穿門判定：|x|<goalR 且 |y-goalY|<goalR） */
+  /** 球門環半徑（穿門判定：與門環同形的圓形 hypot(x, y-goalY) < goalR） */
   goalR: 3.0,
   /** 球門環管徑（視覺 + 門框碰撞的實心部分；隨 goalR 放大） */
   goalTube: 0.27,
@@ -50,8 +50,8 @@ export function soccerTeamColorHex(team: SoccerTeam | null | undefined): number 
 }
 
 // ---- 機對機碰撞（本版新增，legacy 沒有 — Havok 進場後的實體對抗手感）----
-/** 縮放後機身的碰撞半徑（≈ 機身 2.4m × 0.65 / 2 取整；兩機最小間距 = 2×此值） */
-export const SOCCER_CONTACT_R = 0.5;
+/** 縮放後機身的碰撞半徑（對齊分身視覺盒半寬 0.7；兩機最小間距 = 2×此值，推開後不再視覺穿模） */
+export const SOCCER_CONTACT_R = 0.7;
 /** 碰撞推出後的速度衰減（撞人 / 被卡位會明顯減速，「擋」得有實感） */
 export const SOCCER_CONTACT_DAMP = 0.55;
 

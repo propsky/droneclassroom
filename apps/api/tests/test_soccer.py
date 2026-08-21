@@ -97,13 +97,15 @@ def test_striker模式進球驗證與半場重置與勝負(
             go = _countdown_to_go(client, clock, s1)
             assert go["mode"] == "striker"
             assert go["ball"] is None  # striker 模式沒有共用球
-            # 場地資料驅動下發（新常數：halfX=10、halfZ=20、goalY=4.5、goalR=3、ceil=15）
+            # 場地資料驅動下發（新常數：halfX=10、halfZ=20、goalY=4.5、goalR=3、ceil=15；
+            # goalZ = halfZ - 內縮 4 = 門面位置，與 client 門環視覺一致）
             assert go["field"] == {
                 "halfX": 10.0,
                 "halfZ": 20.0,
                 "goalY": 4.5,
                 "goalR": 3.0,
                 "ceil": 15.0,
+                "goalZ": 16.0,
             }
             # 出生點：前鋒居中 x≈0、z = 站位端（±halfZ）× 0.85
             spawns = {sp["id"]: sp for sp in go["spawns"]}
@@ -112,8 +114,22 @@ def test_striker模式進球驗證與半場重置與勝負(
             assert spawns["s3"]["x"] == -5.0  # 藍防守沿 x 排開（halfX×0.5）
             assert go["endTime"] == int(clock.ms + 40_000)
 
-            # 藍隊前鋒飛到對方門環（attackGoalZ=+20, goalY=4.5）→ 進球
+            # 迴歸驗證（門面錯位 bug）：在邊界牆 z=20（距門面 4 > 容差 1）宣告 → 不算
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 20, "yaw": 0})
+            s1.send_json({"type": "soccer_goal"})
+            settle(client)
+            assert soccer.scores["blue"] == 0
+            # 迴歸驗證（方形判定漏洞）：門面上但門環外的「角落」（hypot≈3.4 > goalR=3）→ 不算
+            clock.advance(3000)
+            s1.send_json({"type": "soccer_pos", "x": 2.4, "y": 6.9, "z": 16, "yaw": 0})
+            s1.send_json({"type": "soccer_goal"})
+            settle(client)
+            assert soccer.scores["blue"] == 0
+
+            # 藍隊前鋒飛到對方門環（attackGoalZ=+16 門面、goalY=4.5）→ 進球
+            # （門面在端牆內縮 4，不是 z=20 邊界牆 — 之前判定跑到牆上是回歸 bug）
+            clock.advance(3000)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 16, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["scores"] == {"blue": 1, "red": 0}
@@ -128,7 +144,7 @@ def test_striker模式進球驗證與半場重置與勝負(
 
             # 非前鋒在門環內宣告 → 不算
             clock.advance(3000)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 20, "yaw": 0})
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 16, "yaw": 0})
             s3.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 1
@@ -139,7 +155,7 @@ def test_striker模式進球驗證與半場重置與勝負(
             assert soccer.scores["red"] == 0
 
             # 半場重置：藍前鋒回自家半場（z<0）→ tick 恢復 armed
-            clock.advance(3000)  # 拉開回報間隔，位移 ~25 單位不觸發超速（≈8.4 單位/秒）
+            clock.advance(3000)  # 拉開回報間隔，位移 ~21 單位不觸發超速（≈7 單位/秒）
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 2, "z": -5, "yaw": 0})
             tick(client)
             assert soccer.armed["blue"] is True

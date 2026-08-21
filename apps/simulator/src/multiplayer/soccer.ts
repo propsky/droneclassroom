@@ -422,7 +422,7 @@ function interpolateBall(): void {
   b.pos.z += (b.target.z - b.pos.z) * INTERP;
   const p = droneState.position;
   const d = Math.hypot(p.x - b.pos.x, p.y - b.pos.y, p.z - b.pos.z);
-  soccerState.ballNear = d < b.r + SOCCER_BALL_R + 0.5; // 球框半徑 + 球半徑 + 一點餘裕
+  soccerState.ballNear = d < b.r + SOCCER_BALL_R + 0.15; // 與伺服器推球門檻對齊（+0.15 網路延遲餘裕）
 }
 
 /** 內插他人分身位置（60Hz 固定 tick × 0.25 = legacy 每幀 @60fps 等價） */
@@ -500,7 +500,7 @@ function detectGoal(): void {
     team === 'blue'
       ? pz < attackZ && z >= attackZ && fwdZ > 0 // 藍：朝 +z 穿過 +z 門
       : pz > attackZ && z <= attackZ && fwdZ < 0; // 紅：朝 -z 穿過 -z 門
-  const inRing = Math.abs(p.x) < F.goalR && Math.abs(p.y - F.goalY) < F.goalR;
+  const inRing = Math.hypot(p.x, p.y - F.goalY) < F.goalR; // 圓形判定與門環同形（伺服器同款）
   const armed = soccerState.armed[team] !== false;
   if (crossing && inRing && armed && performance.now() > soccerState.goalCooldownUntil) {
     soccerState.goalCooldownUntil = performance.now() + GOAL_COOLDOWN_MS;

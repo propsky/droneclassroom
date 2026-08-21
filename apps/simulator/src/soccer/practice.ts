@@ -203,12 +203,12 @@ export function tickSoccerPractice(): void {
   }
   const p = droneState.position;
   const z = p.z;
-  // 穿過遠端門：z 由門前跨到門後，且在門環半徑內（與 server / legacy 同一組條件）
+  // 穿過遠端門：z 由門前跨到門後，且在門環半徑內（圓形判定與門環同形；
+  // 舊方形判定的角落會落在門框實體外緣之外，能從門框旁的空氣中得分）
   const crossedFar =
     practiceState.prevZ > -SOCCER_FIELD.goalZ &&
     z <= -SOCCER_FIELD.goalZ &&
-    Math.abs(p.x) < SOCCER_FIELD.goalR &&
-    Math.abs(p.y - SOCCER_FIELD.goalY) < SOCCER_FIELD.goalR;
+    Math.hypot(p.x, p.y - SOCCER_FIELD.goalY) < SOCCER_FIELD.goalR;
 
   if (d.type === 'pass' && crossedFar) {
     practiceState.count++;

@@ -36,12 +36,14 @@ logger = logging.getLogger("creafly.api.games.soccer")
 SOCCER_DURATION_DEFAULT = 180  # 1 局 3 分鐘（測試可送較短 durationSec）
 SOCCER_TEAM_NAMES = ("blue", "red")
 SOCCER_GOAL_Z_TOL = 1.0  # striker 模式進球驗證：z 與門面的容差（legacy 寫死 1.0）
+# 門面自端牆內縮距離（與 client soccer/constants.ts SOCCER_GOAL_INSET 對齊；門後留退場空間）
+SOCCER_GOAL_INSET = 4.0
 
 # ---------- 推球模式（ball）物理常數 ----------
 # 伺服器 80ms tick 模擬；數值以「單位/秒」為主，每 tick 的量以 BALL_TICK_DT 換算
 
 BALL_RADIUS = 1.2  # 球半徑（大顆好推好看；隨 soccer_ball 下發，client 據此渲染）
-DRONE_RADIUS = 0.65  # 推球接觸判定用的無人機半徑（接觸門檻 = 球半徑 + 此值）
+DRONE_RADIUS = 0.8  # 推球接觸判定用的無人機半徑（與 client SOCCER_BALL_R 球形保護框一致）
 BALL_TICK_DT = 0.08  # 物理積分步長 = 賽局 tick 週期（80ms），與假時鐘無關、每 tick 固定
 BALL_DRAG = 0.985  # 輕阻力：每 tick 速度衰減倍率
 BALL_HOVER_GAIN = 1.5  # 弱重力：向懸浮高度（goalY）回歸的加速度增益（/秒²）
@@ -56,8 +58,10 @@ BALL_MAX_SPEED = 20.0  # 球速上限（重疊時每 tick 連推會疊加，防�
 class SoccerField:
     """場地尺寸（資料驅動）：以 SoccerFieldDef 下發，client 據此渲染。
 
-    half_x / half_z = 場地半寬 / 半長（長軸 z、兩門在 z=±half_z 端牆、中線 z=0）；
+    half_x / half_z = 場地半寬 / 半長（長軸 z、中線 z=0）；
     goal_y = 門環中心高；goal_r = 門環半徑；ceil = 天花板高。
+    兩門在 z=±goal_z（自端牆內縮 SOCCER_GOAL_INSET，與 client 門環視覺同位置，
+    legacy server.js 的 goalZ 同語意）；端牆 z=±half_z 是場地邊界。
     """
 
     half_x: float = 10.0
@@ -65,6 +69,11 @@ class SoccerField:
     goal_y: float = 4.5
     goal_r: float = 3.0
     ceil: float = 15.0
+
+    @property
+    def goal_z(self) -> float:
+        """門面 z（進球判定用；client 門環畫在同一位置）。"""
+        return self.half_z - SOCCER_GOAL_INSET
 
     @classmethod
     def from_settings(cls, cfg: Settings) -> "SoccerField":
@@ -85,6 +94,8 @@ class SoccerField:
             "goalY": self.goal_y,
             "goalR": self.goal_r,
             "ceil": self.ceil,
+            # 門面 z 一併下發（client field.ts 有帶就用，沒帶才自行以 halfZ-4 衍生）
+            "goalZ": self.goal_z,
         }
 
 
@@ -145,17 +156,19 @@ class SoccerGame(BaseGame):
             max_y=self.field.ceil,
         )
         # 每隊站位端 / 攻門 / 守門（z 軸，隨場地換算）：
-        # 藍隊站 -z 端、攻 +z 門；紅隊站 +z 端、攻 -z 門
+        # 藍隊站 -z 端、攻 +z 門；紅隊站 +z 端、攻 -z 門。
+        # 門在 goal_z（端牆內縮、與 client 門環視覺同位置），不是 half_z 端牆 —
+        # 用 half_z 會讓進球判定跑到門環後方 4m 的邊界牆上（重寫時的回歸，legacy 是對的）。
         self._teams: dict[str, dict[str, float]] = {
             "blue": {
                 "stationZ": -self.field.half_z,
-                "attackGoalZ": self.field.half_z,
-                "defendGoalZ": -self.field.half_z,
+                "attackGoalZ": self.field.goal_z,
+                "defendGoalZ": -self.field.goal_z,
             },
             "red": {
                 "stationZ": self.field.half_z,
-                "attackGoalZ": -self.field.half_z,
-                "defendGoalZ": self.field.half_z,
+                "attackGoalZ": -self.field.goal_z,
+                "defendGoalZ": self.field.goal_z,
             },
         }
 
@@ -347,10 +360,10 @@ class SoccerGame(BaseGame):
         ):
             return
         cfg = self._teams[p.team]
+        # 圓形判定與門環同形（舊方形判定的角落 √2×r 會超出門框實體外緣）
         near_goal = (
             abs(p.z - cfg["attackGoalZ"]) < SOCCER_GOAL_Z_TOL
-            and abs(p.x) < self.field.goal_r
-            and abs(p.y - self.field.goal_y) < self.field.goal_r
+            and math.hypot(p.x, p.y - self.field.goal_y) < self.field.goal_r
         )
         if not near_goal:
             return
@@ -545,6 +558,7 @@ class SoccerGame(BaseGame):
             k = BALL_MAX_SPEED / speed
             b.vx, b.vy, b.vz = b.vx * k, b.vy * k, b.vz * k
         # 積分 + 輕阻力 + 弱重力向懸浮高度（goalY）回歸（球漂浮、掉不到地上）
+        z0 = b.z  # 積分前 z：門面穿越判定用（只認「由場內向外」穿越，回穿不算）
         b.x += b.vx * dt
         b.y += b.vy * dt
         b.z += b.vz * dt
@@ -562,15 +576,16 @@ class SoccerGame(BaseGame):
         elif b.y > f.ceil - BALL_RADIUS:
             b.y = f.ceil - BALL_RADIUS
             b.vy = -b.vy * BALL_BOUNCE
-        # 端牆：門環範圍是「洞」讓球飛過；球心過門面（|z| ≥ halfZ）且在門環半徑內 → 進球
-        if abs(b.z) > f.half_z - BALL_RADIUS:
-            in_ring = math.hypot(b.x, b.y - f.goal_y) < f.goal_r
-            if in_ring:
-                if abs(b.z) >= f.half_z:
-                    await self._ball_goal(1 if b.z > 0 else -1)
-            else:
-                b.z = math.copysign(f.half_z - BALL_RADIUS, b.z)
-                b.vz = -b.vz * BALL_BOUNCE
+        # 門面（z=±goal_z，與 client 門環視覺同位置）：球心由場內向外穿越門面
+        # 且在門環半徑內 → 進球（_ball_goal 會把球重置回中場）。
+        # 沒進門的球一律被端牆（z=±half_z）反彈；門面～端牆之間是門後退場空間，
+        # 球在該區域可自由移動、也可穿過門環回到場內（回穿不計分）。
+        crossed_goal = (z0 < f.goal_z <= b.z) or (z0 > -f.goal_z >= b.z)
+        if crossed_goal and math.hypot(b.x, b.y - f.goal_y) < f.goal_r:
+            await self._ball_goal(1 if b.z > 0 else -1)
+        elif abs(b.z) > f.half_z - BALL_RADIUS:
+            b.z = math.copysign(f.half_z - BALL_RADIUS, b.z)
+            b.vz = -b.vz * BALL_BOUNCE
         # 每 tick 廣播球位置（僅 running 期間會走到這裡）
         msg = {"type": "soccer_ball", "ball": self._ball_payload()}
         await self._broadcast(self._active(), msg)
