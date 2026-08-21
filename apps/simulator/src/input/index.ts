@@ -49,6 +49,12 @@ export function tickInputDevices(manualLocked: boolean): void {
 
 /** 彙整本 tick 的手動控制輸入 */
 export function collectControlFrame(): ControlFrame {
+  // Space 按住 = 緊急停止最高優先權：壓制所有裝置的輸入（含 WASD / 虛擬搖桿 / 實體搖桿），
+  // anyInput 恆為 false → 凍結不會被其他按鍵解除；放開 Space 後推桿才恢復飛行。
+  // （凍結本身由 keyboard.ts 的 keydown 邊緣觸發 emergencyStop()）
+  if (keys[' ']) {
+    return { lift: 0, forward: 0, right: 0, yawDelta: 0, wantsTakeoff: false, anyInput: false };
+  }
   // 校正中：不吃搖桿輸入（overlay 蓋住畫面時亂推桿不該讓機子亂飛）
   const gp = calibration.active
     ? { throttle: 0, yaw: 0, pitch: 0, roll: 0 }

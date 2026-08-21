@@ -78,6 +78,8 @@ body.mode-program #app {
   padding: 0 var(--sp-4);
   background: var(--bg-1);
   border-bottom: 1px solid var(--line);
+  /* 內容過寬時不許撐大整條 grid 軌（否則 3D 場景跟著變寬、整頁橫向捲動） */
+  min-width: 0;
 }
 
 .header-left {
@@ -217,7 +219,9 @@ body.mode-program #app {
 .header-btn.active > svg.ic {
   color: var(--brand);
 }
-/* 窄螢幕：工具按鈕收成 icon-only（36×36） */
+/* 窄螢幕：工具按鈕收成 icon-only（36×36）。
+ * 靜態斷點只是無 JS 時的保底；實際降級由 ui/headerOverflow.ts 量測後
+ * 掛 body.header-compact 驅動（同款樣式）— 跨裝置、跨按鈕數量都成立。 */
 @media (max-width: 1180px) {
   .header-btn > span:not(.btn-ic) {
     display: none;
@@ -227,6 +231,50 @@ body.mode-program #app {
     justify-content: center;
     padding: 0;
   }
+}
+body.header-compact .header-btn > span:not(.btn-ic) {
+  display: none;
+}
+body.header-compact .header-btn {
+  width: 36px;
+  justify-content: center;
+  padding: 0;
+}
+
+/* 「更多」下拉（ui/headerOverflow.ts：header 溢出時依序收納低頻按鈕） */
+.header-more {
+  position: relative;
+}
+.header-more-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: var(--z-modal);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-2);
+  min-width: 180px;
+}
+.header-more.open .header-more-panel {
+  display: flex;
+}
+.header-more.open #header-more-btn {
+  background: var(--bg-3);
+}
+/* 收進面板的按鈕永遠顯示文字（蓋過 icon-only 降級），整列左對齊 */
+#header .header-more-panel .header-btn {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0 var(--sp-3);
+}
+#header .header-more-panel .header-btn > span:not(.btn-ic) {
+  display: inline;
 }
 
 /* 模式切換 segmented（手動 ↔ 程式；active 段由 body.mode-* 驅動） */
@@ -380,6 +428,9 @@ body:not(.gamepad-connected) .header-btn-calib {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* 固定最小寬：計時跳動不改變 header 寬度（否則整排按鈕會抖、還會觸發溢出重排） */
+  display: inline-block;
+  min-width: 48px;
 }
 .level-menu-panel {
   display: none;

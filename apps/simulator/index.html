@@ -57,6 +57,11 @@
                 <button id="calib-fab" class="header-btn header-btn-calib" title="搖桿校正精靈（偵測到搖桿才會亮起）"><span class="btn-ic" data-icon="settings"></span><span>校正</span></button>
                 <button id="fullscreen-btn" class="header-btn" title="全螢幕（iPad / 桌機）"><span class="btn-ic" data-icon="expand"></span><span>全螢幕</span></button>
             </div>
+            <!-- 「更多」下拉：header 塞不下時由 ui/headerOverflow.ts 把低頻按鈕收進來（平常隱藏） -->
+            <div id="header-more" class="header-more" style="display:none;">
+                <button id="header-more-btn" class="header-btn" title="更多工具"><span class="btn-ic" data-icon="more-h"></span><span>更多</span></button>
+                <div id="header-more-panel" class="header-more-panel"></div>
+            </div>
             <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 4：帳號頭像（emoji 頭像屬內容層，保留） -->
             <div id="player-hud" style="display:none;">
@@ -208,6 +213,17 @@
         <div class="level-intro-body">計時已凍結，按「繼續」回到飛行。</div>
         <button id="pause-resume" class="modal-btn">▶ 繼續</button>
         <button id="pause-restart" class="modal-btn modal-btn-ghost">↻ 重新本關</button>
+    </div>
+</div>
+
+<!-- 過關結算卡（ui/levelComplete.ts：下一關 / 再玩一次 / 留在本關；老師鎖關時不顯示下一關） -->
+<div id="level-complete" class="modal-overlay">
+    <div class="modal-card">
+        <div class="level-intro-title">🎉 過關！</div>
+        <div class="level-intro-body" id="level-complete-body"></div>
+        <button id="level-complete-next" class="modal-btn">下一關 →</button>
+        <button id="level-complete-replay" class="modal-btn modal-btn-ghost">↻ 再玩一次</button>
+        <button id="level-complete-stay" class="modal-btn modal-btn-ghost">留在本關繼續飛</button>
     </div>
 </div>
 

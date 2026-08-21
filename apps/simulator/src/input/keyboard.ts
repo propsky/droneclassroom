@@ -21,7 +21,8 @@ export function initKeyboard(opts: { toggleView: () => void }): void {
     ) {
       e.preventDefault();
     }
-    // 空白鍵 = 緊急停止（空中觸發；不重複觸發）
+    // 空白鍵 = 緊急停止（空中觸發；不重複觸發）。
+    // 按住期間 input/index.ts 會壓制所有其他輸入 → 急停不會被 WASD 蓋掉
     if (e.key === ' ' && !e.repeat) emergencyStop();
     // C = 切換視角（第三人稱 ⇄ FPV）
     if (k === 'c' && !e.repeat) onToggleView?.();

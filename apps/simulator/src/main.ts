@@ -38,6 +38,8 @@ import { CameraRig } from './render/cameras';
 import { initHud, updateHudFrame } from './ui/hud';
 import { initOnboarding } from './ui/onboarding';
 import { initOverlays, initPlayer, syncViewButton } from './ui/overlays';
+import { initHeaderOverflow } from './ui/headerOverflow';
+import { initLevelComplete } from './ui/levelComplete';
 import { initCalibrationOverlay } from './ui/calibrationOverlay';
 import {
   calibration,
@@ -101,6 +103,8 @@ cameraRig.snapBehindDrone();
 // ---- UI / 輸入 / 音效 / 網路 ----
 initHud();
 initOverlays();
+initHeaderOverflow(); // header 溢出防護（在 initOverlays 之後：圖標已掛載，量測才準）
+initLevelComplete(); // 過關結算卡（下一關 / 再玩一次）
 initAudio();
 initWs();
 initArena(); // 大亂鬥：訊息分派 + 右下進場按鈕（在 initWs 之後掛 bus）
