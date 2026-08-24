@@ -99,6 +99,107 @@ function roundRect(
   ctx.fill();
 }
 
+/**
+ * 分身無人機外型（大亂鬥 / 足球共用工廠）— 簡化版自機輪廓：
+ * 機身 + X 型雙臂（可上色）＋ 4 馬達柱 + 4 旋翼盤（深色）＋ 白色機鼻錐（-Z = 機頭，
+ * 遠距離唯一可靠的朝向線索，務必保留）。
+ * 效能：建構時 MergeMeshes 壓成 2 顆 mesh（機色 1 + MultiMaterial 2 submesh）
+ * ≈ 每台 3 draw call，比舊方塊分身（7 顆 mesh）更省 — 不吃掉 L-03 的 draw call 預算
+ * （docs/perf-arena.md：16 機門檻 < 500）。旋翼不做動畫（分身在 10m 外看不出相位）。
+ */
+export function makeCloneDrone(
+  scene: Scene,
+  id: string,
+  color: Color3,
+  scale: number,
+): { root: TransformNode; bodyMat: StandardMaterial; mats: StandardMaterial[] } {
+  const s = scale;
+  const root = new TransformNode(`cloneDrone-${id}`, scene);
+
+  // 機色材質（呼叫端會改 diffuse/emissive：鬼變紅、足球換隊色）
+  const bodyMat = new StandardMaterial(`cloneBody-${id}`, scene);
+  bodyMat.diffuseColor = color.clone();
+  bodyMat.emissiveColor = color.scale(0.25);
+
+  const whiteMat = new StandardMaterial(`cloneNose-${id}`, scene);
+  whiteMat.emissiveColor = Color3.White();
+  whiteMat.disableLighting = true;
+
+  const darkMat = new StandardMaterial(`cloneChrome-${id}`, scene);
+  darkMat.diffuseColor = hex(0x222831);
+  darkMat.emissiveColor = hex(0x222831).scale(0.15);
+
+  // ---- 機色群：中央機身 + X 型雙臂（各是一根貫穿中心的斜盒）----
+  const hull = MeshBuilder.CreateBox(
+    `cloneHull-${id}`,
+    { width: 0.5 * s, height: 0.2 * s, depth: 0.72 * s },
+    scene,
+  );
+  hull.position.y = 0.04 * s;
+  const armA = MeshBuilder.CreateBox(
+    `cloneArmA-${id}`,
+    { width: 0.1 * s, height: 0.07 * s, depth: 1.56 * s },
+    scene,
+  );
+  armA.rotation.y = Math.PI / 4;
+  const armB = MeshBuilder.CreateBox(
+    `cloneArmB-${id}`,
+    { width: 0.1 * s, height: 0.07 * s, depth: 1.56 * s },
+    scene,
+  );
+  armB.rotation.y = -Math.PI / 4;
+  const bodyParts = [hull, armA, armB];
+  bodyParts.forEach((m) => (m.material = bodyMat));
+
+  // ---- 深色/白色群：4 馬達柱 + 4 旋翼盤 + 白鼻錐 ----
+  const chromeParts: Mesh[] = [];
+  const nose = MeshBuilder.CreateCylinder(
+    `cloneNoseM-${id}`,
+    { height: 0.34 * s, diameterTop: 0, diameterBottom: 0.2 * s, tessellation: 10 },
+    scene,
+  );
+  nose.rotation.x = -Math.PI / 2; // 錐尖朝 -Z（機頭方向）
+  nose.position.z = -0.53 * s;
+  nose.material = whiteMat;
+  chromeParts.push(nose);
+  for (const [mx, mz] of [[0.55, 0.55], [-0.55, 0.55], [0.55, -0.55], [-0.55, -0.55]] as const) {
+    const motor = MeshBuilder.CreateCylinder(
+      `cloneMotorM-${id}`,
+      { diameter: 0.2 * s, height: 0.16 * s, tessellation: 8 },
+      scene,
+    );
+    motor.position.set(mx * s, 0.08 * s, mz * s);
+    motor.material = darkMat;
+    chromeParts.push(motor);
+    const rotor = MeshBuilder.CreateCylinder(
+      `cloneRotorM-${id}`,
+      { diameter: 0.52 * s, height: 0.025 * s, tessellation: 12 },
+      scene,
+    );
+    rotor.position.set(mx * s, 0.17 * s, mz * s);
+    rotor.material = darkMat;
+    chromeParts.push(rotor);
+  }
+
+  // 合併：機色 1 顆、白+深 1 顆（MultiMaterial 2 submesh）；來源 mesh 一併 dispose
+  const bodyMesh = Mesh.MergeMeshes(bodyParts, true, true, undefined, false, false);
+  const chromeMesh = Mesh.MergeMeshes(chromeParts, true, true, undefined, false, true);
+  for (const m of [bodyMesh, chromeMesh]) {
+    if (!m) continue;
+    m.isPickable = false;
+    m.parent = root;
+  }
+
+  // root 遞迴 dispose 時把三個材質一併清掉（MultiMaterial 預設不清 sub-material）
+  root.onDisposeObservable.add(() => {
+    bodyMat.dispose();
+    whiteMat.dispose();
+    darkMat.dispose();
+  });
+
+  return { root, bodyMat, mats: [bodyMat, whiteMat, darkMat] };
+}
+
 /** 一個他人分身的視覺物件組 */
 interface CloneVisual {
   root: TransformNode;
@@ -253,7 +354,7 @@ export class ArenaCloneVisuals {
   // ---------------------------------------------------------------------------
   // 工廠
   // ---------------------------------------------------------------------------
-  /** 他人分身：色盒機身 + 白色機鼻錐（指向 -Z = 機頭）+ 4 顆馬達球 + 名牌 */
+  /** 他人分身：簡化無人機外型（makeCloneDrone 共用工廠）+ 名牌 */
   private makeClone(
     id: string,
     name: string,
@@ -262,36 +363,7 @@ export class ArenaCloneVisuals {
   ): CloneVisual {
     const scene = this.scene;
     const col = cloneColorForId(id);
-    const root = new TransformNode(`clone-${id}`, scene);
-
-    const bodyMat = new StandardMaterial(`cloneBody-${id}`, scene);
-    bodyMat.diffuseColor = col.clone();
-    bodyMat.emissiveColor = col.scale(0.25);
-    const body = MeshBuilder.CreateBox(`cloneBox-${id}`, { width: 0.9, height: 0.25, depth: 0.9 }, scene);
-    body.material = bodyMat;
-    body.parent = root;
-
-    const noseMat = new StandardMaterial(`cloneNose-${id}`, scene);
-    noseMat.emissiveColor = Color3.White();
-    noseMat.disableLighting = true;
-    const nose = MeshBuilder.CreateCylinder(
-      `cloneNoseM-${id}`,
-      { height: 0.4, diameterTop: 0, diameterBottom: 0.24, tessellation: 12 },
-      scene,
-    );
-    nose.rotation.x = -Math.PI / 2; // 錐尖朝 -Z（機頭方向）
-    nose.position.z = -0.6;
-    nose.material = noseMat;
-    nose.parent = root;
-
-    const motorMat = new StandardMaterial(`cloneMotor-${id}`, scene);
-    motorMat.diffuseColor = hex(0x222831);
-    for (const [mx, mz] of [[0.5, 0.5], [-0.5, 0.5], [0.5, -0.5], [-0.5, -0.5]] as const) {
-      const m = MeshBuilder.CreateSphere(`cloneMotorM-${id}`, { diameter: 0.24, segments: 8 }, scene);
-      m.position.set(mx, 0, mz);
-      m.material = motorMat;
-      m.parent = root;
-    }
+    const { root, bodyMat, mats } = makeCloneDrone(scene, id, col, 0.85);
 
     const label = makeNameLabel(scene, `${emoji || ''}${name || '?'}`);
     label.parent = root;
@@ -302,7 +374,7 @@ export class ArenaCloneVisuals {
       root.rotation.y = target.yaw;
     }
 
-    const fadeMats = [bodyMat, noseMat, motorMat, label.material as StandardMaterial].map((m) => ({
+    const fadeMats = [...mats, label.material as StandardMaterial].map((m) => ({
       mat: m,
       baseAlpha: m.alpha,
     }));

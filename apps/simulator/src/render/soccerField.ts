@@ -30,7 +30,7 @@ import { activeSoccerField } from '../soccer/field';
 import { soccerState, type SoccerOther } from '../multiplayer/soccer';
 import { getHavokBackend, type HavokBackend } from './havokBackend';
 import { bakeTriangleSoup } from './playground';
-import { makeNameLabel } from './clones';
+import { makeNameLabel, makeCloneDrone } from './clones';
 import { hex } from './scene';
 import type { DroneVisual } from './drone';
 
@@ -435,36 +435,13 @@ export class SoccerFieldVisuals {
     }
   }
 
-  /** 他人分身：隊色盒身 + 白色機鼻錐（-Z = 機頭）+ 名牌 + 前鋒彩帶（對齊 legacy makeSoccerDrone） */
+  /** 他人分身：簡化無人機外型（makeCloneDrone 共用工廠，隊色）+ 名牌 + 前鋒彩帶 */
   private makeClone(id: string, o: SoccerOther): SoccerCloneVisual {
     const scene = this.scene;
-    const root = new TransformNode(`soccerClone-${id}`, scene);
     const col = hex(soccerTeamColorHex(o.team));
-
-    const bodyMat = new StandardMaterial(`soccerCloneBody-${id}`, scene);
-    bodyMat.diffuseColor = col;
-    bodyMat.emissiveColor = col.scale(0.3);
-    // 分身尺寸對齊縮放後的自機（約 1.5m 寬）→ 與場地同比例、不會像小點
-    const body = MeshBuilder.CreateBox(
-      `soccerCloneBox-${id}`,
-      { width: 1.4, height: 0.4, depth: 1.4 },
-      scene,
-    );
-    body.material = bodyMat;
-    body.parent = root;
-
-    const noseMat = new StandardMaterial(`soccerCloneNose-${id}`, scene);
-    noseMat.emissiveColor = Color3.White();
-    noseMat.disableLighting = true;
-    const nose = MeshBuilder.CreateCylinder(
-      `soccerCloneNoseM-${id}`,
-      { height: 0.6, diameterTop: 0, diameterBottom: 0.4, tessellation: 10 },
-      scene,
-    );
-    nose.rotation.x = -Math.PI / 2; // 錐尖朝 -Z（機頭方向）
-    nose.position.z = -0.92;
-    nose.material = noseMat;
-    nose.parent = root;
+    // 尺寸對齊縮放後的自機（約 1.5m 寬）→ 與場地同比例、不會像小點
+    const { root, bodyMat } = makeCloneDrone(scene, `soccer-${id}`, col, 1.05);
+    bodyMat.emissiveColor = col.scale(0.3); // 隊色亮一點（與舊盒身相同）
 
     const label = makeNameLabel(scene, `${o.emoji || ''}${o.name || '?'}`);
     label.position.y = CLONE_LABEL_Y;
