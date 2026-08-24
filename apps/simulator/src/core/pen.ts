@@ -148,3 +148,5 @@ export function tickPen(nowMs: number): void {
 
 // 載入 / 切換關卡：清墨水 + 重設畫筆（legacy clearLevelObjects → clearInk）
 bus.on('level-loaded', () => clearInk());
+// 清除關卡（進大亂鬥 / 足球）也要清 — 否則畫畫關的墨水線會殘留飄在多人場地上
+bus.on('level-cleared', () => clearInk());

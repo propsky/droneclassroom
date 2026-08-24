@@ -288,7 +288,9 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       toast('🏁 比賽開始！', 'success');
       break;
     case 'show_message':
-      toast(msg.text || '', 'success');
+      // 老師廣播走專屬大字橫幅（ui/broadcastBanner.ts），不走 toast —
+      // toast 是單一 DOM，2.5 秒內來一則系統訊息就會把廣播蓋掉，且 13px 太小
+      bus.emit('broadcast-message', { text: msg.text || '' });
       break;
     case 'arena_state':
     case 'arena_countdown':

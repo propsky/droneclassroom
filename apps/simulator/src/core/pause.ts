@@ -7,9 +7,10 @@ import { flags } from './droneState';
 import { levelState } from './level';
 import { bus, toast } from './events';
 
-/** 目前是否可暫停：要有關卡、且不在 3-2-1 倒數中 */
+/** 目前是否可暫停：要有關卡、已按開始、且不在 3-2-1 倒數中
+ *（未開始就暫停會讓 pausedAt 早於 startTime，恢復補償把計時推向未來） */
 export function isPausable(): boolean {
-  return levelState.current !== null && !flags.countdownActive;
+  return levelState.current !== null && levelState.armed && !flags.countdownActive;
 }
 
 export function pauseGame(): void {

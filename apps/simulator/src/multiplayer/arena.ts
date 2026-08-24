@@ -109,9 +109,8 @@ export function enterArena(): void {
   arenaState.others.clear();
 
   if (flags.mode !== 'manual') setMode('manual');
-  clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickArena）
+  clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickArena）；軌跡/墨水/虛線一併清
   resetDroneState();
-  bus.emit('trail-clear', {});
 
   // grid 場地掩體（實心，交給既有 AABB 碰撞）
   setSolidObstacles(
@@ -151,6 +150,7 @@ export function exitArena(): void {
   bus.emit('arena-exited', {}); // render 清分身 / 氣球 / 光環 / 掩體（dispose）
   showArenaHud(false);
   resetDroneState();
+  bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
   stateHud('待命');
   toast('已離開大亂鬥 — 從關卡選單挑一關繼續飛', 'success');
 }

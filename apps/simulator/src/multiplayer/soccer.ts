@@ -137,8 +137,7 @@ export function enterSoccerMatch(): void {
   resetSoccerField(); // 先用 fallback 場地建場；伺服器下發 field 後再重建
 
   if (flags.mode !== 'manual') setMode('manual');
-  clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickSoccerMatch）
-  bus.emit('trail-clear', {});
+  clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickSoccerMatch）；軌跡/墨水/虛線一併清
 
   bus.emit('soccer-entered', { variant: 'match' }); // render 建場地 + 門框碰撞 + 縮小飛機
   bus.emit('soccer-view-changed', { sign: soccerCameraSign(null) }); // 未分隊先當藍隊視角
@@ -180,6 +179,7 @@ export function exitSoccerMatch(): void {
   bus.emit('soccer-exited', {}); // render 清場地 / 分身 / 彩帶 / 共用球（dispose）、還原機體
   showSoccerMatchHud(false);
   resetDroneState();
+  bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
   stateHud('待命');
   toast('已離開足球對戰', 'success');
 }

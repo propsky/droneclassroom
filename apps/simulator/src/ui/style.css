@@ -1090,6 +1090,50 @@ body.joystick-forced #joystick-layer {
   opacity: 1;
   visibility: visible;
 }
+
+/* =============================================================================
+ * 老師廣播橫幅（ui/broadcastBanner.ts）— 場景頂部置中大字，獨立於 toast。
+ * 字級屬遊戲事件回饋（§5）：教室投影 / 平板距離要一眼看到。
+ * ========================================================================== */
+#broadcast-banner {
+  /* 掛在 #scene-overlay 內 → 場景頂部置中，不壓 header；避開 end-countdown 的位置往下一階 */
+  position: absolute;
+  top: calc(var(--sp-6) + 40px);
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  max-width: 70vw;
+  text-align: center;
+  background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-3) var(--sp-5);
+  font-size: clamp(24px, 3.2vw, 40px);
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text-1);
+  z-index: var(--z-toast);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, transform 0.25s ease, visibility 0.25s;
+}
+#broadcast-banner.show {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  #broadcast-banner {
+    transform: translateX(-50%);
+    transition: opacity 0.25s ease, visibility 0.25s;
+  }
+  #broadcast-banner.show {
+    transform: translateX(-50%);
+  }
+}
 /* 剩 ≤3 秒：放大 1.4 倍 + 轉危險色 */
 #end-countdown.danger {
   color: var(--danger);

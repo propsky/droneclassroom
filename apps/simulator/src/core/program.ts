@@ -279,6 +279,11 @@ export function runProgram(code: string): void {
   programState.running = true;
   programState.abort = false;
   programState.startTime = simNowMs();
+  // 程式模式可能沒按過關卡的「開始」（intro 直接切程式模式）→ 補上關卡計時基準，
+  // 否則 checkProgramCompletion 用 levelElapsedMs() 會回 0 秒成績；armed 一併補
+  // （tickLevel 的圈圈判定在未 armed 時不跑）
+  if (levelState.startTime === 0) levelState.startTime = Date.now();
+  levelState.armed = true;
   flags.programRunning = true;
   bus.emit('program-running', { running: true });
 

@@ -42,6 +42,8 @@ export class InkVisual {
     bus.on('ink-stroke-start', ({ id, color }) => this.startStroke(id, color));
     bus.on('ink-point', ({ id, x, y, z }) => this.addPoint(id, x, y, z));
     bus.on('ink-clear', () => this.clear());
+    // 雙保險：清除關卡時 render 層自清，不依賴 core 是否記得發 ink-clear
+    bus.on('level-cleared', () => this.clear());
   }
 
   private startStroke(id: number, color: string): void {

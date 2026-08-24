@@ -26,6 +26,11 @@ export class GuideVisual {
   constructor(scene: Scene) {
     this.scene = scene;
     bus.on('level-loaded', ({ level }) => this.build(level));
+    // 清除關卡（進大亂鬥 / 足球）：參考虛線不能殘留在多人場地上
+    bus.on('level-cleared', () => {
+      this.mesh?.dispose();
+      this.mesh = null;
+    });
   }
 
   private build(level: LevelDef): void {

@@ -67,9 +67,10 @@ export function ringWorldY(index: number, baseY: number, nowMs: number): number 
 
 export function levelElapsedMs(): number {
   if (!levelState.startTime) return 0;
-  // 暫停中：以暫停當下時間為基準 → HUD 計時凍結
+  // 暫停中：以暫停當下時間為基準 → HUD 計時凍結。
+  // clamp ≥ 0：防禦「暫停中按開始」等時序邊界產生負值
   const base = levelState.pausedAt || Date.now();
-  return base - levelState.startTime;
+  return Math.max(0, base - levelState.startTime);
 }
 
 // =============================================================================
@@ -166,6 +167,9 @@ export function clearLevel(): void {
   lastFaceAligned = null;
   lastFaceRing = -1;
   setSolidObstacles([]);
+  // 清飛行軌跡（進大亂鬥 / 足球的唯一共同出口在這裡統一發，呼叫端不必各自補）；
+  // 墨水線與參考虛線由 pen.ts / render 端監聽 level-cleared 清除
+  bus.emit('trail-clear', {});
   bus.emit('level-cleared', {});
 }
 
@@ -181,8 +185,13 @@ export function armLevelStart(): void {
   if (s.armed || !s.current) return;
   s.armed = true;
   bus.emit('level-armed', { level: s.current });
-  // 自由活動關：不倒數、不計時，直接開飛
-  if (s.current.freeplay) return;
+  // 自由活動關：不倒數、直接開飛，但仍要設 startTime —
+  // 1-6 這類「freeplay＋有完成條件（氣球）」的關卡，過關結算與上報才有真實用時
+  // （否則恆為 0 秒，還會被伺服器 <1s 防作弊誤標為可疑成績）。HUD 依 freeplay 不顯示計時。
+  if (s.current.freeplay) {
+    s.startTime = Date.now();
+    return;
+  }
   runCountdown(() => {
     s.startTime = Date.now();
   });
@@ -224,7 +233,9 @@ export function resetMission(): void {
 export function tickLevel(nowMs: number): void {
   const level = levelState.current;
   if (!level) return;
-  if (!flags.countdownActive) {
+  // 未按「開始」（intro 卡還開著）不判定 — 否則低門檻關（如 1-1 起飛 zone）
+  // 會在 startTime 還沒設定時就完成，產生 0 秒成績
+  if (levelState.armed && !flags.countdownActive) {
     checkRings(nowMs);
     checkZones();
     checkBalloons();

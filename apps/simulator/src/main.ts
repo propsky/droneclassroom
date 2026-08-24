@@ -50,6 +50,7 @@ import {
 } from './input/calibration';
 import { initAudio } from './ui/audio';
 import { initEndCountdown } from './ui/endCountdown';
+import { initBroadcastBanner } from './ui/broadcastBanner';
 import { initWs, rejoin } from './net/ws';
 import { initBlockly } from './blockly';
 import {
@@ -115,6 +116,7 @@ initSoccerHud(
   () => (soccerState.active ? exitSoccerMatch() : enterSoccerMatch()),
 );
 initEndCountdown(); // 賽局結束倒數 chip（§5.3；arena / soccer 共用 endTime）
+initBroadcastBanner(); // 老師廣播大字橫幅（獨立於 toast）
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進：以目前身分（含房間碼）重新連線 register

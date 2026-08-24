@@ -104,8 +104,7 @@ export function enterSoccerPractice(): void {
   practiceState.count = 0;
 
   if (flags.mode !== 'manual') setMode('manual');
-  clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickSoccerPractice）
-  bus.emit('trail-clear', {});
+  clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickSoccerPractice）；軌跡/墨水/虛線一併清
 
   // 單人沒有伺服器 → 生效場地回 constants fallback（避免殘留上一場多人下發的尺寸）
   resetSoccerField();
@@ -131,6 +130,7 @@ export function exitSoccerPractice(): void {
   bus.emit('soccer-exited', {}); // render 清場地 / 碰撞、還原機體大小與地面
   showSoccerPracticeHud(false);
   resetDroneState();
+  bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
   stateHud('待命');
   toast('已離開足球練習', 'success');
 }

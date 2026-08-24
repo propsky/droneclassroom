@@ -71,6 +71,8 @@ export interface CoreEventMap {
   'student-logout': Record<string, never>;
   /** 學生歷史進度更新（progress_sync 下發或 complete_ack 本地併入）：UI 重畫關卡選單勾勾（資料在 net/progressQueue.ts 的 progressState） */
   'progress-updated': Record<string, never>;
+  /** 老師廣播訊息（show_message）→ ui/broadcastBanner.ts 大字橫幅（獨立於 toast，不被系統訊息蓋掉） */
+  'broadcast-message': { text: string };
   /** 伺服器 arena_* 訊息（ws 只分派、不處理） */
   'arena-message': { msg: ArenaServerMsg };
   /** 進入大亂鬥（render 建場地、UI 切 HUD） */
