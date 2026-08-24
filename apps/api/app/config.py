@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     room_code_alphabet: str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     default_room_code: str = "MAIN"
     room_default_max_students: int | None = None
+    room_max_sub_rooms: int = 5
     room_idle_close_sec: float = 3600
     room_max_rooms: int = 20
     database_url: str | None = None

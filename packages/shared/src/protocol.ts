@@ -74,6 +74,8 @@ export type TeacherBroadcastPayload =
 export interface TeacherBroadcastMsg {
   type: 'broadcast';
   payload: TeacherBroadcastPayload;
+  /** 目標房屬於班級時套用到該班級所有房（主房＋分房）— 一班多房整班廣播 */
+  allRooms?: boolean;
 }
 export interface ArenaStartMsg {
   type: 'arena_start';
@@ -125,6 +127,8 @@ export interface RoomInfo {
   createdAt: number;
   /** 持久化班級（teams 表）id；訪客預設房與無 DB 模式為 null */
   teamId?: number | null;
+  /** 主房（code = 班級碼）或分房（一班多房；獨立產碼）；非班級房恆為 true */
+  isMain?: boolean;
 }
 
 /**
@@ -155,6 +159,10 @@ export interface RoomKickMsg { type: 'room_kick'; roomCode: string; studentId: s
 /** 老師切換「目前作用房間」：之後的名冊/賽局訊息以此房為準 */
 export interface RoomSelectMsg { type: 'room_select'; roomCode: string }
 export interface RoomListReqMsg { type: 'room_list_req' }
+/** 一班多房：在班級主房下開分房（獨立產碼、繼承班級密碼；限擁有者、主房要開著） */
+export interface RoomCreateSubMsg { type: 'room_create_sub'; teamId: number; name?: string }
+/** 把學生移到另一間房（roomCode = 來源房，缺省 = 選定房）；帳號學生移入分房會持久化指派 */
+export interface RoomMoveStudentMsg { type: 'room_move_student'; studentId: string; toRoomCode: string }
 
 /** 帶 roomCode 的老師訊息：缺省 = 目前選定房間 */
 export interface RoomScoped { roomCode?: string }
@@ -165,7 +173,8 @@ export type TeacherToServer =
   | (SoccerStartMsg & RoomScoped) | (SoccerStateReqMsg & RoomScoped) | (SoccerStopMsg & RoomScoped)
   | (SoccerSetStrikerMsg & RoomScoped) | (SoccerSetTeamMsg & RoomScoped) | (SoccerResetMsg & RoomScoped)
   | RoomCreateMsg | RoomCloseMsg | RoomUpdateMsg | RoomKickMsg | RoomSelectMsg | RoomListReqMsg
-  | RoomOpenTeamMsg | RoomArchiveTeamMsg;
+  | RoomOpenTeamMsg | RoomArchiveTeamMsg
+  | RoomCreateSubMsg | (RoomMoveStudentMsg & RoomScoped);
 
 // ---------- Server → Client ----------
 

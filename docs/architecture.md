@@ -75,7 +75,7 @@ droneclassroom/
 - 房間碼 4 碼、去 0/O/1/I（`ROOM_CODE_LENGTH` / `ROOM_CODE_ALPHABET`），上限 `ROOM_MAX_ROOMS`（預設 20）；非預設房 0 人且無賽局閒置逾 `ROOM_IDLE_CLOSE_SEC`（預設 1h）自動關。
 - **學生**：連線 `?room=` 或 `register{roomCode, roomPassword}` 指定房 → 門檢（不存在 / 鎖房 / 滿員 / 密碼）→ `room_joined` 或 `room_rejected`（不斷線可重試，連錯密碼 5 次才斷）；之後訊息全路由到該房。同名重連只在房內比對。
 - **老師**：一條 WS 管多間，`RoomManager` 記每位老師「目前選定的房」；老師訊息帶 `roomCode` 就路由到該房、缺省用選定房；`room_create/close/update/kick/select/list_req` 管房，踢人 / 關房對學生 close **4001**（`WS_CLOSE_KICKED`）。名冊 / 賽局扇出只到選定該房的老師，`room_list` 則推所有老師（同一 loop tick 內合併）。
-- 未來帳號系統：`Room.owner_id` 已預留，加持久化即可，協定不變。
+- **一班多房（分房）**：班級 = 名冊與進度的持久歸屬；房 = 上課場次。班級可同時開主房（`is_main`，code = 班級碼）＋至多 `ROOM_MAX_SUB_ROOMS`（預設 5）間分房（`room_create_sub`，獨立產碼、繼承班級密碼與人數上限）。老師 `room_move_student` 移動學生（退出賽局 → 換名冊 → 學生收 `room_joined`，client 退出多人模式）；帳號學生的分房指派與分房清單持久化在 `Team.settings["rooms"]`（`room_open_team` 連同還原，登入自動進被指派的分房）。關分房 = 學生移回主房不斷線、分組解散；關主房 = 分房一併卸載。廣播 `allRooms: true` 套用到班級所有房（老師端「整班廣播」開關）。權限：開分房 / 移動限班級擁有者（預設房作為移動來源例外 — 撈回停在 MAIN 的迷路學生）。
 
 ### 教師後台（`apps/teacher`）
 

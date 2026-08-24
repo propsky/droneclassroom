@@ -62,9 +62,11 @@ from .protocol import (
     RoomArchiveTeamMsg,
     RoomCloseMsg,
     RoomCreateMsg,
+    RoomCreateSubMsg,
     RoomJoinedMsg,
     RoomKickMsg,
     RoomListReqMsg,
+    RoomMoveStudentMsg,
     RoomOpenTeamMsg,
     RoomRejectedMsg,
     RoomSelectMsg,
@@ -81,6 +83,7 @@ from .protocol import (
     SoccerStateReqMsg,
     SoccerStopMsg,
     TeacherBroadcastMsg,
+    TeacherBroadcastPayload,
 )
 from .rooms import Room, RoomLimitError, RoomManager
 from .roster import StudentRecord, send_safe
@@ -218,6 +221,24 @@ async def _teacher_ticket_ok(ws: WebSocket) -> bool:
 # ---------- 學生連線 ----------
 
 
+async def _apply_broadcast(room: Room, payload: TeacherBroadcastPayload) -> None:
+    """把一則老師廣播套用到一間房（單房與 allRooms 整班共用同一條路徑）。"""
+    if payload.type in ("load_level", "race_start", "reset_all"):
+        # 智能停止：賽局（含倒數）進行中老師切關 → 先結束該賽局
+        # （end 廣播 reason:'level_switch'）再轉發關卡廣播。
+        # 同一 handler 內依序 await，學生保證先收到 end 再收到關卡廣播
+        await room.arena.stop("level_switch")
+        await room.soccer.stop("level_switch")
+    if payload.type in ("load_level", "race_start"):
+        # 記住課程關卡：遲到 / 重整的學生連上時補載入
+        room.roster.current_level_id = payload.levelId
+    if payload.type == "lock_level":
+        # 鎖定狀態存伺服器（遲到者補送），並回送看著這房的老師同步開關 UI
+        room.roster.level_locked = payload.locked
+        await room.roster.send_raw_to_teachers(payload.model_dump_json())
+    await room.roster.broadcast_to_students(payload)
+
+
 async def _notify_not_in_game(room: Room, player_ids: set[str], text: str) -> None:
     """賽局開始時提醒「在房內但沒加入賽局」的學生（賽局訊息只發給已 join 者）。"""
     data = ShowMessagePayload(type="show_message", text=text).model_dump_json()
@@ -275,7 +296,8 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     student, team = account
                     name, emoji, student_id = student.name, student.emoji, student.id
                     skip_password = True  # token 已驗明身分（本來就是這班的學生），免房間密碼
-                    target = rooms.get_by_team(team.id)
+                    # 進房路由：老師有指派分房且該分房開著 → 分房；否則主房
+                    target = rooms.route_room_for(team.id, student.id)
                     if target is None:
                         # 班級的房沒開：老師開房學生才進得來（跟實體課一致）
                         await _send_rejected(ws, "closed")
@@ -498,6 +520,23 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     if await rooms.archive_team(teacher_id, valid.teamId):
                         await rooms.send_room_list(ws)  # 班級清單變了（房沒變時 notify 不會推）
                     continue
+                case RoomCreateSubMsg():
+                    # 一班多房：在班級主房下開分房（限擁有者、主房要先開著）
+                    parent = rooms.get_by_team(valid.teamId)
+                    if parent is None or not rooms.can_manage(parent, teacher_id):
+                        logger.info(
+                            "[Room] 老師 %s 開分房被拒（班級 #%d 未開房或非擁有者）",
+                            teacher_id,
+                            valid.teamId,
+                        )
+                        continue
+                    try:
+                        sub = await rooms.create_sub_room(parent, valid.name)
+                    except RoomLimitError as e:
+                        logger.info("[Room] 開分房失敗：%s", e)
+                        continue
+                    await rooms.select(ws, sub)  # 建完自動切過去（與 room_create 一致）
+                    continue
                 case RoomListReqMsg():
                     await rooms.send_room_list(ws)
                     continue
@@ -528,26 +567,40 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     target = roster.find(valid.studentId)
                     if target is not None:
                         await rooms.kick(room, target)
+                case RoomMoveStudentMsg():
+                    # 移動學生（一班多房分組）：來源要可管理（預設房例外 — 撈回停在
+                    # MAIN 的學生），目標也要可管理；帳號學生移入分房會持久化指派
+                    dst = rooms.get(valid.toRoomCode)
+                    target = roster.find(valid.studentId)
+                    if (
+                        dst is None
+                        or target is None
+                        or dst is room
+                        or not rooms.can_manage(dst, teacher_id)
+                        or not (room is rooms.default or rooms.can_manage(room, teacher_id))
+                    ):
+                        logger.info(
+                            "[Room] 老師 %s 移動學生被拒（%s → %s）",
+                            teacher_id,
+                            room.code,
+                            valid.toRoomCode,
+                        )
+                        continue
+                    await rooms.move_student(room, target, dst)
                 case RoomCloseMsg():
                     if not await rooms.close(room):
                         logger.info("[Room] 預設房 %s 不可關閉", room.code)
                 case TeacherBroadcastMsg():
                     # 老師廣播（load_level / set_mode / reset_all / race_start /
-                    # show_message / lock_level）→ 該房全體學生
-                    if valid.payload.type in ("load_level", "race_start", "reset_all"):
-                        # 智能停止：賽局（含倒數）進行中老師切關 → 先結束該賽局
-                        # （end 廣播 reason:'level_switch'）再轉發關卡廣播。
-                        # 同一 handler 內依序 await，學生保證先收到 end 再收到關卡廣播
-                        await arena.stop("level_switch")
-                        await soccer.stop("level_switch")
-                    if valid.payload.type in ("load_level", "race_start"):
-                        # 記住課程關卡：鎖定中遲到 / 重整的學生連上時補載入
-                        roster.current_level_id = valid.payload.levelId
-                    if valid.payload.type == "lock_level":
-                        # 鎖定狀態存伺服器（遲到者補送），並回送看著這房的老師同步開關 UI
-                        roster.level_locked = valid.payload.locked
-                        await roster.send_raw_to_teachers(valid.payload.model_dump_json())
-                    await roster.broadcast_to_students(valid.payload)
+                    # show_message / lock_level）→ 該房全體學生；
+                    # allRooms 且目標房屬於班級 → 該班級所有房（主房＋分房）一次套用
+                    targets = (
+                        rooms.team_rooms(room.team_id)
+                        if valid.allRooms and room.team_id is not None
+                        else [room]
+                    )
+                    for target_room in targets:
+                        await _apply_broadcast(target_room, valid.payload)
                 # ----- 大亂鬥 -----
                 case ArenaStartMsg():
                     await arena.start(valid)

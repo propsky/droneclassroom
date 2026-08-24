@@ -53,6 +53,7 @@ const ROOM_SCOPED_TYPES = new Set<TeacherToServer['type']>([
   'arena_start', 'arena_state_req', 'arena_stop',
   'soccer_start', 'soccer_state_req', 'soccer_stop',
   'soccer_set_striker', 'soccer_set_team', 'soccer_reset',
+  'room_move_student', // roomCode = 來源房（名冊顯示的就是選定房）
 ]);
 
 export class TeacherWs {

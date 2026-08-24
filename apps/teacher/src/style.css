@@ -278,6 +278,33 @@ body {
   line-height: 18px;
 }
 .room-chip.active .chip-tag { color: var(--text-2); }
+/* 分房（一班多房）：接在主房 chip 後、縮一階視覺；「＋分房」為虛線動作 chip */
+.room-chip.sub {
+  border-style: dashed;
+  font-weight: 500;
+}
+.room-chip.sub.active { border-style: solid; }
+.room-chip.sub-add {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-3);
+  gap: var(--sp-1);
+}
+.room-chip.sub-add .icon { width: 14px; height: 14px; }
+.room-chip.sub-add:hover { border-color: var(--brand); color: var(--brand); background: transparent; }
+/* 整班廣播（含分房）開關：房間列右側 */
+.all-rooms-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.all-rooms-toggle input { accent-color: var(--brand); }
 /* 沒開的班級：灰態（虛線邊、弱化文字）＋「點擊開啟」提示；hover 才亮起來示意可開 */
 .room-chip.closed {
   border-style: dashed;
@@ -484,7 +511,26 @@ tbody tr.offline td { opacity: 0.55; }
 .roster-table td:last-child { padding-right: var(--sp-4); }
 /* 名冊「移出」鈕：列 hover / 鍵盤聚焦才出現；沒有房間資訊（舊伺服器）時整欄不顯示 */
 .roster-table th.row-act,
-.roster-table td.row-act { width: 52px; padding-left: 0; text-align: right; }
+.roster-table td.row-act { width: 52px; padding-left: 0; text-align: right; white-space: nowrap; }
+/* 名冊「移至…」下拉（一班多房分組）：與移出鈕同樣列 hover 才出現 */
+.row-move {
+  height: 24px;
+  margin-right: var(--sp-1);
+  padding: 0 var(--sp-1);
+  max-width: 96px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.18s;
+}
+.roster-table tbody tr:hover .row-move,
+.row-move:focus-visible { opacity: 1; }
+.roster-card:not(.rooms-on) .row-move { display: none; }
 .row-kick {
   height: 24px;
   padding: 0 var(--sp-2);

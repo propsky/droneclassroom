@@ -161,6 +161,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         <div class="room-strip-row">
           <span class="room-strip-label" id="room-strip-label">我的班級</span>
           <div class="room-chips" id="room-chips"><span class="room-chips-empty">連線後顯示班級</span></div>
+          <label class="all-rooms-toggle" id="all-rooms-wrap" hidden title="勾選後：切關、訊息、重置、鎖定等廣播會同時套用到這個班級的主房與所有分房"><input type="checkbox" id="all-rooms-chk">整班廣播（含分房）</label>
           <button class="btn btn-primary btn-sm" id="btn-room-new">${ICONS.plus}新增班級</button>
         </div>
         <p class="room-hint" id="room-hint" hidden>還沒有班級。新增一個班級，學生用班級碼加入。</p>
@@ -476,12 +477,18 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
 
   // ---- 廣播控制（全部走 broadcast / TeacherBroadcastPayload）----
   const levelSelect = root.querySelector<HTMLSelectElement>('#level-select')!;
+  // 「整班廣播（含分房）」開關：勾選時廣播帶 allRooms（伺服器套用到班級所有房）
+  const allRoomsChk = root.querySelector<HTMLInputElement>('#all-rooms-chk')!;
+  const allRoomsWrap = root.querySelector<HTMLElement>('#all-rooms-wrap')!;
   const send = (payload: TeacherBroadcastPayload, okText: string): void => {
-    if (!opts.send(payload)) {
+    const ok = allRoomsChk.checked && !allRoomsWrap.hidden
+      ? opts.sendGame({ type: 'broadcast', payload, allRooms: true })
+      : opts.send(payload);
+    if (!ok) {
       toast('尚未連線到伺服器', 'error');
       return;
     }
-    toast(okText, 'success');
+    toast(allRoomsChk.checked && !allRoomsWrap.hidden ? `${okText}（整班含分房）` : okText, 'success');
   };
   const on = (id: string, fn: () => void): void => {
     root.querySelector<HTMLButtonElement>(`#${id}`)!.addEventListener('click', fn);
@@ -804,7 +811,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const teamMode = (): boolean => !!teams && teams.length > 0;
   /** 班級對應的開著的房（teamId 對上；退而以 code 對） */
   const roomOfTeam = (t: TeamInfo): RoomInfo | null =>
-    rooms.find((r) => r.teamId === t.id) ?? rooms.find((r) => r.code === t.code) ?? null;
+    rooms.find((r) => r.teamId === t.id && r.isMain !== false) ??
+    rooms.find((r) => r.code === t.code) ??
+    null;
   /** 訪客房：班級模式下 teamId 為空的房（伺服器開機即存在的預設房，學生不帶 ?room= 就進這間） */
   const isGuestRoom = (r: RoomInfo): boolean => teamMode() && r.teamId == null;
   /** 班級的房：班級模式下有 teamId 的房（可封存；關房後班級保留） */
@@ -841,9 +850,11 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const chipHtml = (r: RoomInfo): string => {
     const named = r.name && r.name !== r.code;
     const guest = isGuestRoom(r);
-    return `<button type="button" class="room-chip${r.code === selectedRoom ? ' active' : ''}${guest ? ' guest' : ''}" data-code="${esc(r.code)}" aria-pressed="${r.code === selectedRoom}" title="切換到「${esc(r.name || r.code)}」">
+    const sub = r.isMain === false; // 分房（一班多房）：縮小樣式 + 標籤
+    return `<button type="button" class="room-chip${r.code === selectedRoom ? ' active' : ''}${guest ? ' guest' : ''}${sub ? ' sub' : ''}" data-code="${esc(r.code)}" aria-pressed="${r.code === selectedRoom}" title="切換到「${esc(r.name || r.code)}」">
       ${roomLive(r) ? '<span class="chip-live" title="賽局進行中"></span>' : ''}
       ${guest ? '<span class="chip-tag">訪客房</span>' : ''}
+      ${sub ? '<span class="chip-tag">分房</span>' : ''}
       ${named ? `<span class="chip-name">${esc(r.name)}</span>` : ''}
       <span class="chip-code">${esc(r.code)}</span>
       <span class="chip-count">${r.studentCount}/${r.maxStudents}</span>
@@ -855,7 +866,14 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 班級 chip：開著 → 對應房的亮 chip（切房）；沒開 → 灰態（班名 / mono 班級碼 / 「點擊開啟」），點擊 room_open_team */
   const teamChipHtml = (t: TeamInfo): string => {
     const r = t.open ? roomOfTeam(t) : null;
-    if (r) return chipHtml(r);
+    if (r) {
+      // 開著：主房 chip + 分房 chips + 「＋分房」（一班多房；分組上課用）
+      const subs = rooms
+        .filter((x) => x.teamId === t.id && x.isMain === false)
+        .sort((a, b) => a.createdAt - b.createdAt);
+      const addSub = `<button type="button" class="room-chip sub-add" data-subteam="${t.id}" title="在「${esc(t.name || t.code)}」下開一間分房：獨立房碼、繼承班級密碼，可把學生分組移過去">${ICONS.plus}分房</button>`;
+      return chipHtml(r) + subs.map(chipHtml).join('') + addSub;
+    }
     const named = t.name && t.name !== t.code;
     const opening = pendingOpenTeam === t.id;
     return `<button type="button" class="room-chip closed" data-team="${t.id}" ${opening ? 'disabled' : ''} title="開啟班級「${esc(t.name || t.code)}」的房間，學生即可用班級碼加入">
@@ -902,16 +920,19 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     roomLockBtn.innerHTML = r.locked ? `${ICONS.lock}開放` : `${ICONS.lockOpen}鎖房`;
     roomLockBtn.classList.toggle('btn-warning', r.locked);
     roomLockBtn.title = r.locked ? '目前鎖房中（新學生無法加入）；點擊開放加入' : '鎖房後新學生無法加入，已在房內的不受影響';
+    const isSub = r.isMain === false;
     roomCloseBtn.disabled = isDefault;
     roomCloseWrap.title = isDefault
       ? guest ? '訪客房無法關閉' : '預設房間無法關閉'
-      : team
-        ? `關閉房間（班級保留）：${r.code} 房內學生會被移出，班級碼與紀錄保留，之後可在班級列再開啟`
-        : `關閉房間 ${r.code}（房內學生會被移出）`;
-    // 持久化班級才有「封存」：學生無法再加入、紀錄保留、列表不再顯示；訪客房 / 舊伺服器房間沒有
-    roomArchiveBtn.hidden = !team;
-    // 「管理名單」也只有持久化班級才有（DB 名單掛在 teamId 上）；訪客房 / 舊伺服器房間不顯示
-    manageBtn.hidden = !team || r.teamId == null;
+      : isSub
+        ? `關閉分房 ${r.code}：房內學生會移回主房（不斷線），分組解散`
+        : team
+          ? `關閉房間（班級保留）：${r.code} 房內學生會被移出，班級碼與紀錄保留，之後可在班級列再開啟`
+          : `關閉房間 ${r.code}（房內學生會被移出）`;
+    // 持久化班級才有「封存」：學生無法再加入、紀錄保留、列表不再顯示；分房 / 訪客房 / 舊伺服器房間沒有
+    roomArchiveBtn.hidden = !team || isSub;
+    // 「管理名單」也只有持久化班級的主房才有（DB 名單掛在 teamId 上）
+    manageBtn.hidden = !team || r.teamId == null || isSub;
   };
 
   /** 學生連線位址：有選定房 → 加 ?room=房碼 */
@@ -928,6 +949,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     stripLabelEl.textContent = teamMode() || rooms.length === 0 ? '我的班級' : '房間';
     // 空狀態：還沒有任何班級（只剩預設 / 訪客房）→ 提示新增班級
     roomHintEl.hidden = !(rooms.length > 0 && !teamMode() && rooms.length === 1);
+    // 「整班廣播（含分房）」只在選定房屬於某班級、且該班級開著多間房時出現
+    const cur = currentRoom();
+    const multi =
+      cur?.teamId != null && rooms.filter((x) => x.teamId === cur.teamId).length > 1;
+    allRoomsWrap.hidden = !multi;
+    if (!multi) allRoomsChk.checked = false;
     drawRoomHead();
     drawLan();
   };
@@ -948,6 +975,16 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   chipsEl.addEventListener('click', (ev) => {
     const chip = (ev.target as HTMLElement).closest<HTMLElement>('.room-chip');
     if (!chip) return;
+    const subTeam = chip.dataset['subteam'];
+    if (subTeam !== undefined) {
+      // ＋分房：問名稱（留空自動命名「分組 N」）→ room_create_sub，伺服器建好自動切過去
+      const id = Number(subTeam);
+      if (!Number.isFinite(id)) return;
+      const name = prompt('分房名稱（例：A 組；留空自動命名）');
+      if (name === null) return; // 取消
+      sendGame({ type: 'room_create_sub', teamId: id, name: name.trim() }, '已開分房');
+      return;
+    }
     const teamId = chip.dataset['team'];
     if (teamId !== undefined) {
       const id = Number(teamId);
@@ -1098,6 +1135,21 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const name = btn.dataset['name'] || '?';
     if (!confirm(`確定將「${name}」移出房間 ${r.code}？\n該生會回到進房畫面，可重新加入（鎖房時除外）。`)) return;
     sendGame({ type: 'room_kick', roomCode: r.code, studentId: id }, `已將 ${name} 移出`);
+  });
+
+  // 名冊列「移至…」：把學生移到同班級的另一間房（分組）；帳號學生的指派會被伺服器記住
+  tbody.addEventListener('change', (ev) => {
+    const sel = (ev.target as HTMLElement).closest<HTMLSelectElement>('.row-move');
+    if (!sel) return;
+    const to = sel.value;
+    const id = sel.dataset['id'];
+    sel.value = '';
+    if (!to || !id) return;
+    const target = rooms.find((r) => r.code === to);
+    sendGame(
+      { type: 'room_move_student', studentId: id, toRoomCode: to },
+      `已移至「${target && target.name !== target.code ? target.name : to}」`,
+    );
   });
 
   drawRooms();
@@ -1261,6 +1313,21 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         tbody.innerHTML = '<tr><td colspan="5" class="empty">尚無學生連線</td></tr>';
         return;
       }
+      // 「移至」目標：同班級的其他房（分組）；預設房則可移入任何開著的班級房（撈回迷路學生）
+      const cur = currentRoom();
+      const moveTargets = !cur
+        ? []
+        : cur.teamId != null
+          ? rooms.filter((r) => r.teamId === cur.teamId && r.code !== cur.code)
+          : cur.code === defaultRoomCode(rooms)
+            ? rooms.filter((r) => r.teamId != null)
+            : [];
+      const moveOptions = moveTargets
+        .map((r) => {
+          const label = r.name && r.name !== r.code ? r.name : r.code;
+          return `<option value="${esc(r.code)}">${esc(label)}${r.isMain !== false && r.teamId != null ? '（主房）' : ''}</option>`;
+        })
+        .join('');
       tbody.innerHTML = sorted
         .map((s, idx) => {
           const ranked = s.time != null;
@@ -1288,7 +1355,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
             <td><span class="student-cell" title="${esc(seenTitle)}">${avatarChip(s.emoji, !!s.connected)}<span class="student-name">${esc(s.name)}</span>${registered}${suspect}</span></td>
             <td>${esc(s.level ?? '—')}</td>
             <td class="right mono">${time}</td>
-            <td class="row-act"><button type="button" class="row-kick" data-id="${esc(s.id)}" data-name="${esc(s.name)}" title="將 ${esc(s.name)} 移出房間">移出</button></td>
+            <td class="row-act">${moveOptions ? `<select class="row-move" data-id="${esc(s.id)}" title="把 ${esc(s.name)} 移到別的房間（分組）"><option value="">移至…</option>${moveOptions}</select>` : ''}<button type="button" class="row-kick" data-id="${esc(s.id)}" data-name="${esc(s.name)}" title="將 ${esc(s.name)} 移出房間">移出</button></td>
           </tr>`;
         })
         .join('');

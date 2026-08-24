@@ -18,6 +18,13 @@ code 固定、重啟不消失、老師只看到自己的班級。Room 是 Team �
 - room_update → 同步寫 teams；room_archive_team → 封存（列表消失、紀錄保留）
 - 伺服器重啟不預載班級：老師重新登入在 room_list.teams 看到、點開才載入（省記憶體）
 無 DB / 訪客老師 → 純記憶體房（既有行為零改變）。預設房永遠是記憶體房、所有老師共用。
+
+一班多房（分房）：班級 = 名冊與進度的持久歸屬；房 = 上課場次，一個班級可同時開多間 —
+主房（is_main，code = team_code、老師卡片上的碼不變）＋若干分房（獨立產碼、繼承班級
+密碼與人數上限）。老師可把學生移到分房（room_move_student），帳號學生的指派持久化在
+Team.settings["rooms"]（重啟後 room_open_team 連同分房與指派一起還原），登入時自動
+進被指派的分房、沒指派進主房。關分房 = 學生移回主房（不踢線）；關主房 = 整個班級
+場次結束（分房一併關）。分房只屬於班級房（記憶體房要多房直接多開即可，本來就支援）。
 """
 
 import asyncio
@@ -45,6 +52,7 @@ from .protocol import (
     RejectReason,
     RoomClosedMsg,
     RoomInfo,
+    RoomJoinedMsg,
     RoomListMsg,
     RoomSettingsIn,
     TeamInfo,
@@ -114,6 +122,8 @@ class Room:
     # 持久化班級（teams 表）：id 與擁有的老師；預設房與記憶體房皆為 None
     team_id: int | None = None
     owner_teacher_id: int | None = None
+    # 主房（code = team_code）或分房（獨立產碼）；非班級房恆為 True
+    is_main: bool = True
     # 閒置起點（epoch 毫秒）：0 人且無賽局進行的那一刻；None = 目前不閒置
     idle_since: float | None = field(default=None, repr=False)
 
@@ -168,6 +178,7 @@ class Room:
             soccerStatus=self.soccer.status,
             createdAt=self.created_at,
             teamId=self.team_id,
+            isMain=self.is_main,
         )
 
 
@@ -198,6 +209,9 @@ class RoomManager:
         # room_list 推送很頻繁（人數 / 賽局狀態變動都推），不能每推一次查一次 DB；
         # 班級只會被擁有者自己改，所以快取只需在本人操作後刷新
         self._teams_cache: dict[int, list[Team]] = {}
+        # 分房指派：team_id → { students 表 id → 分房碼 }（載入班級時自 Team.settings 還原、
+        # 變動時寫回；訪客學生無 student_id → 只有活體移動、不持久化）
+        self._assignments: dict[int, dict[int, str]] = {}
         # 學生 id 全域遞增（帶 ?room= 的學生要到 register 才知道進哪房，id 得先發）
         self._student_counter = 0
         # 時鐘可注入（測試閒置關房）；epoch 毫秒（RoomInfo.createdAt 走線上給 Date.now() 比對）
@@ -225,8 +239,16 @@ class RoomManager:
         return self._rooms.get(code.strip().upper())
 
     def get_by_team(self, team_id: int) -> Room | None:
-        """找某班級目前載入的房（沒開著回 None）。"""
-        return next((r for r in self._rooms.values() if r.team_id == team_id), None)
+        """找某班級目前載入的主房（沒開著回 None）；分房用 team_rooms()。"""
+        return next(
+            (r for r in self._rooms.values() if r.team_id == team_id and r.is_main), None
+        )
+
+    def team_rooms(self, team_id: int) -> list[Room]:
+        """某班級目前載入的所有房（主房在前、分房依建立順序）。"""
+        rooms = [r for r in self._rooms.values() if r.team_id == team_id]
+        rooms.sort(key=lambda r: (not r.is_main, r.created_at))
+        return rooms
 
     def _default_settings(self) -> RoomSettings:
         return RoomSettings(
@@ -241,6 +263,7 @@ class RoomManager:
         team_id: int | None = None,
         owner_teacher_id: int | None = None,
         created_at: float | None = None,
+        is_main: bool = True,
     ) -> Room:
         roster = Roster(known_levels=self._known_levels, on_change=self.notify)
         room = Room(
@@ -252,6 +275,7 @@ class RoomManager:
             created_at=self.now_ms() if created_at is None else created_at,
             team_id=team_id,
             owner_teacher_id=owner_teacher_id,
+            is_main=is_main,
         )
         self._rooms[code] = room
         return room
@@ -319,23 +343,191 @@ class RoomManager:
         logger.info("[Room] %s 踢出 %s%s (%s)", room.code, record.name, record.emoji, record.id)
 
     async def close(self, room: Room) -> bool:
-        """關房：全員 WS_CLOSE_KICKED、賽局停止、看著這房的老師切回預設房、房移除。
+        """關房。預設房拒絕（回 False）。
 
-        預設房拒絕關閉（回 False）。班級房只卸載記憶體，Team 列保留（可再 room_open_team）。
+        - 分房：學生移回主房（不踢線）、指派清除、房移除 — 解散分組不中斷上課。
+        - 主房：整個班級場次結束 → 分房一併卸載，全員 WS_CLOSE_KICKED；
+          班級房只卸載記憶體，Team 列保留（可再 room_open_team）。
         """
         if room is self.default or room.code not in self._rooms:
             return False
+        if not room.is_main and room.team_id is not None:
+            return await self._close_sub_room(room)
+        if room.team_id is not None:
+            for sub in [r for r in self.team_rooms(room.team_id) if not r.is_main]:
+                await self._unload_room(sub)
+        await self._unload_room(room)
+        logger.info("[Room] 關房 %s", room.code)
+        self.notify()
+        return True
+
+    async def _unload_room(self, room: Room) -> None:
+        """卸載一間房：全員 WS_CLOSE_KICKED、賽局停止、看著這房的老師切回預設房、房移除。"""
         for record in room.roster.students:
             await _close_kicked(record, "closed")
         await room.arena.stop()
         await room.soccer.stop()
-        del self._rooms[room.code]
+        self._rooms.pop(room.code, None)
         for ws, selected in list(self._teachers.items()):
             if selected is room:
                 await self.select(ws, self.default)
-        logger.info("[Room] 關房 %s", room.code)
+
+    async def _close_sub_room(self, sub: Room) -> bool:
+        """關分房：在線學生移回主房（斷線保留列直接捨棄）、指派清除、老師切回主房。"""
+        assert sub.team_id is not None
+        main = self.get_by_team(sub.team_id)
+        for record in list(sub.roster.students):
+            if main is not None and record.connected:
+                await self.move_student(sub, record, main, persist=False)
+            else:
+                await _close_kicked(record, "closed")
+        await sub.arena.stop()
+        await sub.soccer.stop()
+        self._rooms.pop(sub.code, None)
+        for ws, selected in list(self._teachers.items()):
+            if selected is sub:
+                await self.select(ws, main if main is not None else self.default)
+        # 這間分房的指派全部清掉（解散分組）並持久化
+        assigns = self._assignments.get(sub.team_id)
+        if assigns is not None:
+            for sid in [sid for sid, code in assigns.items() if code == sub.code]:
+                del assigns[sid]
+        await self._save_team_layout(sub.team_id)
+        logger.info("[Room] 關分房 %s（學生移回 %s）", sub.code, main.code if main else "-")
         self.notify()
         return True
+
+    # ---------- 分房（一班多房）----------
+
+    async def create_sub_room(self, main: Room, name: str) -> Room:
+        """在班級主房下開一間分房：獨立產碼、繼承班級密碼與人數上限、不鎖房。
+
+        呼叫端已驗過 can_manage；超過每班分房上限或全伺服器房數上限拋 RoomLimitError。
+        """
+        assert main.is_main and main.team_id is not None
+        self._check_room_limit()
+        subs = [r for r in self.team_rooms(main.team_id) if not r.is_main]
+        if len(subs) >= self._cfg.room_max_sub_rooms:
+            raise RoomLimitError(f"每班分房上限 {self._cfg.room_max_sub_rooms}")
+        settings = RoomSettings(
+            max_students=main.settings.max_students,
+            name=name.strip() or f"分組 {len(subs) + 1}",
+            password_hash=main.settings.password_hash,
+        )
+        sub = self._new_room(
+            self.generate_code(),
+            settings,
+            team_id=main.team_id,
+            owner_teacher_id=main.owner_teacher_id,
+            is_main=False,
+        )
+        await self._save_team_layout(main.team_id)
+        logger.info("[Room] 開分房 %s（%s）← 班級房 %s", sub.code, settings.name, main.code)
+        self.notify()
+        return sub
+
+    async def move_student(
+        self, src: Room, record: StudentRecord, dst: Room, *, persist: bool = True
+    ) -> bool:
+        """把學生從 src 移到 dst：退出賽局 → 換名冊（dst 會補送鎖定狀態與課程關卡）→
+        通知學生 room_joined（client 據此更新房間標籤並退出多人模式）。
+
+        帳號學生移入班級房時把指派持久化（移到主房 = 清指派）；訪客只做活體移動。
+        權限（can_manage）由呼叫端把關。
+        """
+        if src is dst or dst.code not in self._rooms:
+            return False
+        await src.arena.drop(record)
+        await src.soccer.drop(record)
+        await src.roster.detach(record)
+        await dst.roster.add_student(record)
+        if record.ws is not None:
+            await send_safe(record.ws, RoomJoinedMsg(room=dst.info()).model_dump_json())
+        if persist and record.student_id is not None and dst.team_id is not None:
+            assigns = self._assignments.setdefault(dst.team_id, {})
+            if dst.is_main:
+                assigns.pop(record.student_id, None)
+            else:
+                assigns[record.student_id] = dst.code
+            await self._save_team_layout(dst.team_id)
+        logger.info(
+            "[Room] %s%s (%s) 移房 %s → %s",
+            record.name,
+            record.emoji,
+            record.id,
+            src.code,
+            dst.code,
+        )
+        self.notify()
+        return True
+
+    def route_room_for(self, team_id: int, student_id: int) -> Room | None:
+        """帳號學生進房路由：有指派且該分房開著 → 分房；否則主房（沒開回 None）。"""
+        code = self._assignments.get(team_id, {}).get(student_id)
+        if code:
+            sub = self._rooms.get(code)
+            if sub is not None and sub.team_id == team_id:
+                return sub
+        return self.get_by_team(team_id)
+
+    async def _save_team_layout(self, team_id: int) -> None:
+        """分房與指派寫回 Team.settings["rooms"]（無 DB 靜默略過；失敗只 log 不中斷上課）。"""
+        if self._db is None:
+            return
+        subs = [
+            {"code": r.code, "name": r.settings.name}
+            for r in self.team_rooms(team_id)
+            if not r.is_main
+        ]
+        assigns = {str(sid): code for sid, code in self._assignments.get(team_id, {}).items()}
+        try:
+            async with self._db() as session:
+                team = await session.get(Team, team_id)
+                if team is None:
+                    return
+                team.settings = {
+                    **(team.settings or {}),
+                    "rooms": {"subs": subs, "assignments": assigns},
+                }
+                await session.commit()
+        except Exception:  # noqa: BLE001 — 分組是課堂輔助，DB 出錯不中斷上課
+            logger.exception("[Room] 班級 #%d 分房配置寫入資料庫失敗", team_id)
+
+    def _restore_team_layout(self, team: Team) -> None:
+        """room_open_team 時還原分房與指派（Team.settings["rooms"]，容錯：格式不符即略過）。"""
+        layout = team.settings.get("rooms") if isinstance(team.settings, dict) else None
+        if not isinstance(layout, dict):
+            return
+        assigns: dict[int, str] = {}
+        raw_assigns = layout.get("assignments")
+        if isinstance(raw_assigns, dict):
+            for sid, code in raw_assigns.items():
+                with contextlib.suppress(ValueError, TypeError):
+                    assigns[int(sid)] = str(code).strip().upper()
+        self._assignments[team.id] = assigns
+        raw_subs = layout.get("subs")
+        if not isinstance(raw_subs, list):
+            return
+        for sub in raw_subs[: self._cfg.room_max_sub_rooms]:
+            if not isinstance(sub, dict):
+                continue
+            code = str(sub.get("code") or "").strip().upper()
+            # 碼不合法 / 已被占用（極罕見）→ 跳過；下次 _save_team_layout 自然清掉
+            if not code or not code.isalnum() or code in self._rooms:
+                continue
+            if len(self._rooms) >= self._cfg.room_max_rooms:
+                break
+            self._new_room(
+                code,
+                RoomSettings(
+                    max_students=team.max_students,
+                    name=str(sub.get("name") or code),
+                    password_hash=team.join_password_hash,
+                ),
+                team_id=team.id,
+                owner_teacher_id=team.owner_teacher_id,
+                is_main=False,
+            )
 
     def can_manage(self, room: Room, teacher_id: int | None) -> bool:
         """老師能否管理這間房（改設定 / 踢人 / 關房）：班級房限擁有者；記憶體房與預設房共用。"""
@@ -448,6 +640,7 @@ class RoomManager:
             logger.warning("[Room] 班級 #%d 的碼 %s 已被占用，無法開房", team.id, team.team_code)
             return None
         room = self._load_team(team)
+        self._restore_team_layout(team)  # 分房與指派一起還原（重啟後分組不用重排）
         logger.info("[Room] 開房 %s（%s）← 班級 #%d", room.code, room.settings.name, team.id)
         return room
 

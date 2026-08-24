@@ -269,10 +269,19 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
     case 'welcome':
       wsState.myId = msg.id;
       break;
-    case 'room_joined':
+    case 'room_joined': {
+      // 老師移房（一班多房）：同一條連線收到不同房碼 → 退出進行中的多人模式
+      // （賽局是每房一場；伺服器端已把我們移出，client 也要收乾淨）。
+      // 重連 rejoin 進同一房（房碼相同）不觸發，大亂鬥自動回賽局的流程不受影響。
+      const moved = wsState.room !== null && wsState.room.code !== msg.room.code;
       wsState.room = msg.room;
+      if (moved) {
+        bus.emit('mode-takeover', { mode: 'level' });
+        toast(`🚪 老師把你移到「${msg.room.name || msg.room.code}」`, 'success');
+      }
       bus.emit('room-joined', { room: msg.room });
       break;
+    }
     case 'room_rejected':
       // 被拒不重試同一組（否則伺服器若斷線會無限重連被拒）；使用者改完再送出 → rejoin()
       wsState.stopped = true;

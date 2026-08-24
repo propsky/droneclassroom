@@ -240,10 +240,15 @@ class _RoomScopedModel(_StrictModel):
 
 
 class TeacherBroadcastMsg(_RoomScopedModel):
-    """老師廣播：payload 通過白名單驗證後原樣轉發該房全體學生。"""
+    """老師廣播：payload 通過白名單驗證後原樣轉發該房全體學生。
+
+    allRooms：目標房屬於某班級時，套用到該班級的所有房（主房＋分房）——
+    切關 / 訊息 / 鎖定一次下到整班，不用逐分房切換。
+    """
 
     type: Literal["broadcast"]
     payload: TeacherBroadcastPayload
+    allRooms: bool = False
 
 
 # ---------- 老師 → 伺服器：賽局控制 ----------
@@ -385,6 +390,25 @@ class RoomOpenTeamMsg(_StrictModel):
     teamId: int
 
 
+class RoomCreateSubMsg(_StrictModel):
+    """在班級主房下開分房（一班多房）：獨立產碼、繼承班級密碼與人數上限；
+    建好後老師自動切到分房。限班級擁有者；班級主房要先開著。"""
+
+    type: Literal["room_create_sub"]
+    teamId: int
+    name: str = ""
+
+
+class RoomMoveStudentMsg(_RoomScopedModel):
+    """把學生移到另一間房（roomCode = 來源房，缺省 = 選定房）：退出賽局、換名冊、
+    通知學生。帳號學生移入分房會持久化指派（下次登入直接進分房；移回主房 = 清指派）。
+    限來源與目標房都能管理的老師（預設房作為來源例外 — 撈回停在 MAIN 的學生用）。"""
+
+    type: Literal["room_move_student"]
+    studentId: str
+    toRoomCode: str
+
+
 class RoomArchiveTeamMsg(_StrictModel):
     """封存班級（archived_at；列表不再顯示、紀錄保留）；開著的先關房。無 DB 模式忽略。"""
 
@@ -410,7 +434,9 @@ TeacherMessage = Annotated[
     | RoomSelectMsg
     | RoomListReqMsg
     | RoomOpenTeamMsg
-    | RoomArchiveTeamMsg,
+    | RoomArchiveTeamMsg
+    | RoomCreateSubMsg
+    | RoomMoveStudentMsg,
     Field(discriminator="type"),
 ]
 TEACHER_MESSAGE_ADAPTER: TypeAdapter[
@@ -432,6 +458,8 @@ TEACHER_MESSAGE_ADAPTER: TypeAdapter[
     | RoomListReqMsg
     | RoomOpenTeamMsg
     | RoomArchiveTeamMsg
+    | RoomCreateSubMsg
+    | RoomMoveStudentMsg
 ] = TypeAdapter(TeacherMessage)
 
 # ---------- 伺服器 → 客戶端 ----------
@@ -513,6 +541,8 @@ class RoomInfo(BaseModel):
     createdAt: float  # epoch 毫秒（與 Date.now() 同制）
     # 持久化班級（teams 表）id；預設房與無 DB 模式的記憶體房為 None
     teamId: int | None = None
+    # 主房（code = 班級碼）或分房（一班多房；獨立產碼）；非班級房恆為 True
+    isMain: bool = True
 
 
 class TeamInfo(BaseModel):
