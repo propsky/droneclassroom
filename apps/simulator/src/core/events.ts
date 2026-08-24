@@ -42,6 +42,8 @@ export interface CoreEventMap {
   'return-home': { phase: 'pending' | 'return' | 'land' | 'done' };
   /** 過關（手動或程式模式皆會發；net 層據此上報老師） */
   'level-complete': { levelId: string; timeMs: number };
+  /** 計時真正起算（按開始 / 倒數結束）— net 層據此送 level_start 校正伺服器防作弊觀察起點 */
+  'level-timing-started': { levelId: string };
   /** 手動 ↔ 程式模式切換 */
   'mode-changed': { mode: 'manual' | 'program' };
   /** 程式開始 / 結束執行 */

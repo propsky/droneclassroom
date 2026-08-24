@@ -62,6 +62,10 @@ export class TeacherWs {
   private readonly students = new Map<string, StudentInfo>();
   /** 目前選定房碼；null = 伺服器尚未告知（舊伺服器無房間概念 → 訊息不帶 roomCode，照舊運作） */
   private selectedRoom: string | null = null;
+  /** 老師「想要的」房碼（最後一次主動 room_select）— 斷線重連後自動選回用 */
+  private desiredRoom: string | null = null;
+  /** 每條連線只嘗試自動選回一次，避免與伺服器互踢造成迴圈 */
+  private roomRestoreTried = false;
 
   constructor(
     /** 每次（重）連線時取 ticket；回 null 表示已過期 → 走 onUnauthorized */
@@ -103,6 +107,7 @@ export class TeacherWs {
 
     ws.onopen = () => {
       if (this.ws !== ws) return;
+      this.roomRestoreTried = false;
       this.handlers.onStatus(true);
       // （重）連上就補一份房間列表 + 賽局快照 —— 老師中途開後台 / 斷線重連也能看到進行中的賽局
       this.send({ type: 'room_list_req' });
@@ -153,7 +158,10 @@ export class TeacherWs {
    *  房間作用域訊息（廣播 / 賽局）自動帶上目前選定房碼；room_select 先樂觀更新選定房，之後以伺服器 room_list 為準。 */
   send(msg: TeacherToServer): boolean {
     if (!this.connected || !this.ws) return false;
-    if (msg.type === 'room_select') this.selectedRoom = msg.roomCode;
+    if (msg.type === 'room_select') {
+      this.selectedRoom = msg.roomCode;
+      this.desiredRoom = msg.roomCode;
+    }
     this.ws.send(JSON.stringify(this.withRoom(msg)));
     return true;
   }
@@ -206,10 +214,29 @@ export class TeacherWs {
       case 'lock_level':
         this.handlers.onLock(msg.locked);
         break;
-      case 'room_list':
+      case 'room_list': {
         this.selectedRoom = msg.selected;
+        // 斷線重連時伺服器會把老師掛回預設房（add_teacher → MAIN）——
+        // 若老師之前選定的房還開著，自動選回去；否則之後所有廣播 / 開賽 / 切關
+        // 都會靜默打到預設房，班級房學生全體收不到（間歇性「學生沒反應」主因）。
+        const want = this.desiredRoom;
+        if (
+          want &&
+          want !== msg.selected &&
+          !this.roomRestoreTried &&
+          msg.rooms.some((r) => r.code === want)
+        ) {
+          this.roomRestoreTried = true;
+          this.send({ type: 'room_select', roomCode: want });
+          // onopen 補抓的賽局快照帶的是舊選定房 → 選回後重抓一次
+          this.send({ type: 'arena_state_req' });
+          this.send({ type: 'soccer_state_req' });
+        } else if (want && !msg.rooms.some((r) => r.code === want)) {
+          this.desiredRoom = msg.selected; // 原房已關 → 接受伺服器目前的選定
+        }
         this.handlers.onRooms(msg.rooms, msg.selected, msg.teams);
         break;
+      }
       default:
         break; // 其餘（學生端專用的 arena_go / soccer_countdown …）老師端不需處理
     }

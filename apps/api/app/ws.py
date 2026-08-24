@@ -53,6 +53,9 @@ from .protocol import (
     ArenaStopMsg,
     CompleteAckMsg,
     CompleteLevelMsg,
+    LevelStartMsg,
+    PingMsg,
+    PongMsg,
     ProgressMsg,
     RegisterMsg,
     RejectReason,
@@ -66,6 +69,7 @@ from .protocol import (
     RoomRejectedMsg,
     RoomSelectMsg,
     RoomUpdateMsg,
+    ShowMessagePayload,
     SoccerGoalMsg,
     SoccerJoinMsg,
     SoccerLeaveMsg,
@@ -214,6 +218,14 @@ async def _teacher_ticket_ok(ws: WebSocket) -> bool:
 # ---------- 學生連線 ----------
 
 
+async def _notify_not_in_game(room: Room, player_ids: set[str], text: str) -> None:
+    """賽局開始時提醒「在房內但沒加入賽局」的學生（賽局訊息只發給已 join 者）。"""
+    data = ShowMessagePayload(type="show_message", text=text).model_dump_json()
+    for s in room.roster.students:
+        if s.ws is not None and s.connected and s.id not in player_ids:
+            await send_safe(s.ws, data)
+
+
 async def _student_endpoint(ws: WebSocket) -> None:
     """學生 WS：welcome →（進房）→ register / progress / complete_level / 賽局訊息迴圈。
 
@@ -242,6 +254,12 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 logger.info(
                     "[WS] 學生訊息驗證失敗，丟棄：type=%s（%s）", msg["type"], record.name
                 )
+                continue
+            # 心跳基準：任何有效訊息都算「有回應」；ping 另外標記此 client 會送心跳
+            record.last_seen = time.monotonic()
+            if isinstance(valid, PingMsg):
+                record.pinged = True
+                await send_safe(ws, PongMsg(t=valid.t).model_dump_json())
                 continue
             if isinstance(valid, RegisterMsg):
                 # ----- 帳號模式（studentToken）：名字 / emoji 以 DB 為準、自動進所屬班級的房；
@@ -311,6 +329,9 @@ async def _student_endpoint(ws: WebSocket) -> None:
             match valid:
                 case ProgressMsg():
                     await roster.progress(record, valid.levelId)
+                case LevelStartMsg():
+                    # 計時真正起算（按開始 / 倒數結束）→ 校正防作弊觀察起點
+                    roster.level_start(record, valid.levelId)
                 case CompleteLevelMsg():
                     reasons = await roster.complete_level(
                         record, valid.levelId, valid.timeMs, offline=valid.offline
@@ -530,6 +551,11 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                 # ----- 大亂鬥 -----
                 case ArenaStartMsg():
                     await arena.start(valid)
+                    # 賽局訊息只發給已 join 的學生 → 沒進大亂鬥畫面的人會完全沒反應；
+                    # 用廣播橫幅提醒他們加入（老師「按了開始學生卻沒動靜」的第三大成因）
+                    await _notify_not_in_game(
+                        room, set(arena.players), "🎈 老師開始了大亂鬥！點右下角「大亂鬥」加入"
+                    )
                 case ArenaStateReqMsg():
                     await arena.send_snapshot_to(ws)
                 case ArenaStopMsg():
@@ -537,6 +563,11 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                 # ----- 足球 -----
                 case SoccerStartMsg():
                     await soccer.start(valid.durationSec, valid.mode)
+                    await _notify_not_in_game(
+                        room,
+                        set(soccer.players),
+                        "⚽ 老師開始了足球對戰！點右下角「足球對戰」加入",
+                    )
                 case SoccerStateReqMsg():
                     await soccer.send_snapshot_to(ws)
                 case SoccerStopMsg():

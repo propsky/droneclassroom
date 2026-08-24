@@ -18,6 +18,17 @@ export interface ProgressMsg {
   type: 'progress';
   levelId: string;
 }
+/** 計時真正起算（按「開始」→ 倒數結束；freeplay 按開始即送）：
+ *  伺服器以此校正防作弊觀察起點 — progress 在關卡載入就送，看說明的時間不該算進去 */
+export interface LevelStartMsg {
+  type: 'level_start';
+  levelId: string;
+}
+/** 心跳（約 8 秒一次）：伺服器更新 last_seen 並回 pong；client 以 pong 偵測死連線 */
+export interface PingMsg {
+  type: 'ping';
+  t?: number;
+}
 export interface CompleteLevelMsg {
   type: 'complete_level';
   levelId: string;
@@ -45,7 +56,7 @@ export interface SoccerPosMsg {
 export interface SoccerGoalMsg { type: 'soccer_goal' }
 
 export type StudentToServer =
-  | RegisterMsg | ProgressMsg | CompleteLevelMsg
+  | RegisterMsg | ProgressMsg | LevelStartMsg | PingMsg | CompleteLevelMsg
   | ArenaJoinMsg | ArenaLeaveMsg | ArenaPosMsg | ArenaPopMsg
   | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg;
 
@@ -170,9 +181,16 @@ export interface StudentInfo {
   time?: number | null;
   /** 防作弊標記：成績與伺服器觀察到的經過時間差距離譜（老師端顯示 ⚠️，不阻擋） */
   suspect?: boolean;
+  /** 防作弊標記的原因清單（老師 hover 可見；缺省 / 空 = 無） */
+  suspectReasons?: string[];
+  /** 最後收到該生任何訊息距今秒數（心跳約 8s；久未回應 = 網路可能已死但 TCP 未斷） */
+  lastSeenSec?: number | null;
   /** 已註冊學生（帳號模式進場）：students 表 id；訪客為 null/缺省 */
   studentId?: number | null;
 }
+
+/** 心跳回覆（echo ping 的 t） */
+export interface PongMsg { type: 'pong'; t?: number | null }
 
 export interface WelcomeMsg { type: 'welcome'; id: string }
 /** 學生成功進房（register 通過）：帶房間資訊供 HUD 顯示 */
@@ -351,7 +369,7 @@ export type SoccerServerMsg =
   | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg;
 
 export type ServerToClient =
-  | WelcomeMsg | StudentListMsg | StudentUpdateMsg
+  | WelcomeMsg | PongMsg | StudentListMsg | StudentUpdateMsg
   | RoomJoinedMsg | RoomRejectedMsg | RoomClosedMsg | RoomListMsg
   | CompleteAckMsg | ProgressSyncMsg
   | TeacherBroadcastPayload

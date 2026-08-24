@@ -1266,16 +1266,26 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           const ranked = s.time != null;
           const rankClass = ranked && idx < 3 ? `rank-${idx + 1}` : '';
           const time = s.time != null ? `${(s.time / 1000).toFixed(1)}s` : '—';
+          // 警示原因：伺服器帶 suspectReasons（hover 可見「為什麼被標」），沒帶退回通用文案
+          const suspectTitle = s.suspectReasons?.length
+            ? `可疑成績：${s.suspectReasons.join('；')}`
+            : '成績與伺服器觀察時間不符';
           const suspect = s.suspect
-            ? `<span class="suspect-badge" title="成績與伺服器觀察時間不符">${ICONS.alertTriangle}</span>`
+            ? `<span class="suspect-badge" title="${esc(suspectTitle)}">${ICONS.alertTriangle}</span>`
             : '';
+          // 連線狀態 hover：最後回應距今秒數（心跳 8s 一次；>25s 伺服器已標為失聯）
+          const seenTitle = s.connected
+            ? s.lastSeenSec != null
+              ? `線上 · 最後回應 ${s.lastSeenSec.toFixed(0)} 秒前`
+              : '線上'
+            : '離線 / 失聯';
           // 已註冊 tag：帳號模式進場的學生（WS StudentInfo.studentId 對得上 DB students 表）；訪客無
           const registered = s.studentId != null
             ? `<span class="reg-tag" title="班級名單內的學生（帳號登入）">${ICONS.check}已註冊</span>`
             : '';
           return `<tr class="${rankClass}${s.connected ? '' : ' offline'}">
             <td class="mono">${ranked ? idx + 1 : '–'}</td>
-            <td><span class="student-cell" title="${s.connected ? '線上' : '離線'}">${avatarChip(s.emoji, !!s.connected)}<span class="student-name">${esc(s.name)}</span>${registered}${suspect}</span></td>
+            <td><span class="student-cell" title="${esc(seenTitle)}">${avatarChip(s.emoji, !!s.connected)}<span class="student-name">${esc(s.name)}</span>${registered}${suspect}</span></td>
             <td>${esc(s.level ?? '—')}</td>
             <td class="right mono">${time}</td>
             <td class="row-act"><button type="button" class="row-kick" data-id="${esc(s.id)}" data-name="${esc(s.name)}" title="將 ${esc(s.name)} 移出房間">移出</button></td>

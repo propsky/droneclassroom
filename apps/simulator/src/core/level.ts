@@ -190,10 +190,12 @@ export function armLevelStart(): void {
   // （否則恆為 0 秒，還會被伺服器 <1s 防作弊誤標為可疑成績）。HUD 依 freeplay 不顯示計時。
   if (s.current.freeplay) {
     s.startTime = Date.now();
+    bus.emit('level-timing-started', { levelId: s.current.id });
     return;
   }
   runCountdown(() => {
     s.startTime = Date.now();
+    if (s.current) bus.emit('level-timing-started', { levelId: s.current.id });
   });
 }
 

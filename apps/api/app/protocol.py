@@ -52,6 +52,25 @@ class ProgressMsg(_StrictModel):
     levelId: str
 
 
+class LevelStartMsg(_StrictModel):
+    """學生計時真正起算的那一刻（按「開始」→ 3-2-1 倒數結束；freeplay 按開始即送）。
+
+    伺服器以此覆寫防作弊的觀察計時起點 —— progress 在「關卡載入」就送，學生看說明 /
+    聽老師講解的時間會被算進觀察時間，造成規則 3（用時 < 觀察時間一半）大量誤標。
+    舊 client 不送這則（白名單驗證直接忽略未知訊息 → 相容），觀察起點退回 progress。
+    """
+
+    type: Literal["level_start"]
+    levelId: str
+
+
+class PingMsg(_StrictModel):
+    """學生心跳（約 8 秒一次）：更新 last_seen；伺服器回 pong 供 client 偵測死連線。"""
+
+    type: Literal["ping"]
+    t: FiniteFloat | None = None
+
+
 class CompleteLevelMsg(_StrictModel):
     """學生完成關卡 + 用時（毫秒）。"""
 
@@ -129,6 +148,8 @@ class SoccerGoalMsg(_StrictModel):
 StudentMessage = Annotated[
     RegisterMsg
     | ProgressMsg
+    | LevelStartMsg
+    | PingMsg
     | CompleteLevelMsg
     | ArenaJoinMsg
     | ArenaLeaveMsg
@@ -143,6 +164,8 @@ StudentMessage = Annotated[
 STUDENT_MESSAGE_ADAPTER: TypeAdapter[
     RegisterMsg
     | ProgressMsg
+    | LevelStartMsg
+    | PingMsg
     | CompleteLevelMsg
     | ArenaJoinMsg
     | ArenaLeaveMsg
@@ -424,6 +447,10 @@ class StudentInfo(BaseModel):
     level: str | None
     time: float | None
     suspect: bool = False  # 防作弊標記（標記不阻擋，老師後台顯示用）
+    # 防作弊標記的原因清單（老師 hover 可見「為什麼被標」；空 = 無標記）
+    suspectReasons: list[str] = []
+    # 最後收到該生任何訊息距今秒數（心跳約 8s 一次；久未回應 = 網路可能已死但 TCP 未斷）
+    lastSeenSec: float | None = None
     # 已註冊學生（帳號模式進場）：students 表 id；訪客為 None
     studentId: int | None = None
 
@@ -437,6 +464,7 @@ class StudentBrief(BaseModel):
     level: str | None
     time: float | None
     suspect: bool = False
+    suspectReasons: list[str] = []
     studentId: int | None = None
 
 
@@ -445,6 +473,13 @@ class WelcomeMsg(BaseModel):
 
     type: Literal["welcome"] = "welcome"
     id: str
+
+
+class PongMsg(BaseModel):
+    """心跳回覆（echo client 的 t → client 可算 RTT、偵測死連線）。"""
+
+    type: Literal["pong"] = "pong"
+    t: float | None = None
 
 
 class StudentListMsg(BaseModel):

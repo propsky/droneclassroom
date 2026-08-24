@@ -42,8 +42,14 @@ SUSPECT_MIN_TIME_MS = 1000.0
 # 宣稱用時 < 伺服器觀察經過時間的一半 → 可疑。取 0.5 而非 1.0 是保守值：
 # progress 到實際開始玩之間學生可能發呆 / 看題目，觀察時間天然偏長
 SUSPECT_ELAPSED_RATIO = 0.5
-# 再扣 2 秒緩衝：吸收網路延遲與 client / server 計時起點的落差，避免誤判
-SUSPECT_ELAPSED_SLACK_MS = 2000.0
+# 緩衝：吸收網路延遲與 client / server 計時起點的落差。新 client 會送 level_start
+# 對齊觀察起點（誤差只剩網路延遲）；舊 client 觀察起點是 progress（關卡載入），
+# 學生看說明 / 聽講解都算進觀察時間 → 緩衝放寬到 15 秒避免整班誤標
+SUSPECT_ELAPSED_SLACK_MS = 15000.0
+
+# 心跳過期門檻：超過此秒數沒收到該生任何訊息（含 ping）→ 名冊顯示為「失聯」。
+# 只對送過 ping 的 client 生效（舊 client 不送心跳，不能因此誤判掉線）
+HEARTBEAT_STALE_SEC = 25.0
 
 
 @dataclass
@@ -61,14 +67,32 @@ class StudentRecord:
     time: float | None = None
     # 帳號模式進場的學生（students 表 id）；訪客為 None。ws.py register 時設定
     student_id: int | None = None
-    # 防作弊：一旦標記保留到重新 register；levelId → 收到 progress 的 monotonic 秒
+    # 防作弊：一旦標記保留到重新 register；levelId → 收到 progress / level_start 的 monotonic 秒
     suspect: bool = False
+    suspect_reasons: list[str] = field(default_factory=list)
     level_started_at: dict[str, float] = field(default_factory=dict)
+    # 心跳：最後收到任何訊息的 monotonic 秒；pinged = 這個 client 會送心跳（新版）。
+    # 注意：class body 內名稱 `time` 被上面的欄位遮蔽 → 用 lambda 延遲到呼叫時解析模組
+    last_seen: float = field(default_factory=lambda: time.monotonic())
+    pinged: bool = False
 
     @property
     def connected(self) -> bool:
         """連線中 = 尚未斷線且 socket 仍在 CONNECTED 狀態。"""
         return self.ws is not None and self.ws.client_state == WebSocketState.CONNECTED
+
+    @property
+    def alive(self) -> bool:
+        """名冊顯示用：連線中且（會送心跳的 client）近期有回應。
+
+        Wi-Fi 掉線 / iPad 睡眠時 TCP 可能數十秒不斷 → connected 仍 True；
+        心跳過期就當失聯顯示，讓老師看得到真實網路狀態。
+        """
+        if not self.connected:
+            return False
+        if not self.pinged:
+            return True  # 舊 client 不送心跳 → 只能信 socket 狀態
+        return (time.monotonic() - self.last_seen) < HEARTBEAT_STALE_SEC
 
 
 class Roster:
@@ -108,13 +132,16 @@ class Roster:
     async def add_student(self, record: StudentRecord) -> None:
         """學生進房（record 已配發 id 並收過 welcome）：掛上名冊、通知老師。
 
-        老師鎖定關卡中 → 補送鎖定狀態與課程關卡（遲到 / 重整的學生跟上全班進度）。
+        補課：老師廣播過關卡（current_level_id 有值）→ 遲到 / 重整 / 斷線重連的
+        學生一律補載入該關（舊版只在「鎖定中」才補，沒鎖定時重連的學生會停在
+        預設關、跟全班脫節）；鎖定狀態另外補送（影響學生能不能自行換關）。
         """
         self._students.append(record)
-        if record.ws is not None and self.level_locked:
-            await send_safe(
-                record.ws, LockLevelPayload(type="lock_level", locked=True).model_dump_json()
-            )
+        if record.ws is not None:
+            if self.level_locked:
+                await send_safe(
+                    record.ws, LockLevelPayload(type="lock_level", locked=True).model_dump_json()
+                )
             if self.current_level_id is not None:
                 await send_safe(
                     record.ws,
@@ -182,6 +209,9 @@ class Roster:
                 record.level = other.level
                 record.time = other.time
             record.suspect = record.suspect or other.suspect
+            for r in other.suspect_reasons:
+                if r not in record.suspect_reasons:
+                    record.suspect_reasons.append(r)
             self._students.remove(other)
             if other.ws is not None:
                 # dead socket 關閉失敗可忽略
@@ -197,6 +227,15 @@ class Roster:
         record.level = level_id
         record.level_started_at[level_id] = time.monotonic()
         await self.broadcast_to_teachers(self._student_update_payload(record))
+
+    def level_start(self, record: StudentRecord, level_id: str) -> None:
+        """level_start：學生計時真正起算（按開始 / 倒數結束）→ 覆寫觀察計時起點。
+
+        progress 在關卡載入就送、學生看說明的時間會虛增觀察時間；以這一刻為準，
+        規則 3（用時 < 觀察時間一半）才是真正的作弊偵測而不是誤報製造機。
+        """
+        record.level = level_id
+        record.level_started_at[level_id] = time.monotonic()
 
     async def complete_level(
         self, record: StudentRecord, level_id: str, time_ms: float, *, offline: bool = False
@@ -239,6 +278,9 @@ class Roster:
             reasons.append(f"用時 {time_ms:.0f}ms < {SUSPECT_MIN_TIME_MS:.0f}ms")
         if reasons:
             record.suspect = True
+            for r in reasons:
+                if r not in record.suspect_reasons:
+                    record.suspect_reasons.append(r)
             logger.warning(
                 "[防作弊] %s%s 完成 %s 標記可疑：%s",
                 record.name,
@@ -253,6 +295,8 @@ class Roster:
     async def flag_suspect(self, record: StudentRecord, reason: str) -> None:
         """賽局位置級違規累積達門檻 → 標 suspect（沿用既有機制：標記不阻擋），即時通知老師。"""
         logger.warning("[防作弊] %s%s 標記可疑：%s", record.name, record.emoji, reason)
+        if reason not in record.suspect_reasons:
+            record.suspect_reasons.append(reason)
         if record.suspect:
             return
         record.suspect = True
@@ -280,16 +324,21 @@ class Roster:
     # ---------- payload 組裝 ----------
 
     def _student_list_payload(self) -> StudentListMsg:
+        now = time.monotonic()
         return StudentListMsg(
             students=[
                 StudentInfo(
                     id=s.id,
                     name=s.name,
                     emoji=s.emoji,
-                    connected=s.connected,
+                    # alive = socket 在線且心跳沒過期（Wi-Fi 掉線 / 裝置睡眠時
+                    # TCP 可能數十秒不斷 → 老師要看到真實網路狀態）
+                    connected=s.alive,
                     level=s.level,
                     time=s.time,
                     suspect=s.suspect,
+                    suspectReasons=list(s.suspect_reasons),
+                    lastSeenSec=round(now - s.last_seen, 1) if s.connected else None,
                     studentId=s.student_id,
                 )
                 for s in self._students
@@ -305,6 +354,7 @@ class Roster:
                 level=s.level,
                 time=s.time,
                 suspect=s.suspect,
+                suspectReasons=list(s.suspect_reasons),
                 studentId=s.student_id,
             )
         )

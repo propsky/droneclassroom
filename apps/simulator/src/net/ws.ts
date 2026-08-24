@@ -36,6 +36,37 @@ const send = sendToServer;
 /** 老師廣播比關卡資料早到（遲到者剛連上時）→ 暫存，levels-ready 後補載入 */
 let pendingLevelId: string | null = null;
 
+// ---- 心跳：Wi-Fi 掉線 / 裝置睡眠時 TCP 可能數十秒不斷，靠 ping/pong 偵測死連線 ----
+const HEARTBEAT_MS = 8000;
+const PONG_TIMEOUT_MS = 25000; // 超過沒收到 pong → 視為死連線，主動斷開觸發重連
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let lastPongAt = 0;
+
+function startHeartbeat(): void {
+  stopHeartbeat();
+  lastPongAt = Date.now();
+  heartbeatTimer = setInterval(() => {
+    if (wsState.ws?.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
+      console.warn('[WS] 心跳逾時，主動斷開重連');
+      try {
+        wsState.ws.close();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    send({ type: 'ping', t: Date.now() });
+  }, HEARTBEAT_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatTimer != null) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+}
+
 export function initWs(): void {
   // 登出學生帳號（頭像下拉）：主動斷線、不自動重連（token 已清；使用者重送登入表單才連 → rejoin）
   bus.on('student-logout', () => {
@@ -59,6 +90,9 @@ export function initWs(): void {
   initProgressQueue();
   bus.on('level-complete', ({ levelId, timeMs }) => reportComplete(levelId, timeMs));
   bus.on('level-loaded', ({ level }) => send({ type: 'progress', levelId: level.id }));
+  // 計時真正起算（按開始 / 倒數結束）→ 校正伺服器防作弊觀察起點，
+  // 否則「看說明的時間」會被算進觀察時間、短關正常完成也被標可疑
+  bus.on('level-timing-started', ({ levelId }) => send({ type: 'level_start', levelId }));
   bus.on('levels-ready', () => {
     if (pendingLevelId) {
       const id = pendingLevelId;
@@ -115,6 +149,7 @@ export function connectToTeacher(): void {
       toast('🟢 已連線到課程', 'success');
     }
     wsState.everConnected = true;
+    startHeartbeat();
     // 通知多人模組（大亂鬥重連後自動補送 arena_join）
     bus.emit('ws-connected', {});
   };
@@ -132,6 +167,7 @@ export function connectToTeacher(): void {
   ws.onclose = (ev) => {
     if (wsState.ws !== ws) return;
     wsState.connected = false;
+    stopHeartbeat();
     console.log('[WS] 連線關閉', ev.code);
     if (ev.code === WS_CLOSE_REPLACED) {
       // 同名在其他裝置登入 → 不搶連線
@@ -144,7 +180,11 @@ export function connectToTeacher(): void {
       onRoomLeft('kicked');
       return;
     }
-    if (wsState.everConnected) wsState.wasDown = true;
+    // 首次斷線提示（重連期間不重複洗版；恢復時 onopen 會 toast「已恢復連線」）
+    if (wsState.everConnected && !wsState.wasDown) {
+      wsState.wasDown = true;
+      toast('📡 連線中斷，自動重連中…', 'warning');
+    }
     scheduleReconnect();
   };
 
@@ -241,6 +281,9 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       break;
     case 'room_closed':
       onRoomLeft(msg.reason);
+      break;
+    case 'pong':
+      lastPongAt = Date.now(); // 心跳回應（死連線偵測基準）
       break;
     case 'complete_ack':
       // 帳號模式：成績入庫確認 → 佇列移除該筆 + 本地標記進度（net/progressQueue.ts）
