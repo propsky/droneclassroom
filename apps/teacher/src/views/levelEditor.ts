@@ -9,7 +9,9 @@ import type {
 } from '@creafly/shared';
 import {
   EDITOR_HALF,
+  EDITOR_MAX_Y,
   EDITOR_WORLD,
+  heightHueColor,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
   applyLevelGoalPreset,
@@ -170,7 +172,19 @@ export function openLevelEditor(
             <div class="lvl-props-grid">
               <div class="field"><label class="field-label" for="le-px">X（左右）</label><input id="le-px" type="number" step="0.5" class="mono"></div>
               <div class="field"><label class="field-label" for="le-pz">Z（前後）</label><input id="le-pz" type="number" step="0.5" class="mono"></div>
-              <div class="field" id="le-py-wrap"><label class="field-label" for="le-py">Y（高度）</label><input id="le-py" type="number" step="0.5" min="0" max="8" class="mono"></div>
+              <div class="field" id="le-py-wrap">
+                <label class="field-label" for="le-py">Y（高度）<span id="le-py-readout" class="mono le-py-readout"></span></label>
+                <input id="le-py-range" type="range" min="0" max="8" step="0.5" class="le-height-range" aria-label="高度滑桿">
+                <input id="le-py" type="number" step="0.5" min="0" max="8" class="mono">
+                <div class="le-height-presets" id="le-height-presets">
+                  <button type="button" class="btn btn-ghost btn-xs" data-y="0.5">地面</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-y="1.5">低空</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-y="2">穿圈</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-y="3.5">中高</button>
+                  <button type="button" class="btn btn-ghost btn-xs" data-y="5">高空</button>
+                </div>
+                <p class="note">PgUp / PgDn 微調高度 · 側視圖確認</p>
+              </div>
               <div class="field" id="le-size-wrap" hidden><label class="field-label" for="le-size">邊長</label><input id="le-size" type="number" step="0.5" min="0.5" max="6" class="mono"></div>
               <div class="field" id="le-label-wrap" hidden><label class="field-label" for="le-label">標籤</label><input id="le-label" type="text" maxlength="40"></div>
               <div class="field" id="le-solid-wrap" hidden><label class="check-row"><input type="checkbox" id="le-solid">實心碰撞（會擋住）</label></div>
@@ -234,6 +248,13 @@ export function openLevelEditor(
           <div class="lvl-editor-canvas-wrap">
             <canvas id="le-canvas" width="${CANVAS_PX}" height="${CANVAS_PX}" aria-label="俯視編輯器"></canvas>
           </div>
+          <div class="lvl-elev-wrap">
+            <div class="lvl-canvas-head">
+              <span class="note">側視高度（X 軸 · Y 向上）</span>
+              <span class="mono" id="le-elev-hint"></span>
+            </div>
+            <canvas id="le-elev" width="480" height="120" aria-label="側視高度圖"></canvas>
+          </div>
           <p class="note lvl-legend">
             <span class="le-legend-ring">○ 圈</span>
             <span class="le-legend-solid">■ 實心</span>
@@ -253,6 +274,8 @@ export function openLevelEditor(
   const q = <T extends HTMLElement>(sel: string): T => backdrop.querySelector<T>(sel)!;
   const canvas = q<HTMLCanvasElement>('#le-canvas');
   const ctx = canvas.getContext('2d')!;
+  const elevCanvas = q<HTMLCanvasElement>('#le-elev');
+  const elevCtx = elevCanvas.getContext('2d')!;
   const saveHint = q<HTMLElement>('#le-save-hint');
   const propsPanel = q<HTMLElement>('#le-props');
   const cursorEl = q<HTMLElement>('#le-cursor');
@@ -290,6 +313,12 @@ export function openLevelEditor(
     selection?.kind === kind && selection.index === index;
 
   const emptyBanner = q<HTMLElement>('#le-empty-banner');
+
+  const syncPyControls = (y: number): void => {
+    q<HTMLInputElement>('#le-py').value = String(y);
+    q<HTMLInputElement>('#le-py-range').value = String(y);
+    q<HTMLElement>('#le-py-readout').textContent = ` ${y.toFixed(1)} m`;
+  };
 
   const updateEmptyBanner = (): void => {
     emptyBanner.hidden = !isLevelLayoutEmpty(level);
@@ -353,8 +382,11 @@ export function openLevelEditor(
       const [ox, oz] = worldToCanvas(obs.x, obs.z);
       const r = ((obs.size ?? 1) / WORLD) * w * 0.5;
       const sel = isSelected('obstacle', i);
-      ctx.fillStyle = obs.solid ? 'rgba(248,113,113,0.55)' : 'rgba(74,222,128,0.4)';
+      ctx.fillStyle = heightHueColor(obs.y, obs.solid ? 0.75 : 0.5);
       ctx.fillRect(ox - r, oz - r, r * 2, r * 2);
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '8px monospace';
+      ctx.fillText(`${obs.y}m`, ox - 10, oz - r - 3);
       if (sel) {
         ctx.strokeStyle = '#60a5fa';
         ctx.lineWidth = 2;
@@ -364,10 +396,13 @@ export function openLevelEditor(
 
     (level.balloons ?? []).forEach((b, i) => {
       const [bx, bz] = worldToCanvas(b.x, b.z);
-      ctx.fillStyle = 'rgba(251,191,36,0.75)';
+      ctx.fillStyle = heightHueColor(b.y, 0.8);
       ctx.beginPath();
       ctx.arc(bx, bz, 10, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '8px monospace';
+      ctx.fillText(`${b.y}m`, bx - 10, bz - 12);
       if (isSelected('balloon', i)) {
         ctx.strokeStyle = '#60a5fa';
         ctx.lineWidth = 2;
@@ -407,16 +442,73 @@ export function openLevelEditor(
 
     (level.rings ?? []).forEach((ring, i) => {
       const [rx, rz] = worldToCanvas(ring.x, ring.z);
-      ctx.strokeStyle = isSelected('ring', i) ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : '#38bdf8';
-      ctx.lineWidth = isSelected('ring', i) ? 3 : 2;
+      const sel = isSelected('ring', i);
+      ctx.strokeStyle = sel ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : heightHueColor(ring.y, 0.95);
+      ctx.lineWidth = sel ? 3 : 2;
       ctx.beginPath();
       ctx.arc(rx, rz, 14, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = '#e2e8f0';
       ctx.font = '10px sans-serif';
       ctx.fillText(ring.label ?? String(i + 1), rx - 4, rz + 3);
+      ctx.font = '8px monospace';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(`${ring.y}m`, rx - 10, rz - 16);
     });
+    drawElev();
     updateEmptyBanner();
+  };
+
+  const drawElev = (): void => {
+    const w = elevCanvas.width;
+    const h = elevCanvas.height;
+    elevCtx.fillStyle = '#141c28';
+    elevCtx.fillRect(0, 0, w, h);
+    const toEx = (x: number): number => ((x + HALF) / WORLD) * w;
+    const toEy = (y: number): number => h - 8 - (y / EDITOR_MAX_Y) * (h - 20);
+    elevCtx.strokeStyle = 'rgba(251,191,36,0.55)';
+    elevCtx.lineWidth = 1;
+    elevCtx.beginPath();
+    elevCtx.moveTo(0, toEy(0));
+    elevCtx.lineTo(w, toEy(0));
+    elevCtx.stroke();
+    for (let y = 0; y <= EDITOR_MAX_Y; y += 2) {
+      elevCtx.strokeStyle = 'rgba(255,255,255,0.06)';
+      elevCtx.beginPath();
+      elevCtx.moveTo(0, toEy(y));
+      elevCtx.lineTo(w, toEy(y));
+      elevCtx.stroke();
+      elevCtx.fillStyle = 'rgba(148,163,184,0.45)';
+      elevCtx.font = '8px monospace';
+      elevCtx.fillText(`${y}m`, 2, toEy(y) - 2);
+    }
+    const mark = (x: number, y: number, label: string, on: boolean): void => {
+      const ex = toEx(x);
+      const ey = toEy(y);
+      elevCtx.fillStyle = heightHueColor(y);
+      elevCtx.beginPath();
+      elevCtx.arc(ex, ey, on ? 7 : 4, 0, Math.PI * 2);
+      elevCtx.fill();
+      if (on) {
+        elevCtx.strokeStyle = '#60a5fa';
+        elevCtx.lineWidth = 2;
+        elevCtx.stroke();
+        elevCtx.fillStyle = '#e2e8f0';
+        elevCtx.font = '9px sans-serif';
+        elevCtx.fillText(`${label} · Y=${y}`, Math.min(ex + 8, w - 80), ey - 6);
+      }
+    };
+    (level.rings ?? []).forEach((r, i) =>
+      mark(r.x, r.y, r.label ?? `圈${i + 1}`, selection?.kind === 'ring' && selection.index === i),
+    );
+    (level.obstacles ?? []).forEach((o, i) =>
+      mark(o.x, o.y, `障${i + 1}`, selection?.kind === 'obstacle' && selection.index === i),
+    );
+    (level.balloons ?? []).forEach((b, i) =>
+      mark(b.x, b.y, `球${i + 1}`, selection?.kind === 'balloon' && selection.index === i),
+    );
+    q<HTMLElement>('#le-elev-hint').textContent =
+      selection && selection.kind !== 'zone' ? '藍低 → 紅高' : '選取圈/障礙/氣球以確認高度';
   };
 
   const syncFormFromLevel = (): void => {
@@ -497,7 +589,7 @@ export function openLevelEditor(
       if (!r) return setSelection(null);
       q<HTMLInputElement>('#le-px').value = String(r.x);
       q<HTMLInputElement>('#le-pz').value = String(r.z);
-      q<HTMLInputElement>('#le-py').value = String(r.y);
+      syncPyControls(r.y);
       pyWrap.hidden = false;
       sizeWrap.hidden = true;
       labelWrap.hidden = false;
@@ -511,7 +603,7 @@ export function openLevelEditor(
       if (!o) return setSelection(null);
       q<HTMLInputElement>('#le-px').value = String(o.x);
       q<HTMLInputElement>('#le-pz').value = String(o.z);
-      q<HTMLInputElement>('#le-py').value = String(o.y);
+      syncPyControls(o.y);
       q<HTMLInputElement>('#le-size').value = String(o.size ?? 1);
       q<HTMLInputElement>('#le-solid').checked = !!o.solid;
       pyWrap.hidden = false;
@@ -523,7 +615,7 @@ export function openLevelEditor(
       if (!b) return setSelection(null);
       q<HTMLInputElement>('#le-px').value = String(b.x);
       q<HTMLInputElement>('#le-pz').value = String(b.z);
-      q<HTMLInputElement>('#le-py').value = String(b.y);
+      syncPyControls(b.y);
       pyWrap.hidden = false;
       sizeWrap.hidden = true;
       labelWrap.hidden = true;
@@ -659,6 +751,34 @@ export function openLevelEditor(
     else if (kind === 'balloon') level.balloons = (level.balloons ?? []).filter((_, i) => i !== index);
     else level.passZones = (level.passZones ?? []).filter((_, i) => i !== index);
     setSelection(null);
+    scheduleSave();
+  };
+
+  const nudgeHeight = (dy: number): void => {
+    if (!selection || selection.kind === 'zone') return;
+    const step = 0.5;
+    const clampY = (y: number): number => Math.max(0, Math.min(EDITOR_MAX_Y, Math.round((y + dy) / step) * step));
+    if (selection.kind === 'ring') {
+      const rings = [...(level.rings ?? [])];
+      const r = rings[selection.index];
+      if (!r) return;
+      rings[selection.index] = { ...r, y: clampY(r.y) };
+      level.rings = rings;
+    } else if (selection.kind === 'obstacle') {
+      const obs = [...(level.obstacles ?? [])];
+      const o = obs[selection.index];
+      if (!o) return;
+      obs[selection.index] = { ...o, y: clampY(o.y) };
+      level.obstacles = obs;
+    } else if (selection.kind === 'balloon') {
+      const balloons = [...(level.balloons ?? [])];
+      const b = balloons[selection.index];
+      if (!b) return;
+      balloons[selection.index] = { ...b, y: clampY(b.y) };
+      level.balloons = balloons;
+    }
+    syncPropsPanel();
+    draw();
     scheduleSave();
   };
 
@@ -835,7 +955,7 @@ export function openLevelEditor(
     });
   });
 
-  ['#le-px', '#le-pz', '#le-py', '#le-size', '#le-label', '#le-solid', '#le-face-yaw', '#le-face-tol',
+  ['#le-px', '#le-pz', '#le-py', '#le-py-range', '#le-size', '#le-label', '#le-solid', '#le-face-yaw', '#le-face-tol',
     '#le-zone-minx', '#le-zone-maxx', '#le-zone-minz', '#le-zone-maxz',
     '#le-zone-miny', '#le-zone-maxy', '#le-zone-yaw', '#le-zone-tol'].forEach((sel) => {
     q<HTMLElement>(sel).addEventListener('input', () => applyPropsToSelection());
@@ -843,6 +963,19 @@ export function openLevelEditor(
   });
 
   q<HTMLButtonElement>('#le-del-sel').addEventListener('click', deleteSelection);
+
+  q<HTMLInputElement>('#le-py-range').addEventListener('input', () => {
+    q<HTMLInputElement>('#le-py').value = q<HTMLInputElement>('#le-py-range').value;
+    applyPropsToSelection();
+  });
+  q<HTMLElement>('#le-height-presets').querySelectorAll<HTMLButtonElement>('button[data-y]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const y = Number(btn.dataset['y']);
+      if (!Number.isFinite(y)) return;
+      syncPyControls(y);
+      applyPropsToSelection();
+    });
+  });
 
   backdrop.addEventListener('keydown', (e) => {
     if (!(e.target instanceof HTMLElement)) return;
@@ -856,6 +989,13 @@ export function openLevelEditor(
     else if (e.key === 'ArrowRight') nudgeSelection(step, 0);
     else if (e.key === 'ArrowUp') nudgeSelection(0, -step);
     else if (e.key === 'ArrowDown') nudgeSelection(0, step);
+    else if (e.key === 'PageUp') {
+      e.preventDefault();
+      nudgeHeight(step);
+    } else if (e.key === 'PageDown') {
+      e.preventDefault();
+      nudgeHeight(-step);
+    }
   });
   backdrop.tabIndex = -1;
 

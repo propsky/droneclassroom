@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # 免登入模式（測試用）：無 DB 時後台不需 PIN；有 DB 時 /auth/teacher/login 任意帳密
     # 皆登入預設老師 dev@local。正式環境務必維持 False
     teacher_auth_disabled: bool = False
+    # 老師自行註冊邀請碼；未設定 = 開放註冊（開發預設）。正式環境建議設一組密碼
+    teacher_register_code: str | None = None
+    # 老師忘記密碼重設 token 有效秒數（預設 1 小時）
+    password_reset_ttl_sec: int = 3600
+    # 老師後台對外網址（重設密碼信連結用）
+    public_teacher_url: str = "https://droneclassroom.pages.dev/teacher/"
     # 寄信（AWS SES）：mail_from 未設定 = 寄信停用（記 log 不真寄，開發/測試預設）
     # 例：MAIL_FROM="CREAFLY <noreply@propskynet.com>"（寄件網域須已在 SES 完成 DKIM 驗證）
     mail_from: str | None = None

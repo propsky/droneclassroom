@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampWorld, snapClampXZ, snapWorld } from './levelEditorUtils';
+import { clampWorld, heightHueColor, snapClampXZ, snapWorld } from './levelEditorUtils';
 
 describe('levelEditorUtils', () => {
   it('snapWorld 1m 格', () => {
@@ -16,5 +16,10 @@ describe('levelEditorUtils', () => {
     const p = snapClampXZ(1.23, -4.56, 0.5);
     expect(p.x).toBe(1);
     expect(p.z).toBe(-4.5);
+  });
+
+  it('heightHueColor 低藍高紅', () => {
+    expect(heightHueColor(0)).toContain('220');
+    expect(heightHueColor(8)).toContain('0');
   });
 });

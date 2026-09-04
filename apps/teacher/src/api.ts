@@ -25,6 +25,8 @@ import type {
   TeacherLoginResponse,
   TeacherMe,
   TeacherMeResponse,
+  TeacherPasswordResetConfirm,
+  TeacherPasswordResetRequest,
   TeacherRegisterRequest,
   TeamCatalogListResponse,
 } from '@creafly/shared';
@@ -99,17 +101,25 @@ export function isOfflineError(err: unknown): boolean {
 }
 
 /** 依狀態碼轉成給老師看的帳號訊息（登入 / 註冊共用；ctx 決定 401 文案） */
-export function authErrorText(err: unknown, ctx: 'login' | 'register' | 'password' = 'login'): string {
+export function authErrorText(
+  err: unknown,
+  ctx: 'login' | 'register' | 'password' | 'reset' | 'forgot' = 'login',
+): string {
   if (!(err instanceof ApiError)) return '發生未知錯誤，請再試一次';
   switch (err.status) {
     case 0:
       return '無法連到伺服器，請確認後端已啟動';
     case 400:
     case 422:
-      return ctx === 'password' ? '新密碼格式不符（至少 8 碼）' : '資料格式不正確，請檢查後再試';
-    case 401:
+      return ctx === 'password' || ctx === 'reset'
+        ? '新密碼格式不符（至少 8 碼）'
+        : '資料格式不正確，請檢查後再試';
     case 403:
+      return ctx === 'register' ? '註冊邀請碼不正確' : '帳號或密碼錯誤';
+    case 401:
       return ctx === 'password' ? '目前密碼不正確' : '帳號或密碼錯誤';
+    case 404:
+      return ctx === 'reset' ? '重設連結無效或已過期，請重新申請' : '找不到資源';
     case 409:
       return '這個 email 已註冊過，直接登入';
     case 429:
@@ -117,7 +127,7 @@ export function authErrorText(err: unknown, ctx: 'login' | 'register' | 'passwor
     case 503:
       return '伺服器尚未啟用帳號功能';
     default:
-      return `${ctx === 'register' ? '註冊' : ctx === 'password' ? '更新密碼' : '登入'}失敗（HTTP ${err.status}）`;
+      return `${ctx === 'register' ? '註冊' : ctx === 'password' ? '更新密碼' : ctx === 'reset' ? '重設密碼' : ctx === 'forgot' ? '寄送重設信' : '登入'}失敗（HTTP ${err.status}）`;
   }
 }
 
@@ -166,8 +176,13 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
 // ---------- 老師帳號 ----------
 
 /** POST /auth/teacher/register（201）→ 直接視同登入（回傳含 ticket） */
-export function register(email: string, password: string, name: string): Promise<TeacherLoginResponse> {
-  const body: TeacherRegisterRequest = { email, password, name };
+export function register(
+  email: string,
+  password: string,
+  name: string,
+  registerCode?: string,
+): Promise<TeacherLoginResponse> {
+  const body: TeacherRegisterRequest = { email, password, name, registerCode };
   return request<TeacherLoginResponse>('/auth/teacher/register', { method: 'POST', body });
 }
 
@@ -195,6 +210,24 @@ export async function logout(): Promise<void> {
 export function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   const body: TeacherChangePasswordRequest = { currentPassword, newPassword };
   return request<void>('/auth/teacher/password', { method: 'POST', body, auth: true });
+}
+
+/** POST /auth/teacher/password-reset/request — 寄重設密碼連結 */
+export function requestPasswordReset(email: string): Promise<{ ok: true }> {
+  const body: TeacherPasswordResetRequest = { email };
+  return request<{ ok: true }>('/auth/teacher/password-reset/request', { method: 'POST', body });
+}
+
+/** POST /auth/teacher/password-reset/confirm — 重設密碼並登入 */
+export function confirmPasswordReset(
+  resetToken: string,
+  newPassword: string,
+): Promise<TeacherLoginResponse> {
+  const body: TeacherPasswordResetConfirm = { resetToken, newPassword };
+  return request<TeacherLoginResponse>('/auth/teacher/password-reset/confirm', {
+    method: 'POST',
+    body,
+  });
 }
 
 // ---------- 班級學生名單（老師建名單 + 邀請；契約見 rest.ts 學生段落） ----------

@@ -70,7 +70,7 @@ async def issue_session(
 ) -> str:
     """發一個 session：回傳明文 token（只此一次），DB 存 sha256。不 commit（呼叫端決定）。
 
-    purpose：auth = 登入 session（滑動延長）；invite = 學生邀請 token（一次性，accept 後撤銷）。
+    purpose：auth = 登入 session（滑動延長）；invite = 學生邀請 token；reset = 老師重設密碼 token。
     """
     now = now or _now()
     token = secrets.token_urlsafe(32)
@@ -236,3 +236,17 @@ async def get_current_teacher(current: CurrentSession, session: DbSession) -> Te
 
 
 CurrentTeacher = Annotated[Teacher, Depends(get_current_teacher)]
+
+
+async def get_current_student_session(request: Request, session: DbSession) -> Session:
+    """Bearer → 有效學生 auth session 列；無效 401。"""
+    settings: Settings = request.app.state.settings
+    resolved = await resolve_student_session(session, bearer_token(request), settings=settings)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="請先登入")
+    row, _, _ = resolved
+    await session.commit()
+    return row
+
+
+CurrentStudentSession = Annotated[Session, Depends(get_current_student_session)]

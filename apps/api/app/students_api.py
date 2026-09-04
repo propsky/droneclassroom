@@ -12,6 +12,7 @@
   GET  /auth/student/invite/{token}   設密碼頁載入時查邀請對象
   POST /auth/student/invite/accept    設密碼 → 完成即登入
   GET  /auth/student/me               驗 token + 滑動延長
+  POST /auth/student/logout           撤銷目前 session（Bearer）
 
 設計取捨：
 - student_code 每班流水（'01' 起）：配號前 SELECT ... FOR UPDATE 鎖住 team 列，
@@ -35,6 +36,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .accounts import (
+    CurrentStudentSession,
     CurrentTeacher,
     DbSession,
     bearer_token,
@@ -139,6 +141,10 @@ class StudentLoginResponse(BaseModel):
     token: str
     expiresIn: int  # noqa: N815
     me: StudentMe
+
+
+class StudentLogoutResponse(BaseModel):
+    ok: Literal[True] = True
 
 
 class InviteAcceptRequest(BaseModel):
@@ -695,3 +701,26 @@ async def student_me(request: Request, session: DbSession) -> StudentMe:
     _, student, team = resolved
     await session.commit()  # 滑動延長（若有）落地
     return _me(student, team)
+
+
+@router.post("/auth/student/logout")
+async def student_logout(
+    request: Request, session: DbSession, current: CurrentStudentSession
+) -> StudentLogoutResponse:
+    """撤銷目前學生 session（與老師 logout 對齊）。"""
+    student = await session.get(Student, current.principal_id)
+    team = await session.get(Team, student.team_id) if student is not None else None
+    await revoke_session(session, current)
+    if student is not None and team is not None:
+        await record_event(
+            session,
+            event_type="student.logout",
+            actor_type="student",
+            actor_id=student.id,
+            org_id=team.org_id,
+            team_id=team.id,
+            student_id=student.id,
+            payload={"ip": request.client.host if request.client else "?"},
+        )
+    await session.commit()
+    return StudentLogoutResponse()

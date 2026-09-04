@@ -62,8 +62,7 @@ jobs:
 
       # ==========================================
       # 4. 透過 SSM 叫 EC2 更新（無 SSH、無金鑰）
-      #    TEACHER_AUTH_DISABLED=1 = 後台免登入。
-      #    正式的帳密登入/註冊流程完成後，移除此行改接新認證。
+      #    TEACHER_AUTH_DISABLED 勿設為 1（正式環境）；註冊碼可設 TEACHER_REGISTER_CODE。
       # ==========================================
       - name: Deploy via SSM
         run: |
@@ -94,7 +93,6 @@ jobs:
             -e "VIRTUAL_PORT=3000" \
             -e "LETSENCRYPT_HOST=${{ env.API_DOMAIN }}" \
             -e "LETSENCRYPT_EMAIL=${{ env.LETSENCRYPT_EMAIL }}" \
-            -e "TEACHER_AUTH_DISABLED=1" \
             -e "ALLOWED_ORIGINS=${{ env.ALLOWED_ORIGINS }}" \
             --env-file /opt/creafly/creafly.env \
             -p 3000:3000 \

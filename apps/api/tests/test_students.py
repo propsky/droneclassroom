@@ -495,3 +495,22 @@ def test_WS_token無效_退回訪客路徑照舊(db_client: TestClient) -> None:
         joined = s.receive_json()
         assert joined["type"] == "room_joined" and joined["room"]["code"] == "MAIN"
     # removed 學生的舊 token 也一樣退回訪客（resolve 會擋掉非 active）
+
+
+@needs_db
+def test_學生登出撤銷session(db_client: TestClient) -> None:
+    headers, team_id, team_code = _setup_team(db_client)
+    created = db_client.post(
+        f"/api/teams/{team_id}/students",
+        json={"students": [{"name": "登出測", "emoji": "🐸"}], "sendInvites": False},
+        headers=headers,
+    ).json()["created"][0]
+    login = db_client.post(
+        "/auth/student/login",
+        json={"teamCode": team_code, "studentCode": created["studentCode"]},
+    )
+    assert login.status_code == 200
+    token = login.json()["token"]
+    assert db_client.get("/auth/student/me", headers=_bearer(token)).status_code == 200
+    assert db_client.post("/auth/student/logout", headers=_bearer(token)).status_code == 200
+    assert db_client.get("/auth/student/me", headers=_bearer(token)).status_code == 401

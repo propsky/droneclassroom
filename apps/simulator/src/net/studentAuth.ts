@@ -151,3 +151,11 @@ export function fetchInviteInfo(inviteToken: string): Promise<AuthResult<InviteI
 export function acceptInvite(req: InviteAcceptRequest): Promise<AuthResult<StudentLoginResponse>> {
   return request<StudentLoginResponse>('/auth/student/invite/accept', postJson(req));
 }
+
+/** POST /auth/student/logout — 撤銷伺服器 session */
+export function studentLogout(token: string): Promise<AuthResult<{ ok: true }>> {
+  return request<{ ok: true }>('/auth/student/logout', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}

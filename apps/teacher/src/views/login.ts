@@ -2,7 +2,7 @@
 // 成功拿到 session（register / login 回應同型）→ saveSession → onSuccess。
 // 免登入模式（/api/info.teacherAuthDisabled）多一顆「測試模式：直接進入」按鈕。
 // 另含 renderOffline：開頁 /me 連不上伺服器時用，保留 token、不登出，自動重試。
-import { ApiError, authErrorText, login, register, saveSession } from '../api';
+import { ApiError, authErrorText, confirmPasswordReset, login, register, requestPasswordReset, saveSession } from '../api';
 import { ICONS } from '../icons';
 
 /** 免登入模式的假帳號（伺服器不驗，任意即可） */
@@ -15,13 +15,17 @@ export interface LoginOptions {
   onSuccess(): void;
   /** 免登入模式：顯示「測試模式：直接進入」 */
   authDisabled?: boolean;
+  /** 註冊需要邀請碼時顯示欄位 */
+  registerCodeRequired?: boolean;
+  /** URL ?reset= 帶入的重設 token */
+  resetToken?: string;
   /** 開頁時的提示（如「登入已過期，請重新登入」），顯示在表單上方 */
   notice?: string;
   /** 預設開哪個分頁 */
-  initialTab?: 'login' | 'register';
+  initialTab?: 'login' | 'register' | 'forgot' | 'reset';
 }
 
-type Tab = 'login' | 'register';
+type Tab = 'login' | 'register' | 'forgot' | 'reset';
 
 export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
   root.innerHTML = `
@@ -47,6 +51,9 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
             <label class="field-label" for="li-pass">密碼</label>
             <input id="li-pass" type="password" autocomplete="current-password" placeholder="密碼">
           </div>
+          <div class="login-forgot-row">
+            <button type="button" class="btn btn-link btn-sm" id="goto-forgot">忘記密碼？</button>
+          </div>
           <div id="login-error" class="login-error" role="alert" hidden></div>
           <div class="login-actions">
             <button type="submit" class="btn btn-primary btn-lg" id="login-btn">登入</button>
@@ -62,6 +69,14 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
             <label class="field-label" for="rg-email">Email</label>
             <input id="rg-email" type="text" inputmode="email" autocomplete="username" placeholder="name@school.edu.tw">
           </div>
+          ${
+            opts.registerCodeRequired
+              ? `<div class="field">
+                   <label class="field-label" for="rg-code">註冊邀請碼</label>
+                   <input id="rg-code" type="text" autocomplete="off" placeholder="向管理員索取">
+                 </div>`
+              : ''
+          }
           <div class="field">
             <label class="field-label" for="rg-pass">密碼（至少 ${PASSWORD_MIN} 碼）</label>
             <input id="rg-pass" type="password" autocomplete="new-password" placeholder="至少 ${PASSWORD_MIN} 碼">
@@ -73,6 +88,36 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
           <div id="register-error" class="login-error" role="alert" hidden></div>
           <div class="login-actions">
             <button type="submit" class="btn btn-primary btn-lg" id="register-btn">建立帳號</button>
+          </div>
+        </form>
+
+        <form id="forgot-form" class="login-form" data-panel="forgot" novalidate hidden>
+          <p class="login-hint">輸入註冊 email，我們會寄重設密碼連結（若帳號存在）。</p>
+          <div class="field">
+            <label class="field-label" for="fg-email">Email</label>
+            <input id="fg-email" type="text" inputmode="email" autocomplete="username" placeholder="name@school.edu.tw">
+          </div>
+          <div id="forgot-error" class="login-error" role="alert" hidden></div>
+          <div id="forgot-ok" class="login-notice" role="status" hidden></div>
+          <div class="login-actions login-actions-split">
+            <button type="button" class="btn btn-ghost" id="forgot-back">返回登入</button>
+            <button type="submit" class="btn btn-primary" id="forgot-btn">寄送連結</button>
+          </div>
+        </form>
+
+        <form id="reset-form" class="login-form" data-panel="reset" novalidate hidden>
+          <p class="login-hint">請設定新密碼（至少 ${PASSWORD_MIN} 碼）。</p>
+          <div class="field">
+            <label class="field-label" for="rs-pass">新密碼</label>
+            <input id="rs-pass" type="password" autocomplete="new-password" placeholder="至少 ${PASSWORD_MIN} 碼">
+          </div>
+          <div class="field">
+            <label class="field-label" for="rs-pass2">確認新密碼</label>
+            <input id="rs-pass2" type="password" autocomplete="new-password" placeholder="再輸入一次">
+          </div>
+          <div id="reset-error" class="login-error" role="alert" hidden></div>
+          <div class="login-actions">
+            <button type="submit" class="btn btn-primary btn-lg" id="reset-btn">重設並登入</button>
           </div>
         </form>
 
@@ -92,13 +137,21 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
   const panels = [...root.querySelectorAll<HTMLFormElement>('.login-form')];
 
   const switchTab = (tab: Tab): void => {
+    const showTabs = tab === 'login' || tab === 'register';
+    q<HTMLElement>('.login-tabs').hidden = !showTabs;
     for (const b of tabBtns) {
       const on = b.dataset['tab'] === tab;
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', String(on));
     }
     for (const p of panels) p.hidden = p.dataset['panel'] !== tab;
-    (tab === 'login' ? q<HTMLInputElement>('#li-email') : q<HTMLInputElement>('#rg-name')).focus();
+    const focusMap: Record<Tab, string> = {
+      login: '#li-email',
+      register: '#rg-name',
+      forgot: '#fg-email',
+      reset: '#rs-pass',
+    };
+    q<HTMLInputElement>(focusMap[tab]).focus();
   };
   for (const b of tabBtns) b.addEventListener('click', () => switchTab((b.dataset['tab'] as Tab) ?? 'login'));
 
@@ -167,7 +220,7 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
     if (password !== confirm) return fail('兩次輸入的密碼不一樣', rgPass2);
     showError(regErr, null);
     busy(regBtn, true, '建立帳號', '建立中…');
-    void register(email, password, name)
+    void register(email, password, name, q<HTMLInputElement>('#rg-code')?.value.trim() || undefined)
       .then((res) => {
         saveSession(res);
         opts.onSuccess();
@@ -182,6 +235,75 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
           showError(loginErr, authErrorText(err, 'register'));
           liPass.focus();
         }
+      });
+  });
+
+  // ---- 忘記密碼 ----
+  const forgotForm = q<HTMLFormElement>('#forgot-form');
+  const fgEmail = q<HTMLInputElement>('#fg-email');
+  const forgotErr = q<HTMLElement>('#forgot-error');
+  const forgotOk = q<HTMLElement>('#forgot-ok');
+  const forgotBtn = q<HTMLButtonElement>('#forgot-btn');
+  q<HTMLButtonElement>('#goto-forgot').addEventListener('click', () => switchTab('forgot'));
+  q<HTMLButtonElement>('#forgot-back').addEventListener('click', () => switchTab('login'));
+  forgotForm.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const email = fgEmail.value.trim();
+    if (!email || !email.includes('@')) {
+      showError(forgotErr, '請輸入正確的 email');
+      fgEmail.focus();
+      return;
+    }
+    showError(forgotErr, null);
+    forgotOk.hidden = true;
+    busy(forgotBtn, true, '寄送連結', '寄送中…');
+    void requestPasswordReset(email)
+      .then(() => {
+        forgotOk.textContent = '若此 email 已註冊，重設連結已寄出（或請查看伺服器 log）。';
+        forgotOk.hidden = false;
+      })
+      .catch((err: unknown) => {
+        showError(forgotErr, authErrorText(err, 'forgot'));
+      })
+      .finally(() => busy(forgotBtn, false, '寄送連結', '寄送中…'));
+  });
+
+  // ---- 重設密碼（?reset= token）----
+  const resetForm = q<HTMLFormElement>('#reset-form');
+  const rsPass = q<HTMLInputElement>('#rs-pass');
+  const rsPass2 = q<HTMLInputElement>('#rs-pass2');
+  const resetErr = q<HTMLElement>('#reset-error');
+  const resetBtn = q<HTMLButtonElement>('#reset-btn');
+  const resetToken = opts.resetToken?.trim() ?? '';
+  resetForm.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (!resetToken) {
+      showError(resetErr, '重設連結無效，請重新申請');
+      return;
+    }
+    const password = rsPass.value;
+    const confirm = rsPass2.value;
+    if (password.length < PASSWORD_MIN) {
+      showError(resetErr, `密碼至少 ${PASSWORD_MIN} 碼`);
+      rsPass.focus();
+      return;
+    }
+    if (password !== confirm) {
+      showError(resetErr, '兩次輸入的密碼不一樣');
+      rsPass2.focus();
+      return;
+    }
+    showError(resetErr, null);
+    busy(resetBtn, true, '重設並登入', '處理中…');
+    void confirmPasswordReset(resetToken, password)
+      .then((res) => {
+        saveSession(res);
+        history.replaceState(null, '', location.pathname);
+        opts.onSuccess();
+      })
+      .catch((err: unknown) => {
+        showError(resetErr, authErrorText(err, 'reset'));
+        busy(resetBtn, false, '重設並登入', '處理中…');
       });
   });
 
@@ -200,7 +322,7 @@ export function renderLogin(root: HTMLElement, opts: LoginOptions): void {
       });
   });
 
-  switchTab(opts.initialTab ?? 'login');
+  switchTab(opts.initialTab ?? (resetToken ? 'reset' : 'login'));
 }
 
 export interface OfflineOptions {

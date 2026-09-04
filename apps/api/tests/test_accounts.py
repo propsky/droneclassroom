@@ -313,3 +313,48 @@ def test_免登入模式_有DB_任意帳密登入預設老師(tmp_path: Path) ->
         with teacher_connect(c, r.json()["ticket"]) as ws:
             assert ws.receive_json()["type"] == "student_list"
     asyncio.run(_cleanup(include_dev=True))
+
+
+@needs_db
+def test_註冊邀請碼錯誤403(tmp_path: Path) -> None:
+    with _make_client(tmp_path, teacher_register_code="secret-code") as c:
+        assert c.get("/api/info").json()["teacherRegisterCodeRequired"] is True
+        email = _email("code")
+        bad = c.post(
+            "/auth/teacher/register",
+            json={"email": email, "password": PASSWORD, "name": "x", "registerCode": "wrong"},
+        )
+        assert bad.status_code == 403
+        ok = c.post(
+            "/auth/teacher/register",
+            json={"email": email, "password": PASSWORD, "name": "x", "registerCode": "secret-code"},
+        )
+        assert ok.status_code == 201, ok.text
+    asyncio.run(_cleanup())
+
+
+@needs_db
+def test_忘記密碼重設並登入(db_client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    import re
+
+    email = _email("reset")
+    _register(db_client, email)
+    new_pass = "new horse battery"
+    with caplog.at_level(logging.INFO, logger="creafly.api.rest"):
+        req = db_client.post("/auth/teacher/password-reset/request", json={"email": email})
+        assert req.status_code == 200
+    match = re.search(r"reset=([A-Za-z0-9_-]+)", caplog.text)
+    assert match, caplog.text
+    reset_token = match.group(1)
+    r = db_client.post(
+        "/auth/teacher/password-reset/confirm",
+        json={"resetToken": reset_token, "newPassword": new_pass},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["me"]["email"] == email.lower()
+    # 舊密碼失效、新密碼可登入
+    bad_login = db_client.post("/auth/teacher/login", json={"email": email, "password": PASSWORD})
+    assert bad_login.status_code == 401
+    r2 = db_client.post("/auth/teacher/login", json={"email": email, "password": new_pass})
+    assert r2.status_code == 200

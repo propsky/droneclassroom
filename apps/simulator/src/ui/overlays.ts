@@ -11,6 +11,7 @@ import {
   loadStudentSession,
   saveStudentSession,
   studentLogin,
+  studentLogout,
   touchStudentSession,
   type StudentSession,
 } from '../net/studentAuth';
@@ -298,6 +299,8 @@ function initLogout(): void {
   syncAccountUi();
   $('player-logout')?.addEventListener('click', () => {
     $('player-hud')?.classList.remove('open');
+    const token = studentSession?.token;
+    if (token) void studentLogout(token);
     clearStudentSession();
     studentSession = null;
     syncAccountUi();

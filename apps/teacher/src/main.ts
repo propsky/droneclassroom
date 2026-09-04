@@ -28,6 +28,7 @@ let wsClient: TeacherWs | null = null;
 let dashboard: DashboardView | null = null;
 /** 免登入模式（伺服器 TEACHER_AUTH_DISABLED=1，由 /api/info 得知）：登入頁多「測試模式：直接進入」 */
 let authDisabled = false;
+let registerCodeRequired = false;
 
 function teardown(): void {
   wsClient?.stop();
@@ -38,7 +39,16 @@ function teardown(): void {
 
 function showLogin(notice?: string): void {
   teardown();
-  renderLogin(app, { onSuccess: () => void enterDashboard(), authDisabled, notice });
+  const params = new URLSearchParams(location.search);
+  const resetToken = params.get('reset') ?? undefined;
+  renderLogin(app, {
+    onSuccess: () => void enterDashboard(),
+    authDisabled,
+    registerCodeRequired,
+    resetToken,
+    notice,
+    initialTab: resetToken ? 'reset' : 'login',
+  });
 }
 
 /** session 失效（WS 4401 / /me 401）：清 token、回登入；resume 狀態保留給重登後恢復 */
@@ -139,7 +149,12 @@ async function boot(): Promise<void> {
   const session = loadSession();
   if (session) {
     // 免登入模式旗標背景更新（之後 session 失效回登入頁時才知道要不要顯示「測試模式」鈕）
-    void fetchInfo().then((i) => (authDisabled = !!i.teacherAuthDisabled)).catch(() => {});
+    void fetchInfo()
+      .then((i) => {
+        authDisabled = !!i.teacherAuthDisabled;
+        registerCodeRequired = !!i.teacherRegisterCodeRequired;
+      })
+      .catch(() => {});
     if (await verifyAndEnter()) return;
     renderOffline(app, {
       name: session.me.name,
@@ -151,7 +166,10 @@ async function boot(): Promise<void> {
 
   // 免登入模式偵測：伺服器 TEACHER_AUTH_DISABLED=1 時登入頁多一顆「測試模式：直接進入」
   authDisabled = await fetchInfo()
-    .then((i) => !!i.teacherAuthDisabled)
+    .then((i) => {
+      registerCodeRequired = !!i.teacherRegisterCodeRequired;
+      return !!i.teacherAuthDisabled;
+    })
     .catch(() => false);
 
   // 開發後門：URL ?dev=1（舊 ?pin= 同義）直接以測試帳號登入（headless 截圖測試用；伺服器有驗密碼時會 401 落回登入畫面）

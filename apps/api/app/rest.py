@@ -3,6 +3,7 @@
 - 老師帳號（需 DATABASE_URL，否則 503）：
   POST /auth/teacher/register / login → 發 DB session token（回應欄位仍叫 ticket）
   GET  /auth/teacher/me、POST /auth/teacher/logout、POST /auth/teacher/password（Bearer）
+  POST /auth/teacher/password-reset/request、POST /auth/teacher/password-reset/confirm
 - POST /auth/teacher：舊 PIN 登入（密碼 → HMAC ticket），只在無資料庫模式有效
 - GET  /api/levels：三章關卡清單（老師後台下拉選單 / 廣播用），啟動時載入一次快取
 - GET  /api/info：教室現場資訊（LAN IP / port / 人數上限 / 版本）
@@ -10,6 +11,7 @@
 """
 
 import contextlib
+import html as html_escape
 import ipaddress
 import json
 import logging
@@ -33,12 +35,15 @@ from .accounts import (
     issue_session,
     revoke_all_sessions_for,
     revoke_session,
+    token_hash,
     verify_password,
 )
 from .auth import TeacherAuth, origin_allowed
 from .config import Settings
 from .db.audit import record_event
 from .db.models import Organization, Teacher
+from .db.models import Session as SessionRow
+from .mailer import Mailer
 
 logger = logging.getLogger("creafly.api.rest")
 
@@ -80,6 +85,7 @@ class TeacherRegisterRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(max_length=1024)
     name: str = Field(min_length=1, max_length=100)
+    registerCode: str | None = Field(default=None, max_length=64)  # noqa: N815
 
 
 class TeacherLoginRequest(BaseModel):
@@ -106,6 +112,23 @@ class TeacherChangePasswordRequest(BaseModel):
 
     currentPassword: str = Field(max_length=1024)  # noqa: N815
     newPassword: str = Field(max_length=1024)  # noqa: N815
+
+
+class TeacherPasswordResetRequest(BaseModel):
+    """POST /auth/teacher/password-reset/request 請求。"""
+
+    email: str = Field(max_length=254)
+
+
+class TeacherPasswordResetConfirm(BaseModel):
+    """POST /auth/teacher/password-reset/confirm 請求。"""
+
+    resetToken: str = Field(max_length=200)  # noqa: N815
+    newPassword: str = Field(max_length=1024)  # noqa: N815
+
+
+class OkResponse(BaseModel):
+    ok: Literal[True] = True
 
 
 class LevelBrief(BaseModel):
@@ -138,6 +161,8 @@ class InfoResponse(BaseModel):
     version: str
     # 免登入模式（測試用）：前端據此跳過登入畫面自動取票
     teacherAuthDisabled: bool = False  # noqa: N815
+    # 老師註冊是否需要邀請碼（前端據此顯示欄位）
+    teacherRegisterCodeRequired: bool = False  # noqa: N815
 
 
 class HealthResponse(BaseModel):
@@ -283,6 +308,71 @@ async def _find_teacher_by_email(session: AsyncSession, email: str) -> Teacher |
     ).scalar_one_or_none()
 
 
+async def _revoke_reset_tokens(session: AsyncSession, teacher_id: int) -> None:
+    """撤銷該老師所有仍有效的重設 token（重發前呼叫）。不 commit。"""
+    rows = (
+        (
+            await session.execute(
+                select(SessionRow).where(
+                    SessionRow.principal_type == "teacher",
+                    SessionRow.principal_id == teacher_id,
+                    SessionRow.purpose == "reset",
+                    SessionRow.revoked_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        await revoke_session(session, row)
+
+
+async def _valid_reset(
+    session: AsyncSession, token: str, *, now: datetime | None = None
+) -> tuple[SessionRow, Teacher] | None:
+    """有效重設 token → (session 列, 老師)；無效 / 過期 / 停權 → None。"""
+    if not token:
+        return None
+    now = now or datetime.now(UTC)
+    row = (
+        await session.execute(select(SessionRow).where(SessionRow.token_hash == token_hash(token)))
+    ).scalar_one_or_none()
+    if (
+        row is None
+        or row.purpose != "reset"
+        or row.principal_type != "teacher"
+        or row.revoked_at is not None
+        or row.expires_at <= now
+    ):
+        return None
+    teacher = await session.get(Teacher, row.principal_id)
+    if teacher is None or teacher.status != "active":
+        return None
+    return row, teacher
+
+
+def _reset_mail(*, teacher_name: str, link: str, minutes: int) -> tuple[str, str, str]:
+    subject = "CREAFLY 教室 — 重設老師帳號密碼"
+    text = (
+        f"{teacher_name} 老師你好：\n\n"
+        f"我們收到重設 CREAFLY 老師後台密碼的請求。點下面的連結設定新密碼：\n\n"
+        f"{link}\n\n"
+        f"（連結 {minutes} 分鐘內有效；若不是你本人操作，忽略此信即可。）\n"
+    )
+    esc_name = html_escape.escape(teacher_name)
+    html = (
+        f"<p>{esc_name} 老師你好：</p>"
+        f"<p>我們收到重設 CREAFLY 老師後台密碼的請求。點下面的按鈕設定新密碼：</p>"
+        f'<p><a href="{link}" style="display:inline-block;padding:10px 24px;'
+        f'background:#2563eb;color:#fff;border-radius:6px;text-decoration:none">'
+        f"重設密碼</a></p>"
+        f'<p>按鈕打不開的話，複製這個網址到瀏覽器：<br><a href="{link}">{link}</a></p>'
+        f'<p style="color:#666">（連結 {minutes} 分鐘內有效；若不是你本人操作，忽略此信即可。）</p>'
+    )
+    return subject, html, text
+
+
 @router.post("/auth/teacher/register", status_code=201)
 async def teacher_register(
     request: Request, body: TeacherRegisterRequest, session: DbSession
@@ -290,6 +380,8 @@ async def teacher_register(
     """老師自行註冊（掛預設單位）→ 註冊即登入、發 session。重複 email 409。"""
     settings: Settings = request.app.state.settings
     ip = _login_guard(request)
+    if settings.teacher_register_code and body.registerCode != settings.teacher_register_code:
+        raise HTTPException(status_code=403, detail="註冊邀請碼不正確")
     email = _normalize_email(body.email)
     if "@" not in email:
         raise HTTPException(status_code=422, detail="email 格式不正確")
@@ -446,6 +538,76 @@ async def teacher_change_password(
     return TeacherLogoutResponse()
 
 
+@router.post("/auth/teacher/password-reset/request")
+async def teacher_password_reset_request(
+    request: Request, body: TeacherPasswordResetRequest, session: DbSession
+) -> OkResponse:
+    """忘記密碼：寄重設連結。不論 email 是否存在都回 ok（防枚舉）。"""
+    settings: Settings = request.app.state.settings
+    mailer: Mailer = request.app.state.mailer
+    ip = _login_guard(request)
+    email = _normalize_email(body.email)
+    teacher = await _find_teacher_by_email(session, email)
+    if teacher is not None and teacher.status == "active":
+        await _revoke_reset_tokens(session, teacher.id)
+        token = await issue_session(
+            session,
+            principal_type="teacher",
+            principal_id=teacher.id,
+            ttl=settings.password_reset_ttl_sec,
+            purpose="reset",
+        )
+        link = f"{settings.public_teacher_url.rstrip('/')}/?reset={token}"
+        if not mailer.enabled:
+            logger.info("[MAIL] 停用模式重設密碼連結（%s）：%s", email, link)
+        minutes = max(1, settings.password_reset_ttl_sec // 60)
+        subject, html, text = _reset_mail(teacher_name=teacher.name, link=link, minutes=minutes)
+        sent = await mailer.send(to=email, subject=subject, html=html, text=text)
+        await record_event(
+            session,
+            event_type="teacher.password_reset_requested",
+            actor_type="teacher",
+            actor_id=teacher.id,
+            org_id=teacher.org_id,
+            payload={"ip": ip, "sent": sent},
+        )
+        await session.commit()
+    return OkResponse()
+
+
+@router.post("/auth/teacher/password-reset/confirm")
+async def teacher_password_reset_confirm(
+    request: Request, body: TeacherPasswordResetConfirm, session: DbSession
+) -> TeacherLoginResponse:
+    """重設密碼連結：驗 token → 換密碼 → 撤舊 session → 發新登入 session。"""
+    settings: Settings = request.app.state.settings
+    ip = _login_guard(request)
+    found = await _valid_reset(session, body.resetToken)
+    if found is None:
+        raise HTTPException(status_code=404, detail="重設連結無效或已過期")
+    if len(body.newPassword) < settings.password_min_length:
+        raise HTTPException(
+            status_code=422, detail=f"密碼至少 {settings.password_min_length} 個字元"
+        )
+    row, teacher = found
+    teacher.password_hash = hash_password(body.newPassword)
+    teacher.last_login_at = datetime.now(UTC)
+    await revoke_session(session, row)
+    await revoke_all_sessions_for(session, "teacher", teacher.id)
+    result = await _issue_login(request, session, teacher)
+    await record_event(
+        session,
+        event_type="teacher.password_reset",
+        actor_type="teacher",
+        actor_id=teacher.id,
+        org_id=teacher.org_id,
+        payload={"ip": ip},
+    )
+    await session.commit()
+    logger.info("[AUTH] 老師重設密碼成功：id=%s（IP：%s）", teacher.id, ip)
+    return result
+
+
 # ---------- 舊 PIN 登入（無資料庫模式）----------
 
 
@@ -486,6 +648,7 @@ async def get_info(request: Request) -> InfoResponse:
         maxStudents=settings.max_students,
         version=API_VERSION,
         teacherAuthDisabled=settings.teacher_auth_disabled,
+        teacherRegisterCodeRequired=bool(settings.teacher_register_code),
     )
 
 

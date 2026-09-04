@@ -22,3 +22,13 @@ export function snapClampXZ(
     z: snapWorld(clampWorld(z), step),
   };
 }
+
+/** 編輯器高度上限（與模擬器教室空間一致） */
+export const EDITOR_MAX_Y = 8;
+
+/** 俯視標記依高度著色：低=藍、高=紅（業界常見 elevation 視覺化） */
+export function heightHueColor(y: number, alpha = 0.85): string {
+  const t = Math.max(0, Math.min(1, y / EDITOR_MAX_Y));
+  const hue = 220 - t * 220;
+  return `hsla(${hue}, 75%, 55%, ${alpha})`;
+}

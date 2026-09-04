@@ -333,7 +333,7 @@ class Session(Base):
     __tablename__ = "sessions"
     __table_args__ = (
         CheckConstraint("principal_type IN ('teacher', 'student')", name="principal_type"),
-        CheckConstraint("purpose IN ('auth', 'invite')", name="purpose"),
+        CheckConstraint("purpose IN ('auth', 'invite', 'reset')", name="purpose"),
         # 多型關聯（teachers.id / students.id），用 CHECK 不用 FK
         Index("ix_sessions_principal_type_principal_id", "principal_type", "principal_id"),
     )
@@ -343,8 +343,7 @@ class Session(Base):
     token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     principal_type: Mapped[str] = mapped_column(Text, nullable=False)
     principal_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    # 用途：auth = 登入 session；invite = 學生邀請 token（TTL 短、accept 後撤銷，
-    # 見 db-schema.md §3「密碼重設 token 表」的擴充點 —— 同機制不另開表）
+    # 用途：auth = 登入 session；invite = 學生邀請 token；reset = 老師忘記密碼重設 token
     purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default="auth")
     # 老師 30 天、學生 90 天，滑動延長
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

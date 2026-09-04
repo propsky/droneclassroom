@@ -14,11 +14,12 @@ export interface TeacherMe {
   orgName: string;
 }
 
-/** POST /auth/teacher/register — 老師自行註冊（掛預設 org；之後有邀請碼/多租戶再擴） */
+/** POST /auth/teacher/register — 老師自行註冊（掛預設 org；正式環境可要求 registerCode） */
 export interface TeacherRegisterRequest {
   email: string;
   password: string;
   name: string;
+  registerCode?: string;
 }
 
 /** POST /auth/teacher/login */
@@ -47,6 +48,17 @@ export interface TeacherChangePasswordRequest {
   currentPassword: string;
   newPassword: string;
 }
+
+/** POST /auth/teacher/password-reset/request — 寄重設密碼連結（不論 email 是否存在都回 ok） */
+export interface TeacherPasswordResetRequest { email: string }
+
+/** POST /auth/teacher/password-reset/confirm — 重設密碼並登入 */
+export interface TeacherPasswordResetConfirm {
+  resetToken: string;
+  newPassword: string;
+}
+
+export interface OkResponse { ok: true }
 
 // ---------- 學生帳號（老師建名單 + 邀請；無 email 學生用 班級碼+學生碼 登入）----------
 
@@ -115,6 +127,9 @@ export interface InviteInfoResponse { name: string; teamName: string; email: str
 
 /** GET /auth/student/me（Bearer）— 驗 token + 滑動延長 */
 export type StudentMeResponse = StudentMe;
+
+/** POST /auth/student/logout（Bearer）— 撤銷目前 session */
+export interface StudentLogoutResponse { ok: true }
 
 /** GET /api/levels 回應：三章全部關卡（給後台下拉選單/廣播用） */
 export interface LevelsResponse {
@@ -254,6 +269,8 @@ export interface InfoResponse {
   version: string;
   /** 免登入模式（測試用）：true 時前端跳過登入畫面自動取票 */
   teacherAuthDisabled?: boolean;
+  /** 老師註冊是否需要邀請碼 */
+  teacherRegisterCodeRequired?: boolean;
 }
 
 /** WS 升級被拒的 close codes */
