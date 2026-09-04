@@ -9,6 +9,7 @@ import {
   TransformNode,
 } from '@babylonjs/core';
 import type { LevelDef } from '@creafly/shared';
+import { ringDiameter, ringThickness } from '@creafly/shared';
 import { bus } from '../core/events';
 import { ringWorldY } from '../core/level';
 import { CREAFLY_COLOR, hex } from './scene';
@@ -83,10 +84,12 @@ export class LevelVisuals {
       const color = parseColor(r.color, CREAFLY_COLOR.yellow);
       const node = this.track(new TransformNode(`ringNode${i}`, scene));
       node.position.set(r.x, r.y, r.z);
+      const diam = ringDiameter(r);
+      const thick = ringThickness(r);
       const mesh = this.track(
         MeshBuilder.CreateTorus(
           `ring${i}`,
-          { diameter: 3, thickness: 0.24, tessellation: 32 },
+          { diameter: diam, thickness: thick, tessellation: 32 },
           scene,
         ),
       );

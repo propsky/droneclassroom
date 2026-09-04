@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampWorld, heightHueColor, snapClampXZ, snapWorld } from './levelEditorUtils';
+import { clampWorld, heightHueColor, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas } from './levelEditorUtils';
 
 describe('levelEditorUtils', () => {
   it('snapWorld 1m 格', () => {
@@ -21,5 +21,17 @@ describe('levelEditorUtils', () => {
   it('heightHueColor 低藍高紅', () => {
     expect(heightHueColor(0)).toContain('220');
     expect(heightHueColor(8)).toContain('0');
+  });
+
+  it('ringDiameter / ringPassRadius 預設 3m', () => {
+    expect(ringDiameter({})).toBe(3);
+    expect(ringPassRadius({})).toBe(1.5);
+    expect(ringPassRadius({ diameter: 4 })).toBe(2);
+  });
+
+  it('topWorldToCanvas 原點在中心', () => {
+    const [px, py] = topWorldToCanvas(0, 0, 480, 480);
+    expect(px).toBe(240);
+    expect(py).toBe(240);
   });
 });

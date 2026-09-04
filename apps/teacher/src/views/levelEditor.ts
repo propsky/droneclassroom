@@ -12,6 +12,8 @@ import {
   EDITOR_MAX_Y,
   EDITOR_WORLD,
   heightHueColor,
+  isoCanvasToWorld,
+  isoWorldToCanvas,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
   applyLevelGoalPreset,
@@ -21,9 +23,14 @@ import {
   inferLevelKitCategory,
   isLevelLayoutEmpty,
   levelKitByCategory,
+  ringDiameter,
+  sideWorldToCanvas,
   snapClampXZ,
   teacherKitToSnippet,
+  topCanvasToWorld,
+  topWorldToCanvas,
   validateLevelKitPatch,
+  type EditorViewMode,
   type LevelKitCategory,
   type LevelKitSnippet,
 } from '@creafly/shared';
@@ -167,61 +174,6 @@ export function openLevelEditor(
             <label class="check-row"><input type="radio" name="le-snap" value="0">0.1 m</label>
           </div>
 
-          <div class="lvl-props" id="le-props" hidden>
-            <h3 class="lvl-props-title" id="le-props-title">選取物件</h3>
-            <div class="lvl-props-grid">
-              <div class="field"><label class="field-label" for="le-px">X（左右）</label><input id="le-px" type="number" step="0.5" class="mono"></div>
-              <div class="field"><label class="field-label" for="le-pz">Z（前後）</label><input id="le-pz" type="number" step="0.5" class="mono"></div>
-              <div class="field" id="le-py-wrap">
-                <label class="field-label" for="le-py">Y（高度）<span id="le-py-readout" class="mono le-py-readout"></span></label>
-                <input id="le-py-range" type="range" min="0" max="8" step="0.5" class="le-height-range" aria-label="高度滑桿">
-                <input id="le-py" type="number" step="0.5" min="0" max="8" class="mono">
-                <div class="le-height-presets" id="le-height-presets">
-                  <button type="button" class="btn btn-ghost btn-xs" data-y="0.5">地面</button>
-                  <button type="button" class="btn btn-ghost btn-xs" data-y="1.5">低空</button>
-                  <button type="button" class="btn btn-ghost btn-xs" data-y="2">穿圈</button>
-                  <button type="button" class="btn btn-ghost btn-xs" data-y="3.5">中高</button>
-                  <button type="button" class="btn btn-ghost btn-xs" data-y="5">高空</button>
-                </div>
-                <p class="note">PgUp / PgDn 微調高度 · 側視圖確認</p>
-              </div>
-              <div class="field" id="le-size-wrap" hidden><label class="field-label" for="le-size">邊長</label><input id="le-size" type="number" step="0.5" min="0.5" max="6" class="mono"></div>
-              <div class="field" id="le-label-wrap" hidden><label class="field-label" for="le-label">標籤</label><input id="le-label" type="text" maxlength="40"></div>
-              <div class="field" id="le-solid-wrap" hidden><label class="check-row"><input type="checkbox" id="le-solid">實心碰撞（會擋住）</label></div>
-              <div class="field" id="le-face-wrap" hidden>
-                <label class="field-label" for="le-face-yaw">機頭朝向 yaw（度，空=不限）</label>
-                <input id="le-face-yaw" type="number" step="15" min="-180" max="180" class="mono" placeholder="不限">
-                <label class="field-label" for="le-face-tol">朝向容差（度）</label>
-                <input id="le-face-tol" type="number" step="5" min="5" max="90" value="35" class="mono">
-              </div>
-              <div id="le-zone-wrap" hidden>
-                <div class="field">
-                  <label class="field-label" for="le-zone-type">任務類型</label>
-                  <select id="le-zone-type" class="field-input">
-                    <option value="position">位置區域</option>
-                    <option value="altitude">高度</option>
-                    <option value="heading">朝向</option>
-                  </select>
-                </div>
-                <div class="lvl-props-grid" id="le-zone-position">
-                  <div class="field"><label class="field-label" for="le-zone-minx">minX</label><input id="le-zone-minx" type="number" step="0.5" class="mono"></div>
-                  <div class="field"><label class="field-label" for="le-zone-maxx">maxX</label><input id="le-zone-maxx" type="number" step="0.5" class="mono"></div>
-                  <div class="field"><label class="field-label" for="le-zone-minz">minZ</label><input id="le-zone-minz" type="number" step="0.5" class="mono"></div>
-                  <div class="field"><label class="field-label" for="le-zone-maxz">maxZ</label><input id="le-zone-maxz" type="number" step="0.5" class="mono"></div>
-                </div>
-                <div class="lvl-props-grid" id="le-zone-altitude" hidden>
-                  <div class="field"><label class="field-label" for="le-zone-miny">minY</label><input id="le-zone-miny" type="number" step="0.5" min="0" class="mono"></div>
-                  <div class="field"><label class="field-label" for="le-zone-maxy">maxY</label><input id="le-zone-maxy" type="number" step="0.5" min="0" class="mono"></div>
-                </div>
-                <div class="lvl-props-grid" id="le-zone-heading" hidden>
-                  <div class="field"><label class="field-label" for="le-zone-yaw">目標 yaw</label><input id="le-zone-yaw" type="number" step="15" class="mono"></div>
-                  <div class="field"><label class="field-label" for="le-zone-tol">容差</label><input id="le-zone-tol" type="number" step="5" min="5" class="mono"></div>
-                </div>
-              </div>
-            </div>
-            <button type="button" class="btn btn-ghost btn-sm" id="le-del-sel">刪除選取</button>
-          </div>
-
           <div class="lvl-kit">
             <div class="lvl-kit-head">
               <h3 class="lvl-kit-title">我的素材</h3>
@@ -240,28 +192,103 @@ export function openLevelEditor(
             <div id="le-kit-panels"></div>
           </div>
         </div>
-        <div class="lvl-editor-canvas-col">
-          <div class="lvl-canvas-head">
-            <span class="mono" id="le-cursor">X 0 · Z 0</span>
-            <span class="note">↑ 前方為 -Z · 拖曳移動 · 方向鍵微調 · Del 刪除</span>
-          </div>
-          <div class="lvl-editor-canvas-wrap">
-            <canvas id="le-canvas" width="${CANVAS_PX}" height="${CANVAS_PX}" aria-label="俯視編輯器"></canvas>
-          </div>
-          <div class="lvl-elev-wrap">
+        <div class="lvl-editor-workspace">
+          <div class="lvl-editor-canvas-col">
             <div class="lvl-canvas-head">
-              <span class="note">側視高度（X 軸 · Y 向上）</span>
-              <span class="mono" id="le-elev-hint"></span>
+              <div class="le-view-tabs" id="le-view-tabs" role="tablist" aria-label="編輯視角">
+                <button type="button" class="btn btn-ghost btn-xs le-view active" data-view="top" role="tab">俯視</button>
+                <button type="button" class="btn btn-ghost btn-xs le-view" data-view="iso" role="tab">2.5D</button>
+                <button type="button" class="btn btn-ghost btn-xs le-view" data-view="side" role="tab">側視</button>
+              </div>
+              <span class="mono" id="le-cursor">X 0 · Z 0</span>
+              <span class="note le-canvas-hint">↑ 前方為 -Z · 拖曳移動 · 方向鍵微調 · Del 刪除</span>
             </div>
-            <canvas id="le-elev" width="480" height="120" aria-label="側視高度圖"></canvas>
+            <div class="lvl-editor-canvas-wrap">
+              <canvas id="le-canvas" width="${CANVAS_PX}" height="${CANVAS_PX}" aria-label="關卡編輯器"></canvas>
+            </div>
+            <p class="note lvl-legend">
+              <span class="le-legend-ring">○ 圈</span>
+              <span class="le-legend-solid">■ 實心</span>
+              <span class="le-legend-soft">■ 標記</span>
+              <span class="le-legend-balloon">● 氣球</span>
+              <span class="le-legend-zone">▢ 任務</span>
+            </p>
           </div>
-          <p class="note lvl-legend">
-            <span class="le-legend-ring">○ 圈</span>
-            <span class="le-legend-solid">■ 實心</span>
-            <span class="le-legend-soft">■ 標記</span>
-            <span class="le-legend-balloon">● 氣球</span>
-            <span class="le-legend-zone">▢ 任務</span>
-          </p>
+          <aside class="lvl-editor-inspector" id="le-inspector">
+            <h3 class="lvl-inspector-title">檢視器</h3>
+            <div id="le-inspector-idle">
+              <p class="note le-inspector-empty">未選取物件</p>
+              <dl class="le-inspector-readout">
+                <div><dt>游標 X</dt><dd class="mono" id="le-readout-x">0</dd></div>
+                <div><dt>游標 Z</dt><dd class="mono" id="le-readout-z">0</dd></div>
+                <div><dt>放置高度</dt><dd class="mono" id="le-readout-place-y">2.5 m</dd></div>
+              </dl>
+              <p class="note">滾輪調整放置高度 · 側視可拖曳調 Y</p>
+            </div>
+            <div class="lvl-props" id="le-props" hidden>
+              <h3 class="lvl-props-title" id="le-props-title">選取物件</h3>
+              <div class="lvl-props-grid">
+                <div class="field"><label class="field-label" for="le-px">X（左右）</label><input id="le-px" type="number" step="0.5" class="mono"></div>
+                <div class="field"><label class="field-label" for="le-pz">Z（前後）</label><input id="le-pz" type="number" step="0.5" class="mono"></div>
+                <div class="field" id="le-py-wrap">
+                  <label class="field-label" for="le-py">Y（高度）<span id="le-py-readout" class="mono le-py-readout"></span></label>
+                  <input id="le-py-range" type="range" min="0" max="8" step="0.5" class="le-height-range" aria-label="高度滑桿">
+                  <input id="le-py" type="number" step="0.5" min="0" max="8" class="mono">
+                  <div class="le-height-presets" id="le-height-presets">
+                    <button type="button" class="btn btn-ghost btn-xs" data-y="0.5">地面</button>
+                    <button type="button" class="btn btn-ghost btn-xs" data-y="1.5">低空</button>
+                    <button type="button" class="btn btn-ghost btn-xs" data-y="2">穿圈</button>
+                    <button type="button" class="btn btn-ghost btn-xs" data-y="3.5">中高</button>
+                    <button type="button" class="btn btn-ghost btn-xs" data-y="5">高空</button>
+                  </div>
+                  <p class="note">PgUp / PgDn 微調高度</p>
+                </div>
+                <div class="field" id="le-ring-diam-wrap" hidden>
+                  <label class="field-label" for="le-ring-diam">圈徑（m）<span id="le-ring-diam-readout" class="mono le-py-readout"></span></label>
+                  <input id="le-ring-diam" type="range" min="2" max="4" step="0.5" class="le-height-range" aria-label="圈徑">
+                  <div class="le-height-presets" id="le-ring-diam-presets">
+                    <button type="button" class="btn btn-ghost btn-xs" data-diam="2">小</button>
+                    <button type="button" class="btn btn-ghost btn-xs" data-diam="3">標準</button>
+                    <button type="button" class="btn btn-ghost btn-xs" data-diam="4">大</button>
+                  </div>
+                </div>
+                <div class="field" id="le-size-wrap" hidden><label class="field-label" for="le-size">邊長</label><input id="le-size" type="number" step="0.5" min="0.5" max="6" class="mono"></div>
+                <div class="field" id="le-label-wrap" hidden><label class="field-label" for="le-label">標籤</label><input id="le-label" type="text" maxlength="40"></div>
+                <div class="field" id="le-solid-wrap" hidden><label class="check-row"><input type="checkbox" id="le-solid">實心碰撞（會擋住）</label></div>
+                <div class="field" id="le-face-wrap" hidden>
+                  <label class="field-label" for="le-face-yaw">機頭朝向 yaw（度，空=不限）</label>
+                  <input id="le-face-yaw" type="number" step="15" min="-180" max="180" class="mono" placeholder="不限">
+                  <label class="field-label" for="le-face-tol">朝向容差（度）</label>
+                  <input id="le-face-tol" type="number" step="5" min="5" max="90" value="35" class="mono">
+                </div>
+                <div id="le-zone-wrap" hidden>
+                  <div class="field">
+                    <label class="field-label" for="le-zone-type">任務類型</label>
+                    <select id="le-zone-type" class="field-input">
+                      <option value="position">位置區域</option>
+                      <option value="altitude">高度</option>
+                      <option value="heading">朝向</option>
+                    </select>
+                  </div>
+                  <div class="lvl-props-grid" id="le-zone-position">
+                    <div class="field"><label class="field-label" for="le-zone-minx">minX</label><input id="le-zone-minx" type="number" step="0.5" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-maxx">maxX</label><input id="le-zone-maxx" type="number" step="0.5" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-minz">minZ</label><input id="le-zone-minz" type="number" step="0.5" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-maxz">maxZ</label><input id="le-zone-maxz" type="number" step="0.5" class="mono"></div>
+                  </div>
+                  <div class="lvl-props-grid" id="le-zone-altitude" hidden>
+                    <div class="field"><label class="field-label" for="le-zone-miny">minY</label><input id="le-zone-miny" type="number" step="0.5" min="0" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-maxy">maxY</label><input id="le-zone-maxy" type="number" step="0.5" min="0" class="mono"></div>
+                  </div>
+                  <div class="lvl-props-grid" id="le-zone-heading" hidden>
+                    <div class="field"><label class="field-label" for="le-zone-yaw">目標 yaw</label><input id="le-zone-yaw" type="number" step="15" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-tol">容差</label><input id="le-zone-tol" type="number" step="5" min="5" class="mono"></div>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-del-sel">刪除選取</button>
+            </div>
+          </aside>
         </div>
       </div>
       <div class="modal-actions">
@@ -274,10 +301,9 @@ export function openLevelEditor(
   const q = <T extends HTMLElement>(sel: string): T => backdrop.querySelector<T>(sel)!;
   const canvas = q<HTMLCanvasElement>('#le-canvas');
   const ctx = canvas.getContext('2d')!;
-  const elevCanvas = q<HTMLCanvasElement>('#le-elev');
-  const elevCtx = elevCanvas.getContext('2d')!;
   const saveHint = q<HTMLElement>('#le-save-hint');
   const propsPanel = q<HTMLElement>('#le-props');
+  const inspectorIdle = q<HTMLElement>('#le-inspector-idle');
   const cursorEl = q<HTMLElement>('#le-cursor');
 
   let levelPkLocal = levelPk;
@@ -285,6 +311,8 @@ export function openLevelEditor(
   let selection: Selection | null = null;
   let dragSel: Selection | null = null;
   let placeMode: PlaceMode = 'select';
+  let viewMode: EditorViewMode = 'top';
+  let placeHeightY = 2.5;
   let snapStep = 1;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let dirty = false;
@@ -295,18 +323,46 @@ export function openLevelEditor(
     return v === '0.5' ? 0.5 : v === '0' ? 0 : 1;
   };
 
-  const worldToCanvas = (x: number, z: number): [number, number] => {
-    const w = canvas.width;
-    const h = canvas.height;
-    return [((x + HALF) / WORLD) * w, ((z + HALF) / WORLD) * h];
+  const sideCanvasY = (y: number, h: number): number =>
+    h - 10 - (y / EDITOR_MAX_Y) * (h - 24);
+
+  const sideYFromCanvas = (py: number, h: number): number => {
+    const raw = ((h - 10 - py) / (h - 24)) * EDITOR_MAX_Y;
+    return Math.max(0, Math.min(EDITOR_MAX_Y, Math.round(raw * 2) / 2));
   };
 
-  const canvasToWorld = (px: number, py: number): { x: number; z: number } => {
+  const project = (x: number, z: number, y = 0): [number, number] => {
     const w = canvas.width;
     const h = canvas.height;
-    const rawX = (px / w) * WORLD - HALF;
-    const rawZ = (py / h) * WORLD - HALF;
-    return snapClampXZ(rawX, rawZ, snapStep);
+    if (viewMode === 'side') return sideWorldToCanvas(x, y, w, h);
+    if (viewMode === 'iso') return isoWorldToCanvas(x, z, y, w, h);
+    return topWorldToCanvas(x, z, w, h);
+  };
+
+  const unproject = (px: number, py: number): { x: number; z: number } => {
+    const w = canvas.width;
+    const h = canvas.height;
+    if (viewMode === 'iso') return isoCanvasToWorld(px, py, w, h, placeHeightY, snapStep);
+    return topCanvasToWorld(px, py, w, h, snapStep);
+  };
+
+  const ringPxRadius = (diam: number): number =>
+    (diam / WORLD) * canvas.width * 0.5 + 2;
+
+  const syncPlaceHeightReadout = (): void => {
+    q<HTMLElement>('#le-readout-place-y').textContent = `${placeHeightY.toFixed(1)} m`;
+  };
+
+  const syncInspectorIdle = (x: number, z: number): void => {
+    q<HTMLElement>('#le-readout-x').textContent = String(x);
+    q<HTMLElement>('#le-readout-z').textContent = String(z);
+    cursorEl.textContent = viewMode === 'side' ? `側視 · X ${x}` : `X ${x} · Z ${z}`;
+  };
+
+  const syncInspectorVisibility = (): void => {
+    const hasSel = !!selection;
+    propsPanel.hidden = !hasSel;
+    inspectorIdle.hidden = hasSel;
   };
 
   const isSelected = (kind: ObjKind, index: number): boolean =>
@@ -324,54 +380,140 @@ export function openLevelEditor(
     emptyBanner.hidden = !isLevelLayoutEmpty(level);
   };
 
-  const draw = (): void => {
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.fillStyle = '#1a2332';
+  const drawSideView = (w: number, h: number): void => {
+    ctx.fillStyle = '#141c28';
     ctx.fillRect(0, 0, w, h);
-
-    // 格線 + 座標標尺
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = 'rgba(251,191,36,0.55)';
     ctx.lineWidth = 1;
-    for (let m = -15; m <= 15; m += snapStep >= 1 ? 5 : 2.5) {
-      const [gx] = worldToCanvas(m, 0);
-      const [, gz] = worldToCanvas(0, m);
+    ctx.beginPath();
+    ctx.moveTo(0, sideCanvasY(0, h));
+    ctx.lineTo(w, sideCanvasY(0, h));
+    ctx.stroke();
+    for (let y = 0; y <= EDITOR_MAX_Y; y += 2) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.beginPath();
-      ctx.moveTo(gx, 0);
-      ctx.lineTo(gx, h);
+      ctx.moveTo(0, sideCanvasY(y, h));
+      ctx.lineTo(w, sideCanvasY(y, h));
       ctx.stroke();
+      ctx.fillStyle = 'rgba(148,163,184,0.45)';
+      ctx.font = '8px monospace';
+      ctx.fillText(`${y}m`, 2, sideCanvasY(y, h) - 2);
+    }
+    const markSide = (
+      x: number,
+      y: number,
+      label: string,
+      on: boolean,
+      kind: ObjKind,
+      ringDiam?: number,
+    ): void => {
+      const [ex, ey] = sideWorldToCanvas(x, y, w, h);
+      ctx.fillStyle = heightHueColor(y);
       ctx.beginPath();
-      ctx.moveTo(0, gz);
-      ctx.lineTo(w, gz);
-      ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(148,163,184,0.55)';
-    ctx.font = '9px monospace';
-    for (let m = -10; m <= 10; m += 5) {
-      if (m === 0) continue;
-      const [gx] = worldToCanvas(m, 0);
-      const [, gz] = worldToCanvas(0, m);
-      ctx.fillText(String(m), gx + 2, h - 4);
-      ctx.fillText(String(m), 4, gz - 2);
-    }
-
-    const [hx, hz] = worldToCanvas(0, 0);
+      ctx.arc(ex, ey, on ? 8 : 5, 0, Math.PI * 2);
+      ctx.fill();
+      if (kind === 'ring' && ringDiam != null) {
+        ctx.strokeStyle = on ? '#60a5fa' : heightHueColor(y, 0.9);
+        ctx.lineWidth = on ? 2.5 : 1.5;
+        ctx.beginPath();
+        ctx.arc(ex, ey, ringPxRadius(ringDiam) * 0.35, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (on) {
+        ctx.strokeStyle = '#60a5fa';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(`${label} · Y=${y}`, Math.min(ex + 8, w - 90), ey - 6);
+      }
+    };
+    (level.rings ?? []).forEach((r, i) =>
+      markSide(r.x, r.y, r.label ?? `圈${i + 1}`, isSelected('ring', i), 'ring', ringDiameter(r)),
+    );
+    (level.obstacles ?? []).forEach((o, i) =>
+      markSide(o.x, o.y, `障${i + 1}`, isSelected('obstacle', i), 'obstacle'),
+    );
+    (level.balloons ?? []).forEach((b, i) =>
+      markSide(b.x, b.y, `球${i + 1}`, isSelected('balloon', i), 'balloon'),
+    );
+    const [hx, hy] = sideWorldToCanvas(0, 0, w, h);
     ctx.fillStyle = '#fbbf24';
     ctx.beginPath();
-    ctx.arc(hx, hz, 8, 0, Math.PI * 2);
+    ctx.arc(hx, hy, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#94a3b8';
-    ctx.font = '11px sans-serif';
-    ctx.fillText('起飛墊 0,0', hx + 10, hz + 4);
+    ctx.font = '10px sans-serif';
+    ctx.fillText('起飛墊', hx + 8, hy + 3);
+  };
 
-    // guide 折線（畫畫教室）
+  const drawPlanView = (): void => {
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.fillStyle = viewMode === 'iso' ? '#152030' : '#1a2332';
+    ctx.fillRect(0, 0, w, h);
+
+    if (viewMode === 'top') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      ctx.lineWidth = 1;
+      for (let m = -15; m <= 15; m += snapStep >= 1 ? 5 : 2.5) {
+        const [gx] = project(m, 0);
+        const [, gz] = project(0, m);
+        ctx.beginPath();
+        ctx.moveTo(gx, 0);
+        ctx.lineTo(gx, h);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, gz);
+        ctx.lineTo(w, gz);
+        ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(148,163,184,0.55)';
+      ctx.font = '9px monospace';
+      for (let m = -10; m <= 10; m += 5) {
+        if (m === 0) continue;
+        const [gx] = project(m, 0);
+        const [, gz] = project(0, m);
+        ctx.fillText(String(m), gx + 2, h - 4);
+        ctx.fillText(String(m), 4, gz - 2);
+      }
+    } else {
+      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+      ctx.lineWidth = 1;
+      for (let m = -10; m <= 10; m += 5) {
+        const [x1, y1] = project(m, -HALF);
+        const [x2, y2] = project(m, HALF);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        const [x3, y3] = project(-HALF, m);
+        const [x4, y4] = project(HALF, m);
+        ctx.beginPath();
+        ctx.moveTo(x3, y3);
+        ctx.lineTo(x4, y4);
+        ctx.stroke();
+      }
+    }
+
+    const [hx, hz] = project(0, 0, 0);
+    ctx.fillStyle = '#fbbf24';
+    ctx.beginPath();
+    ctx.arc(hx, hz, viewMode === 'iso' ? 6 : 8, 0, Math.PI * 2);
+    ctx.fill();
+    if (viewMode === 'top') {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('起飛墊 0,0', hx + 10, hz + 4);
+    }
+
     const guide = level.guide;
-    if (guide?.length) {
+    if (guide?.length && viewMode === 'top') {
       ctx.strokeStyle = 'rgba(96,165,250,0.5)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       guide.forEach(([gx, gz], i) => {
-        const [cx, cz] = worldToCanvas(gx, gz);
+        const [cx, cz] = project(gx, gz);
         if (i === 0) ctx.moveTo(cx, cz);
         else ctx.lineTo(cx, cz);
       });
@@ -379,26 +521,36 @@ export function openLevelEditor(
     }
 
     (level.obstacles ?? []).forEach((obs, i) => {
-      const [ox, oz] = worldToCanvas(obs.x, obs.z);
+      const [ox, oz] = project(obs.x, obs.z, obs.y);
       const r = ((obs.size ?? 1) / WORLD) * w * 0.5;
       const sel = isSelected('obstacle', i);
       ctx.fillStyle = heightHueColor(obs.y, obs.solid ? 0.75 : 0.5);
-      ctx.fillRect(ox - r, oz - r, r * 2, r * 2);
+      if (viewMode === 'iso') {
+        ctx.beginPath();
+        ctx.ellipse(ox, oz, r, r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(ox - r, oz - r, r * 2, r * 2);
+      }
       ctx.fillStyle = '#cbd5e1';
       ctx.font = '8px monospace';
       ctx.fillText(`${obs.y}m`, ox - 10, oz - r - 3);
       if (sel) {
         ctx.strokeStyle = '#60a5fa';
         ctx.lineWidth = 2;
-        ctx.strokeRect(ox - r - 2, oz - r - 2, r * 2 + 4, r * 2 + 4);
+        if (viewMode === 'iso') {
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(ox - r - 2, oz - r - 2, r * 2 + 4, r * 2 + 4);
+        }
       }
     });
 
     (level.balloons ?? []).forEach((b, i) => {
-      const [bx, bz] = worldToCanvas(b.x, b.z);
+      const [bx, bz] = project(b.x, b.z, b.y);
       ctx.fillStyle = heightHueColor(b.y, 0.8);
       ctx.beginPath();
-      ctx.arc(bx, bz, 10, 0, Math.PI * 2);
+      ctx.arc(bx, bz, viewMode === 'iso' ? 8 : 10, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#cbd5e1';
       ctx.font = '8px monospace';
@@ -410,105 +562,63 @@ export function openLevelEditor(
       }
     });
 
-    (level.passZones ?? []).forEach((zone, i) => {
-      const isPos = zone.type === 'position' || zone.type === undefined;
-      if (isPos && (zone.minX != null || zone.maxX != null)) {
-        const minX = zone.minX ?? zone.x - 1;
-        const maxX = zone.maxX ?? zone.x + 1;
-        const minZ = zone.minZ ?? zone.z - 1;
-        const maxZ = zone.maxZ ?? zone.z + 1;
-        const [x1, z1] = worldToCanvas(minX, minZ);
-        const [x2, z2] = worldToCanvas(maxX, maxZ);
-        ctx.fillStyle = isSelected('zone', i) ? 'rgba(96,165,250,0.15)' : 'rgba(167,139,250,0.12)';
-        ctx.fillRect(x1, z1, x2 - x1, z2 - z1);
-        ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.65)';
-        ctx.lineWidth = isSelected('zone', i) ? 2.5 : 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(x1, z1, x2 - x1, z2 - z1);
-        ctx.setLineDash([]);
-      }
-      const [zx, zz] = worldToCanvas(zone.x, zone.z);
-      ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.85)';
-      ctx.lineWidth = isSelected('zone', i) ? 2.5 : 2;
-      if (!isPos || zone.minX == null) {
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(zx - 12, zz - 12, 24, 24);
-        ctx.setLineDash([]);
-      }
-      ctx.fillStyle = '#c4b5fd';
-      ctx.font = '9px sans-serif';
-      ctx.fillText(zone.label?.slice(0, 4) ?? String(i + 1), zx - 3, zz + 3);
-    });
+    if (viewMode === 'top') {
+      (level.passZones ?? []).forEach((zone, i) => {
+        const isPos = zone.type === 'position' || zone.type === undefined;
+        if (isPos && (zone.minX != null || zone.maxX != null)) {
+          const minX = zone.minX ?? zone.x - 1;
+          const maxX = zone.maxX ?? zone.x + 1;
+          const minZ = zone.minZ ?? zone.z - 1;
+          const maxZ = zone.maxZ ?? zone.z + 1;
+          const [x1, z1] = project(minX, minZ);
+          const [x2, z2] = project(maxX, maxZ);
+          ctx.fillStyle = isSelected('zone', i) ? 'rgba(96,165,250,0.15)' : 'rgba(167,139,250,0.12)';
+          ctx.fillRect(x1, z1, x2 - x1, z2 - z1);
+          ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.65)';
+          ctx.lineWidth = isSelected('zone', i) ? 2.5 : 1.5;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(x1, z1, x2 - x1, z2 - z1);
+          ctx.setLineDash([]);
+        }
+        const [zx, zz] = project(zone.x, zone.z);
+        ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.85)';
+        ctx.lineWidth = isSelected('zone', i) ? 2.5 : 2;
+        if (!isPos || zone.minX == null) {
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(zx - 12, zz - 12, 24, 24);
+          ctx.setLineDash([]);
+        }
+        ctx.fillStyle = '#c4b5fd';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(zone.label?.slice(0, 4) ?? String(i + 1), zx - 3, zz + 3);
+      });
+    }
 
     (level.rings ?? []).forEach((ring, i) => {
-      const [rx, rz] = worldToCanvas(ring.x, ring.z);
+      const [rx, rz] = project(ring.x, ring.z, ring.y);
       const sel = isSelected('ring', i);
+      const rPx = ringPxRadius(ringDiameter(ring));
       ctx.strokeStyle = sel ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : heightHueColor(ring.y, 0.95);
       ctx.lineWidth = sel ? 3 : 2;
       ctx.beginPath();
-      ctx.arc(rx, rz, 14, 0, Math.PI * 2);
+      ctx.arc(rx, rz, rPx, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = '#e2e8f0';
       ctx.font = '10px sans-serif';
       ctx.fillText(ring.label ?? String(i + 1), rx - 4, rz + 3);
       ctx.font = '8px monospace';
       ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(`${ring.y}m`, rx - 10, rz - 16);
+      ctx.fillText(`${ring.y}m`, rx - 10, rz - rPx - 4);
     });
-    drawElev();
-    updateEmptyBanner();
   };
 
-  const drawElev = (): void => {
-    const w = elevCanvas.width;
-    const h = elevCanvas.height;
-    elevCtx.fillStyle = '#141c28';
-    elevCtx.fillRect(0, 0, w, h);
-    const toEx = (x: number): number => ((x + HALF) / WORLD) * w;
-    const toEy = (y: number): number => h - 8 - (y / EDITOR_MAX_Y) * (h - 20);
-    elevCtx.strokeStyle = 'rgba(251,191,36,0.55)';
-    elevCtx.lineWidth = 1;
-    elevCtx.beginPath();
-    elevCtx.moveTo(0, toEy(0));
-    elevCtx.lineTo(w, toEy(0));
-    elevCtx.stroke();
-    for (let y = 0; y <= EDITOR_MAX_Y; y += 2) {
-      elevCtx.strokeStyle = 'rgba(255,255,255,0.06)';
-      elevCtx.beginPath();
-      elevCtx.moveTo(0, toEy(y));
-      elevCtx.lineTo(w, toEy(y));
-      elevCtx.stroke();
-      elevCtx.fillStyle = 'rgba(148,163,184,0.45)';
-      elevCtx.font = '8px monospace';
-      elevCtx.fillText(`${y}m`, 2, toEy(y) - 2);
-    }
-    const mark = (x: number, y: number, label: string, on: boolean): void => {
-      const ex = toEx(x);
-      const ey = toEy(y);
-      elevCtx.fillStyle = heightHueColor(y);
-      elevCtx.beginPath();
-      elevCtx.arc(ex, ey, on ? 7 : 4, 0, Math.PI * 2);
-      elevCtx.fill();
-      if (on) {
-        elevCtx.strokeStyle = '#60a5fa';
-        elevCtx.lineWidth = 2;
-        elevCtx.stroke();
-        elevCtx.fillStyle = '#e2e8f0';
-        elevCtx.font = '9px sans-serif';
-        elevCtx.fillText(`${label} · Y=${y}`, Math.min(ex + 8, w - 80), ey - 6);
-      }
-    };
-    (level.rings ?? []).forEach((r, i) =>
-      mark(r.x, r.y, r.label ?? `圈${i + 1}`, selection?.kind === 'ring' && selection.index === i),
-    );
-    (level.obstacles ?? []).forEach((o, i) =>
-      mark(o.x, o.y, `障${i + 1}`, selection?.kind === 'obstacle' && selection.index === i),
-    );
-    (level.balloons ?? []).forEach((b, i) =>
-      mark(b.x, b.y, `球${i + 1}`, selection?.kind === 'balloon' && selection.index === i),
-    );
-    q<HTMLElement>('#le-elev-hint').textContent =
-      selection && selection.kind !== 'zone' ? '藍低 → 紅高' : '選取圈/障礙/氣球以確認高度';
+  const draw = (): void => {
+    const w = canvas.width;
+    const h = canvas.height;
+    if (viewMode === 'side') drawSideView(w, h);
+    else drawPlanView();
+    updateEmptyBanner();
+    syncInspectorVisibility();
   };
 
   const syncFormFromLevel = (): void => {
@@ -566,11 +676,8 @@ export function openLevelEditor(
   };
 
   const syncPropsPanel = (): void => {
-    if (!selection) {
-      propsPanel.hidden = true;
-      return;
-    }
-    propsPanel.hidden = false;
+    syncInspectorVisibility();
+    if (!selection) return;
     const { kind, index } = selection;
     q<HTMLElement>('#le-props-title').textContent = `${KIND_LABEL[kind]} #${index + 1}`;
 
@@ -580,17 +687,23 @@ export function openLevelEditor(
     const solidWrap = q<HTMLElement>('#le-solid-wrap');
     const faceWrap = q<HTMLElement>('#le-face-wrap');
     const zoneWrap = q<HTMLElement>('#le-zone-wrap');
+    const ringDiamWrap = q<HTMLElement>('#le-ring-diam-wrap');
 
     syncingProps = true;
     faceWrap.hidden = true;
     zoneWrap.hidden = true;
+    ringDiamWrap.hidden = true;
     if (kind === 'ring') {
       const r = level.rings![index];
       if (!r) return setSelection(null);
       q<HTMLInputElement>('#le-px').value = String(r.x);
       q<HTMLInputElement>('#le-pz').value = String(r.z);
       syncPyControls(r.y);
+      const diam = ringDiameter(r);
+      q<HTMLInputElement>('#le-ring-diam').value = String(diam);
+      q<HTMLElement>('#le-ring-diam-readout').textContent = ` ${diam.toFixed(1)} m`;
       pyWrap.hidden = false;
+      ringDiamWrap.hidden = false;
       sizeWrap.hidden = true;
       labelWrap.hidden = false;
       solidWrap.hidden = true;
@@ -668,11 +781,13 @@ export function openLevelEditor(
       const faceRaw = q<HTMLInputElement>('#le-face-yaw').value.trim();
       const faceYaw = faceRaw === '' ? undefined : Number(faceRaw);
       const faceTol = Number(q<HTMLInputElement>('#le-face-tol').value) || 35;
+      const diam = Number(q<HTMLInputElement>('#le-ring-diam').value) || ringDiameter(r);
       rings[selection.index] = {
         ...r,
         x,
         z,
         y,
+        diameter: diam === 3 ? undefined : diam,
         label: q<HTMLInputElement>('#le-label').value.trim() || r.label,
         faceYaw,
         faceTol: faceYaw != null ? faceTol : undefined,
@@ -818,13 +933,45 @@ export function openLevelEditor(
     scheduleSave();
   };
 
-  const hitAt = (px: number, py: number): Selection | null => {
-    const tryList = (kind: ObjKind, items: { x: number; z: number; size?: number }[]): Selection | null => {
+  const hitAtSide = (px: number, py: number): Selection | null => {
+    const w = canvas.width;
+    const h = canvas.height;
+    const tryY = (
+      kind: ObjKind,
+      items: { x: number; y: number; diameter?: number }[],
+    ): Selection | null => {
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i];
         if (!it) continue;
-        const [cx, cz] = worldToCanvas(it.x, it.z);
-        const hitR = kind === 'obstacle' ? ((it.size ?? 1) / WORLD) * canvas.width * 0.5 + 4 : 14;
+        const [ex, ey] = sideWorldToCanvas(it.x, it.y, w, h);
+        const hitR = kind === 'ring' ? ringPxRadius(ringDiameter(it)) * 0.4 + 6 : 10;
+        if (Math.hypot(px - ex, py - ey) <= hitR) return { kind, index: i };
+      }
+      return null;
+    };
+    return (
+      tryY('ring', level.rings ?? []) ??
+      tryY('obstacle', level.obstacles ?? []) ??
+      tryY('balloon', level.balloons ?? [])
+    );
+  };
+
+  const hitAt = (px: number, py: number): Selection | null => {
+    if (viewMode === 'side') return hitAtSide(px, py);
+    const tryList = (
+      kind: ObjKind,
+      items: { x: number; z: number; y?: number; size?: number; diameter?: number }[],
+    ): Selection | null => {
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        if (!it) continue;
+        const [cx, cz] = project(it.x, it.z, it.y ?? 0);
+        const hitR =
+          kind === 'ring'
+            ? ringPxRadius(ringDiameter(it))
+            : kind === 'obstacle'
+              ? ((it.size ?? 1) / WORLD) * canvas.width * 0.5 + 4
+              : 14;
         if (Math.hypot(px - cx, py - cz) <= hitR) return { kind, index: i };
       }
       return null;
@@ -833,7 +980,7 @@ export function openLevelEditor(
       tryList('ring', level.rings ?? []) ??
       tryList('obstacle', level.obstacles ?? []) ??
       tryList('balloon', level.balloons ?? []) ??
-      tryList('zone', level.passZones ?? [])
+      (viewMode === 'top' ? tryList('zone', level.passZones ?? []) : null)
     );
   };
 
@@ -841,7 +988,7 @@ export function openLevelEditor(
     if (placeMode === 'ring') {
       level.rings = [
         ...(level.rings ?? []),
-        { x: wx, y: 2.5, z: wz, label: String((level.rings?.length ?? 0) + 1) },
+        { x: wx, y: placeHeightY, z: wz, label: String((level.rings?.length ?? 0) + 1) },
       ];
       setSelection({ kind: 'ring', index: level.rings.length - 1 });
     } else if (placeMode === 'obstacle-solid') {
@@ -857,7 +1004,7 @@ export function openLevelEditor(
       ];
       setSelection({ kind: 'obstacle', index: level.obstacles.length - 1 });
     } else if (placeMode === 'balloon') {
-      level.balloons = [...(level.balloons ?? []), { x: wx, y: 2.5, z: wz }];
+      level.balloons = [...(level.balloons ?? []), { x: wx, y: placeHeightY, z: wz }];
       setSelection({ kind: 'balloon', index: level.balloons.length - 1 });
     } else if (placeMode === 'zone') {
       const n = (level.passZones?.length ?? 0) + 1;
@@ -889,15 +1036,24 @@ export function openLevelEditor(
 
   canvas.addEventListener('mousemove', (e) => {
     const [px, py] = canvasPos(e);
-    const { x, z } = canvasToWorld(px, py);
-    cursorEl.textContent = `X ${x} · Z ${z}`;
+    const { x, z } = unproject(px, py);
+    syncInspectorIdle(x, z);
     if (!dragSel) return;
     const drag = dragSel;
     const rings = level.rings ?? [];
     const obs = level.obstacles ?? [];
     const balloons = level.balloons ?? [];
     const zones = level.passZones ?? [];
-    if (drag.kind === 'ring' && rings[drag.index]) {
+    if (viewMode === 'side' && drag.kind !== 'zone') {
+      const ny = sideYFromCanvas(py, canvas.height);
+      if (drag.kind === 'ring' && rings[drag.index]) {
+        level.rings = rings.map((item, i) => (i === drag.index ? { ...item, y: ny } : item));
+      } else if (drag.kind === 'obstacle' && obs[drag.index]) {
+        level.obstacles = obs.map((item, i) => (i === drag.index ? { ...item, y: ny } : item));
+      } else if (drag.kind === 'balloon' && balloons[drag.index]) {
+        level.balloons = balloons.map((item, i) => (i === drag.index ? { ...item, y: ny } : item));
+      }
+    } else if (drag.kind === 'ring' && rings[drag.index]) {
       const p = snapClampXZ(x, z, snapStep);
       level.rings = rings.map((item, i) => (i === drag.index ? { ...item, x: p.x, z: p.z } : item));
     } else if (drag.kind === 'obstacle' && obs[drag.index]) {
@@ -922,13 +1078,43 @@ export function openLevelEditor(
       dragSel = hit;
       return;
     }
-    const { x, z } = canvasToWorld(px, py);
+    if (viewMode === 'side') {
+      if (placeMode !== 'select') toast('請切換俯視或 2.5D 放置物件', 'info');
+      setSelection(null);
+      return;
+    }
+    const { x, z } = unproject(px, py);
     if (placeMode !== 'select') {
       placeAt(x, z);
       draw();
       return;
     }
     setSelection(null);
+  });
+
+  canvas.addEventListener(
+    'wheel',
+    (e) => {
+      if (viewMode === 'side') return;
+      e.preventDefault();
+      const step = 0.5;
+      placeHeightY = Math.max(
+        0.5,
+        Math.min(EDITOR_MAX_Y, placeHeightY + (e.deltaY > 0 ? -step : step)),
+      );
+      syncPlaceHeightReadout();
+    },
+    { passive: false },
+  );
+
+  q<HTMLElement>('#le-view-tabs').querySelectorAll<HTMLButtonElement>('.le-view').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      viewMode = (btn.dataset['view'] as EditorViewMode) || 'top';
+      q<HTMLElement>('#le-view-tabs').querySelectorAll('.le-view').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      dragSel = null;
+      draw();
+    });
   });
 
   const endDrag = (): void => {
@@ -956,6 +1142,7 @@ export function openLevelEditor(
   });
 
   ['#le-px', '#le-pz', '#le-py', '#le-py-range', '#le-size', '#le-label', '#le-solid', '#le-face-yaw', '#le-face-tol',
+    '#le-ring-diam',
     '#le-zone-minx', '#le-zone-maxx', '#le-zone-minz', '#le-zone-maxz',
     '#le-zone-miny', '#le-zone-maxy', '#le-zone-yaw', '#le-zone-tol'].forEach((sel) => {
     q<HTMLElement>(sel).addEventListener('input', () => applyPropsToSelection());
@@ -968,6 +1155,21 @@ export function openLevelEditor(
     q<HTMLInputElement>('#le-py').value = q<HTMLInputElement>('#le-py-range').value;
     applyPropsToSelection();
   });
+  q<HTMLInputElement>('#le-ring-diam').addEventListener('input', () => {
+    const diam = Number(q<HTMLInputElement>('#le-ring-diam').value);
+    q<HTMLElement>('#le-ring-diam-readout').textContent = ` ${diam.toFixed(1)} m`;
+    applyPropsToSelection();
+  });
+  q<HTMLElement>('#le-ring-diam-presets').querySelectorAll<HTMLButtonElement>('button[data-diam]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const diam = Number(btn.dataset['diam']);
+      if (!Number.isFinite(diam)) return;
+      q<HTMLInputElement>('#le-ring-diam').value = String(diam);
+      q<HTMLElement>('#le-ring-diam-readout').textContent = ` ${diam.toFixed(1)} m`;
+      applyPropsToSelection();
+    });
+  });
+
   q<HTMLElement>('#le-height-presets').querySelectorAll<HTMLButtonElement>('button[data-y]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const y = Number(btn.dataset['y']);
@@ -1300,6 +1502,7 @@ export function openLevelEditor(
         detail.status === 'draft' ? '草稿會自動儲存' : '已發布 — 修改後學生端即時生效';
       snapStep = getSnapStep();
       syncFormFromLevel();
+      syncPlaceHeightReadout();
       draw();
       loadMyKits();
       backdrop.focus();

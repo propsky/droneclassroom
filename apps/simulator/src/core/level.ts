@@ -10,6 +10,7 @@ import {
   detSin,
   detHypot2,
   detHypot3,
+  ringPassRadius,
 } from '@creafly/shared';
 import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
@@ -22,6 +23,8 @@ export interface MissionRing {
   z: number;
   color?: number | string;
   label?: string;
+  diameter?: number;
+  thickness?: number;
   faceYaw?: number;
   faceTol?: number;
   passed: boolean;
@@ -300,7 +303,7 @@ function checkRings(nowMs: number): void {
     if (ring.passed) return;
     const ry = ringWorldY(i, ring.y, nowMs);
     const dist = detHypot3(p.x - ring.x, p.y - ry, p.z - ring.z);
-    if (dist >= 1.5) return;
+    if (dist >= ringPassRadius(ring)) return;
     // 旋轉鑽圈關：faceYaw 圈必須機頭對準才算穿過
     if (ring.faceYaw !== undefined && ring.faceYaw !== null) {
       const yawDeg = normalizeDeg(droneState.yaw * RAD2DEG);

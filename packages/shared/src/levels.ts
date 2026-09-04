@@ -7,6 +7,10 @@ export interface RingDef {
   z: number;
   color?: number | string;
   label?: string;
+  /** 圈直徑（公尺）；缺省 3（與模擬器 torus 預設一致） */
+  diameter?: number;
+  /** 圈管粗細（公尺，僅視覺）；缺省 0.24 */
+  thickness?: number;
   /** 旋轉鑽圈關：機頭需對準的 yaw 角（度）才算穿過 */
   faceYaw?: number;
   /** faceYaw 容差（度），預設 35 */
