@@ -7,6 +7,7 @@ import {
   type LoadLevelOptions,
 } from '../core/level';
 import { toast } from '../core/events';
+import { fetchLevelDefinition } from './curriculum';
 import { loadEntitlement } from './entitlement';
 import { sendToServer, wsState } from './ws';
 
@@ -70,6 +71,13 @@ export async function loadLevel(levelId: string, opts?: LoadLevelOptions): Promi
     if (!checkLevelLoadGuard(levelId)) return;
     const ok = await requestLevelLoad(levelId);
     if (!ok) return;
+  }
+  if (!levelState.levels.some((l) => l.id === levelId)) {
+    const def = await fetchLevelDefinition(levelId);
+    if (!def) {
+      toast('找不到關卡資料', 'warning');
+      return;
+    }
   }
   applyLoadLevel(levelId);
 }

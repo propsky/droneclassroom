@@ -125,6 +125,88 @@ export interface LevelsResponse {
   }[];
 }
 
+/** 班級關卡 curriculum 回應（GET /api/student/curriculum、/api/teams/{id}/curriculum） */
+export interface CurriculumLevelBrief {
+  levelId: string;
+  title: string;
+  kind: 'system' | 'teacher';
+  visibleInMenu?: boolean;
+  teacherBroadcastable?: boolean;
+}
+
+export interface CurriculumGroup {
+  label: string;
+  sort: number;
+  levels: CurriculumLevelBrief[];
+}
+
+export interface CurriculumResponse {
+  groups: CurriculumGroup[];
+}
+
+/** GET /api/levels/{levelId} 回應 */
+export interface LevelDefinitionResponse {
+  definition: Record<string, unknown>;
+}
+
+/** 老師作品庫項目 */
+export interface TeacherLevelBrief {
+  id: number;
+  levelId: string;
+  title: string;
+  status: 'draft' | 'published' | 'archived';
+  updatedAt: number;
+}
+
+export interface TeacherLevelsResponse {
+  levels: TeacherLevelBrief[];
+}
+
+/** GET /api/teacher/levels/{id} */
+export interface TeacherLevelDetail extends TeacherLevelBrief {
+  definition: Record<string, unknown>;
+}
+
+/** 老師預覽 iframe：sessionStorage 鍵與虛擬關卡 id */
+export const PREVIEW_LEVEL_STORAGE_KEY = 'creafly_preview_level';
+export const PREVIEW_LEVEL_ID = '__preview__';
+
+export interface CreateCustomLevelRequest {
+  title: string;
+  templateLevelId?: string;
+}
+
+/** 班級目錄一列（GET /api/teams/{id}/catalog） */
+export interface TeamCatalogEntry {
+  levelId: string;
+  title: string;
+  kind: 'system' | 'teacher';
+  groupLabel: string;
+  sortOrder: number;
+  visibleInMenu: boolean;
+  teacherBroadcastable: boolean;
+  enabled: boolean;
+}
+
+export interface TeamCatalogListResponse {
+  entries: TeamCatalogEntry[];
+}
+
+export interface CatalogAssignRequest {
+  levelId: string;
+  groupLabel: string;
+  visibleInMenu?: boolean;
+  teacherBroadcastable?: boolean;
+}
+
+export interface CatalogPatchRequest {
+  groupLabel?: string;
+  sortOrder?: number;
+  visibleInMenu?: boolean;
+  teacherBroadcastable?: boolean;
+  enabled?: boolean;
+}
+
 /** GET /api/info 回應：教室現場資訊 */
 export interface InfoResponse {
   /** 伺服器綁定的區網 IPv4 位址（老師投影給學生抄的網址） */

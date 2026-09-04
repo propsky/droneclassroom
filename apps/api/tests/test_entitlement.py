@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.config import Settings
-from app.db.models import Team
+from app.db.models import TeamLevelEntry
 from app.db.session import create_engine, create_sessionmaker
 from app.entitlement import (
     build_register_entitlement,
     build_welcome_entitlement,
     parse_demo_level_ids,
-    parse_team_level_ids,
 )
 from app.main import create_app
 from app.rest import known_level_ids, load_levels
@@ -26,15 +26,18 @@ from tests.test_students import _account_login, _cleanup, _create_students
 TEACHER_PASSWORD = "test123"
 
 
-async def _patch_team_settings(team_id: int, settings: dict) -> None:
-    """測試用：寫入 teams.settings（如 level_ids 子集）。"""
+async def _set_team_catalog_subset(team_id: int, level_ids: list[str]) -> None:
+    """測試用：team_level_entries 只啟用指定關卡（模擬班級授權子集）。"""
     assert DATABASE_URL
+    allowed = set(level_ids)
     engine = create_engine(DATABASE_URL)
     maker = create_sessionmaker(engine)
     async with maker() as s:
-        team = await s.get(Team, team_id)
-        assert team is not None
-        team.settings = settings
+        rows = (
+            await s.execute(select(TeamLevelEntry).where(TeamLevelEntry.team_id == team_id))
+        ).scalars().all()
+        for entry in rows:
+            entry.enabled = entry.level_id in allowed
         await s.commit()
     await engine.dispose()
 
@@ -81,18 +84,6 @@ def test_build_welcome_無DB_強制open() -> None:
     assert len(ent.levelIds) == len(known)
 
 
-def test_parse_team_level_ids_未設定則全關() -> None:
-    known = frozenset({"1-0", "1-1", "2-1"})
-    assert parse_team_level_ids(None, known) == ["1-0", "1-1", "2-1"]
-    assert parse_team_level_ids({}, known) == ["1-0", "1-1", "2-1"]
-
-
-def test_parse_team_level_ids_過濾未知() -> None:
-    known = frozenset({"1-0", "1-1", "2-1"})
-    settings = {"level_ids": ["2-1", "9-9", "1-0"]}
-    assert parse_team_level_ids(settings, known) == ["1-0", "2-1"]
-
-
 def test_build_register_entitlement_open不回傳() -> None:
     known = _known_levels()
     cfg = Settings(entitlement_mode="open", database_url="postgresql+asyncpg://x")
@@ -114,7 +105,7 @@ def test_build_register_entitlement_帳號enforce升級() -> None:
     known = _known_levels()
     cfg = Settings(entitlement_mode="enforce", database_url="postgresql+asyncpg://x")
     ent = build_register_entitlement(
-        cfg, known, student_id=42, team_settings={"level_ids": ["1-0", "2-1"]}
+        cfg, known, student_id=42, team_level_ids=["1-0", "2-1"]
     )
     assert ent is not None
     assert ent.mode == "licensed"
@@ -267,8 +258,8 @@ def test_complete_enforce_未授權關卡不入庫(enforce_db_client: TestClient
 
 
 @needs_db
-def test_register_enforce_班級level_ids子集(enforce_db_client: TestClient) -> None:
-    """teams.settings.level_ids 限制帳號 licensed 清單；未授權關 complete 不入庫。"""
+def test_register_enforce_班級catalog子集(enforce_db_client: TestClient) -> None:
+    """team_level_entries 限制帳號 licensed 清單；未授權關 complete 不入庫。"""
     ticket = _register(enforce_db_client, _email("entL"))["ticket"]
     with enforce_db_client.websocket_connect(f"/teacher?ticket={ticket}") as ws:
         t = TeacherWS(ws)
@@ -276,7 +267,7 @@ def test_register_enforce_班級level_ids子集(enforce_db_client: TestClient) -
         team_id = _rooms_by_code(t.room_list(lambda lst: code in _rooms_by_code(lst)))[code][
             "teamId"
         ]
-        asyncio.run(_patch_team_settings(team_id, {"level_ids": ["1-0", "1-1"]}))
+        asyncio.run(_set_team_catalog_subset(team_id, ["1-0", "1-1"]))
         headers = _bearer(ticket)
         _create_students(
             enforce_db_client, headers, team_id, [{"name": "小子"}], sendInvites=False

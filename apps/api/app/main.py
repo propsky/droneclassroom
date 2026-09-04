@@ -19,6 +19,8 @@ from sqlalchemy import text
 from .auth import TeacherAuth, generate_pin
 from .config import Settings
 from .db.session import create_engine, create_sessionmaker
+from .levels_api import router as levels_router
+from .levels_catalog import ensure_all_teams_catalog, ensure_system_levels, fetch_known_level_ids
 from .mailer import Mailer
 from .rest import known_level_ids, load_levels
 from .rest import router as rest_router
@@ -64,9 +66,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # 關卡清單啟動時載入一次（/api/levels 快取 + 防作弊已知關卡清單）
     levels = load_levels(cfg.levels_dir)
+    json_known = known_level_ids(levels)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        known = json_known
         # 資料庫（選配）：有 DATABASE_URL 才建 engine；連不上只 log 不擋啟動
         # （教室現場沒網路也要能上課；/api/health 的 db 欄位會反映 error）
         if cfg.database_url:
@@ -76,16 +80,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 async with app.state.db_engine.connect() as conn:
                     await conn.execute(text("SELECT 1"))
                 logger.info("資料庫已連線")
+                async with app.state.db_sessionmaker() as session:
+                    n = await ensure_system_levels(session, cfg.levels_dir)
+                    if n:
+                        logger.info("官方關卡已同步至 levels 表（%d 筆）", n)
+                    known = await fetch_known_level_ids(session, json_known)
+                await ensure_all_teams_catalog(app.state.db_sessionmaker)
             except Exception:  # noqa: BLE001 — 見上方註解
                 logger.exception("資料庫連線失敗（伺服器照常啟動，資料庫功能暫不可用）")
         else:
             logger.info("未設定 DATABASE_URL，以無資料庫模式啟動")
+        app.state.known_levels = known
         # 所有可變狀態封裝在 app.state（測試隔離：每個 create_app 一份房間管理器）。
         # 房間模型見 rooms.py：每房一份名冊 + 賽局；預設房啟動即存在（不帶房間碼 = 舊流程）；
         # 有 DB 時老師開的房持久化為班級（teams 表），故把 sessionmaker 注入。
         # 足球場地尺寸資料驅動（環境變數 SOCCER_HALF_X … 可調，見 config.py）
         app.state.rooms = RoomManager(
-            cfg, known_levels=known_level_ids(levels), db=app.state.db_sessionmaker
+            cfg, known_levels=known, db=app.state.db_sessionmaker
         )
         # 向後相容別名 = 預設房的名冊 / 賽局（既有測試與單房部署直接用）
         app.state.roster = app.state.rooms.default.roster
@@ -123,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.mailer = Mailer(cfg)
     app.state.auth = auth
     app.state.levels = levels
+    app.state.known_levels = json_known
     # 資料庫 engine / sessionmaker：lifespan 內依 database_url 建立；None = 無資料庫模式
     app.state.db_engine = None
     app.state.db_sessionmaker = None
@@ -148,12 +160,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_origins=allow_origins,
             allow_origin_regex="|".join(wildcard_patterns) or None,
             # DELETE：移除學生；authorization：Bearer session token（老師 / 學生端點）
-            allow_methods=["GET", "POST", "DELETE"],
+            allow_methods=["GET", "POST", "PATCH", "DELETE"],
             allow_headers=["content-type", "authorization"],
         )
 
     register_ws_routes(app)
     app.include_router(rest_router)
+    app.include_router(levels_router)
     app.include_router(students_router)
     register_static_routes(app, cfg)
     return app

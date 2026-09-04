@@ -7,6 +7,7 @@
 // 大亂鬥與足球對齊舊版 teacher.html 的功能：排行榜 / 隊伍名單 / 倒數時鐘 / 勝負 toast。
 import type {
   ArenaScoreEntry,
+  CurriculumResponse,
   InfoResponse,
   LevelsResponse,
   RoomInfo,
@@ -21,12 +22,14 @@ import type {
   TeamInfo,
 } from '@creafly/shared';
 import type { TeacherArenaMsg, TeacherSoccerMsg } from '../ws';
+import { fetchTeamCurriculum } from '../api';
 import { ICONS } from '../icons';
 import { toast } from '../toast';
 import { copyText } from '../clipboard';
 import { saveResume, type ResumeState } from '../resume';
 import { renderAccountMenu } from './account';
 import { openStudentsPanel, type StudentsPanel } from './students';
+import { mountLevelsManage, type LevelsManagePanel } from './levelsManage';
 
 export interface DashboardView {
   setWsStatus(connected: boolean): void;
@@ -87,6 +90,29 @@ function avatarChip(emoji: string | null | undefined, connected?: boolean): stri
   const presence =
     connected === undefined ? '' : `<span class="presence ${connected ? 'on' : 'off'}"></span>`;
   return `<span class="avatar-chip" aria-hidden="true">${esc(emoji ?? '')}${presence}</span>`;
+}
+
+/** 關卡下拉：班級 curriculum 優先，否則退回 /api/levels 三章 */
+function levelSelectHtml(
+  curriculum: CurriculumResponse | null,
+  levels: LevelsResponse | null,
+): string {
+  if (curriculum && curriculum.groups.length > 0) {
+    return curriculum.groups
+      .map(
+        (g) =>
+          `<optgroup label="${esc(g.label)}">` +
+          g.levels
+            .map(
+              (l) =>
+                `<option value="${esc(l.levelId)}">${esc(l.levelId)} ${esc(l.title)}</option>`,
+            )
+            .join('') +
+          `</optgroup>`,
+      )
+      .join('');
+  }
+  return levelOptions(levels);
 }
 
 /** 關卡下拉：由 /api/levels 動態產生，三章全列（每章一個 optgroup） */
@@ -245,6 +271,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       <main class="work-col">
         <div class="tabs">
           <button class="tab-btn active" data-tab="levels">${ICONS.map}關卡 / 廣播</button>
+          <button class="tab-btn" data-tab="level-manage">${ICONS.pencil}關卡管理</button>
           <button class="tab-btn" data-tab="arena">${ICONS.trophy}大亂鬥<span class="live-dot"></span></button>
           <button class="tab-btn" data-tab="soccer">${ICONS.target}足球<span class="live-dot"></span></button>
         </div>
@@ -256,7 +283,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               <div class="ctl-grid ctl-grid-wide">
                 <div class="field">
                   <label class="field-label" for="level-select">課程關卡</label>
-                  <select id="level-select">${levelOptions(levels)}</select>
+                  <select id="level-select">${levelSelectHtml(null, levels)}</select>
                 </div>
               </div>
             </div>
@@ -292,6 +319,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
             </div>
           </div>
         </section>
+
+        <section class="tab-panel" id="panel-level-manage"></section>
 
         <section class="tab-panel" id="panel-arena">
           <div class="card">
@@ -446,6 +475,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     for (const p of root.querySelectorAll('.tab-panel')) {
       p.classList.toggle('active', p.id === `panel-${name}`);
     }
+    if (name === 'level-manage') levelsManagePanel?.refresh();
     persist();
   };
   for (const btn of tabBtns) {
@@ -477,6 +507,29 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
 
   // ---- 廣播控制（全部走 broadcast / TeacherBroadcastPayload）----
   const levelSelect = root.querySelector<HTMLSelectElement>('#level-select')!;
+  let teamCurriculum: CurriculumResponse | null = null;
+
+  const refreshLevelSelect = (): void => {
+    levelSelect.innerHTML = levelSelectHtml(teamCurriculum, levels);
+  };
+
+  const loadCurriculumForRoom = (room: RoomInfo | undefined): void => {
+    if (!room?.teamId) {
+      teamCurriculum = null;
+      refreshLevelSelect();
+      return;
+    }
+    void fetchTeamCurriculum(room.teamId)
+      .then((cur) => {
+        teamCurriculum = cur;
+        refreshLevelSelect();
+      })
+      .catch(() => {
+        teamCurriculum = null;
+        refreshLevelSelect();
+      });
+  };
+
   // 「整班廣播（含分房）」開關：勾選時廣播帶 allRooms（伺服器套用到班級所有房）
   const allRoomsChk = root.querySelector<HTMLInputElement>('#all-rooms-chk')!;
   const allRoomsWrap = root.querySelector<HTMLElement>('#all-rooms-wrap')!;
@@ -807,6 +860,13 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 剛送出 room_open_team 的班級 id（chip 顯示開啟中、防連點；伺服器 room_list 回來即清） */
   let pendingOpenTeam: number | null = null;
   const currentRoom = (): RoomInfo | null => rooms.find((r) => r.code === selectedRoom) ?? null;
+  const levelsManageHost = root.querySelector<HTMLElement>('#panel-level-manage')!;
+  let levelsManagePanel: LevelsManagePanel | null = mountLevelsManage(levelsManageHost, {
+    getTeamId: () => currentRoom()?.teamId ?? null,
+    getTeamName: () => currentRoom()?.name || currentRoom()?.code || '本班',
+    levels,
+    onCatalogUpdated: () => loadCurriculumForRoom(currentRoom() ?? undefined),
+  });
   /** 班級模式：伺服器有給非空 teams（有 DB） */
   const teamMode = (): boolean => !!teams && teams.length > 0;
   /** 班級對應的開著的房（teamId 對上；退而以 code 對） */
@@ -1285,6 +1345,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       }
       if (!roomPop.hidden && !currentRoom()) closeRoomPop(); // 正在編輯的房被關掉
       drawRooms();
+      loadCurriculumForRoom(list.find((r) => r.code === selectedRoom));
+      levelsManagePanel?.refresh();
     },
     setMe(me: TeacherMe | null): void {
       account.setMe(me);
@@ -1292,6 +1354,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     destroy(): void {
       studentsPanel?.destroy();
       studentsPanel = null;
+      levelsManagePanel?.destroy();
+      levelsManagePanel = null;
       account.destroy();
     },
     setWsStatus(connected: boolean): void {

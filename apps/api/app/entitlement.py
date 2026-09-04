@@ -61,26 +61,17 @@ def build_welcome_entitlement(cfg: Settings, known_levels: frozenset[str]) -> En
     )
 
 
-def parse_team_level_ids(
-    team_settings: dict | None, known_levels: frozenset[str]
-) -> list[str]:
-    """班級專屬關卡（teams.settings.level_ids）；未設定或空則全關。"""
-    if not team_settings:
-        return sorted(known_levels)
-    raw = team_settings.get("level_ids")
-    if not isinstance(raw, list) or not raw:
-        return sorted(known_levels)
-    return sorted(lid for lid in raw if isinstance(lid, str) and lid in known_levels)
-
-
 def build_register_entitlement(
     cfg: Settings,
     known_levels: frozenset[str],
     *,
     student_id: int | None,
-    team_settings: dict | None = None,
+    team_level_ids: list[str] | None = None,
 ) -> EntitlementMsg | None:
-    """register 成功後下發的能力包；open / 無 DB 不回傳（welcome 已足夠）。"""
+    """register 成功後下發的能力包；open / 無 DB 不回傳（welcome 已足夠）。
+
+    team_level_ids 來自 team_level_entries；None 時視為全關（與無目錄 seed 前相同）。
+    """
     if cfg.entitlement_mode == "open" or not cfg.database_url:
         return None
 
@@ -88,9 +79,10 @@ def build_register_entitlement(
     demo_ids = parse_demo_level_ids(cfg.demo_level_ids, known_levels)
 
     if student_id is not None and cfg.entitlement_mode == "enforce":
+        licensed_ids = team_level_ids if team_level_ids is not None else sorted(known_levels)
         return EntitlementMsg(
             mode="licensed",
-            levelIds=parse_team_level_ids(team_settings, known_levels),
+            levelIds=licensed_ids,
             canSaveProgress=True,
             canOfflineComplete=True,
             issuedAt=now_ms,

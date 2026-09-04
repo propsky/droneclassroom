@@ -6,10 +6,12 @@ import {
   normalizeDeg,
   signedYawDiffDeg,
   RAD2DEG,
+  PREVIEW_LEVEL_ID,
   detSin,
   detHypot2,
   detHypot3,
 } from '@creafly/shared';
+import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
 import { setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
@@ -37,7 +39,13 @@ export interface FaceGuidance {
 export const levelState = {
   levels: [] as LevelDef[],
   /** 章節導覽用：各章 meta + 所屬關卡（levels 為三章攤平，維持既有相容） */
-  chapters: [] as { chapter: number; name: string; levels: LevelDef[] }[],
+  chapters: [] as {
+    chapter: number;
+    name: string;
+    /** 班級 curriculum 分組標籤（有則優先顯示） */
+    groupLabel?: string;
+    levels: LevelDef[];
+  }[],
   current: null as LevelDef | null,
   /** 0 = 尚未開始計時（按開始 + 3-2-1 倒數後才設定） */
   startTime: 0,
@@ -115,6 +123,18 @@ async function fetchChapter(n: number): Promise<{ chapter: number; name: string;
 
 /** 載入三章關卡，完成後載入預設關（或 URL ?level= 指定關） */
 export async function loadChapters(): Promise<void> {
+  const preview = readPreviewLevel();
+  if (preview) {
+    levelState.chapters = [
+      { chapter: 0, name: '預覽', groupLabel: '預覽', levels: [preview] },
+    ];
+    levelState.levels = [preview];
+    console.log('[Chapter] 預覽模式載入自訂關卡');
+    bus.emit('levels-ready', { levels: levelState.levels });
+    applyLoadLevel(PREVIEW_LEVEL_ID);
+    return;
+  }
+
   const chapters = (
     await Promise.all([fetchChapter(1), fetchChapter(2), fetchChapter(3)])
   ).filter((c): c is NonNullable<typeof c> => c !== null);
@@ -135,7 +155,6 @@ export function applyLoadLevel(levelId: string): void {
     console.warn('找不到關卡：', levelId);
     return;
   }
-
   const s = levelState;
   s.current = level;
   s.rings = (level.rings ?? []).map((r) => ({ ...r, passed: false }));

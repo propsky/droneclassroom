@@ -86,6 +86,78 @@ class Organization(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+# ---------- levels — 關卡定義（官方 system + 老師自訂 teacher）----------
+
+
+class Level(Base):
+    __tablename__ = "levels"
+    __table_args__ = (
+        CheckConstraint("scope IN ('system', 'teacher')", name="scope"),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')", name="status"
+        ),
+        _json_object_check("definition"),
+        Index("ix_levels_org_id_scope", "org_id", "scope"),
+        Index("ix_levels_owner_teacher_id", "owner_teacher_id"),
+    )
+
+    id: Mapped[int] = _id_column()
+    # 全域唯一：官方 "1-0"、自訂 "cl-7"
+    level_id: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    org_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("organizations.id"), index=True
+    )
+    owner_teacher_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("teachers.id")
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    definition: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=_EMPTY_JSON
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="published")
+    # 預設分組鍵（官方 ch1/ch2/ch3；自訂 custom）
+    default_group: Mapped[str] = mapped_column(Text, nullable=False, server_default="custom")
+    sort_key: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ---------- team_level_entries — 班級關卡目錄（上架、分類、可見性）----------
+
+
+class TeamLevelEntry(Base):
+    __tablename__ = "team_level_entries"
+    __table_args__ = (
+        UniqueConstraint("team_id", "level_id", name="uq_team_level_entries_team_level"),
+        Index("ix_team_level_entries_team_id_sort", "team_id", "sort_order"),
+    )
+
+    id: Mapped[int] = _id_column()
+    team_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("teams.id"), nullable=False, index=True
+    )
+    level_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("levels.level_id"), nullable=False
+    )
+    group_label: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    visible_in_menu: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    teacher_broadcastable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    assigned_at: Mapped[datetime] = _created_at()
+    assigned_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("teachers.id")
+    )
+
+
 # ---------- teachers — 老師帳號 ----------
 
 
@@ -143,7 +215,7 @@ class Team(Base):
     max_students: Mapped[int] = mapped_column(Integer, nullable=False, server_default="30")
     # 鎖隊：禁止新加入
     locked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
-    # 隊伍層選配（未來：專屬關卡清單 level_ids、賽制）
+    # 隊伍層選配（分房 rooms；level_ids 已遷至 team_level_entries）
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=_EMPTY_JSON
     )
@@ -210,7 +282,7 @@ class Progress(Base):
     )
 
     student_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("students.id"), nullable=False)
-    # '1-1'；關卡是 JSON 檔不是表，故用字串
+    # '1-1' / 'cl-7'；關卡定義在 levels 表
     level_id: Mapped[str] = mapped_column(Text, nullable=False)
     # 最佳成績
     best_time_ms: Mapped[int | None] = mapped_column(Integer)

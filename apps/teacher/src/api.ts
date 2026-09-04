@@ -3,6 +3,10 @@
 // 伺服器每次使用都滑動延長，前端在 /me 成功時跟著把本地 expiresAt 往後推。
 import { API_BASE } from './backend';
 import type {
+  CatalogAssignRequest,
+  CatalogPatchRequest,
+  CurriculumResponse,
+  CreateCustomLevelRequest,
   InfoResponse,
   LevelsResponse,
   ReinviteResponse,
@@ -10,11 +14,15 @@ import type {
   StudentsCreateResponse,
   StudentsListResponse,
   TeacherChangePasswordRequest,
+  TeacherLevelBrief,
+  TeacherLevelDetail,
+  TeacherLevelsResponse,
   TeacherLoginRequest,
   TeacherLoginResponse,
   TeacherMe,
   TeacherMeResponse,
   TeacherRegisterRequest,
+  TeamCatalogListResponse,
 } from '@creafly/shared';
 
 const SESSION_KEY = 'creafly-teacher-session';
@@ -112,7 +120,7 @@ export function authErrorText(err: unknown, ctx: 'login' | 'register' | 'passwor
 // ---------- fetch 包裝 ----------
 
 interface RequestOpts {
-  method?: 'GET' | 'POST' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** 帶 Authorization: Bearer <ticket>；沒有 session 時直接丟 401 */
   auth?: boolean;
@@ -207,6 +215,73 @@ export function removeStudent(id: number): Promise<void> {
 
 export function fetchLevels(): Promise<LevelsResponse> {
   return request<LevelsResponse>('/api/levels');
+}
+
+/** GET /api/teams/{teamId}/curriculum — 老師廣播下拉用分組清單 */
+export function fetchTeamCurriculum(teamId: number): Promise<CurriculumResponse> {
+  return request<CurriculumResponse>(`/api/teams/${teamId}/curriculum`, { auth: true });
+}
+
+/** GET /api/teams/{teamId}/catalog — 班級目錄管理全列 */
+export function fetchTeamCatalog(teamId: number): Promise<TeamCatalogListResponse> {
+  return request<TeamCatalogListResponse>(`/api/teams/${teamId}/catalog`, { auth: true });
+}
+
+/** POST /api/teams/{teamId}/catalog — 將已發布關卡加入班級 */
+export function assignToCatalog(teamId: number, body: CatalogAssignRequest): Promise<{ ok: true }> {
+  return request<{ ok: true }>(`/api/teams/${teamId}/catalog`, {
+    method: 'POST',
+    body,
+    auth: true,
+  });
+}
+
+/** PATCH /api/teams/{teamId}/catalog/{levelId} — 更新目錄項 */
+export function patchCatalogEntry(
+  teamId: number,
+  levelId: string,
+  body: CatalogPatchRequest,
+): Promise<{ ok: true }> {
+  return request<{ ok: true }>(`/api/teams/${teamId}/catalog/${encodeURIComponent(levelId)}`, {
+    method: 'PATCH',
+    body,
+    auth: true,
+  });
+}
+
+/** GET /api/teacher/levels — 作品庫 */
+export function fetchTeacherLevels(): Promise<TeacherLevelsResponse> {
+  return request<TeacherLevelsResponse>('/api/teacher/levels', { auth: true });
+}
+
+/** POST /api/teacher/levels — 建立草稿 */
+export function createTeacherLevel(body: CreateCustomLevelRequest): Promise<TeacherLevelBrief> {
+  return request<TeacherLevelBrief>('/api/teacher/levels', { method: 'POST', body, auth: true });
+}
+
+/** POST /api/teacher/levels/{id}/publish — 發布 */
+export function publishTeacherLevel(id: number): Promise<TeacherLevelBrief> {
+  return request<TeacherLevelBrief>(`/api/teacher/levels/${id}/publish`, {
+    method: 'POST',
+    auth: true,
+  });
+}
+
+/** GET /api/teacher/levels/{id} — 含 definition */
+export function fetchTeacherLevel(id: number): Promise<TeacherLevelDetail> {
+  return request<TeacherLevelDetail>(`/api/teacher/levels/${id}`, { auth: true });
+}
+
+/** PATCH /api/teacher/levels/{id} — 自動儲存草稿 */
+export function patchTeacherLevel(
+  id: number,
+  body: { title?: string; definition?: Record<string, unknown> },
+): Promise<TeacherLevelBrief> {
+  return request<TeacherLevelBrief>(`/api/teacher/levels/${id}`, {
+    method: 'PATCH',
+    body,
+    auth: true,
+  });
 }
 
 export function fetchInfo(): Promise<InfoResponse> {

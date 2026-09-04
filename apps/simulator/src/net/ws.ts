@@ -7,6 +7,7 @@ import { WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
 import { applyEntitlement, grantOfflineGrace, clearEntitlement, isOnlineOnlyMode } from './entitlement';
+import { mergeStudentCurriculum } from './curriculum';
 import { handleLevelLoadResponse } from './levelLoad';
 import { handleCompleteAck, handleProgressSync, initProgressQueue, reportComplete } from './progressQueue';
 import { getStudentToken } from './studentAuth';
@@ -285,6 +286,9 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       const moved = wsState.room !== null && wsState.room.code !== msg.room.code;
       wsState.room = msg.room;
       if (msg.entitlement) applyEntitlement(msg.entitlement);
+      if (msg.entitlement?.mode === 'licensed') {
+        void mergeStudentCurriculum();
+      }
       if (moved) {
         bus.emit('mode-takeover', { mode: 'level' });
         toast(`🚪 老師把你移到「${msg.room.name || msg.room.code}」`, 'success');

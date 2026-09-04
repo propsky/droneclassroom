@@ -519,6 +519,15 @@ function setRoomTag(room: { code: string; name: string } | null): void {
  *   逾時（伺服器沒回）先放行單機遊玩，連上後 register 會自動再進房
  */
 export function initPlayer(onJoin: () => void): void {
+  // 老師 iframe 預覽：不連線、不顯示登入
+  if (new URLSearchParams(location.search).get('preview') === '1') {
+    player.name = '預覽';
+    player.emoji = '👀';
+    hideLoginModal();
+    bus.emit('player-ready', {});
+    return;
+  }
+
   document.querySelectorAll('.emoji-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.emoji-btn').forEach((b) => b.classList.remove('selected'));
@@ -891,7 +900,7 @@ export function initOverlays(): void {
       levelState.chapters.forEach((ch) => {
         const title = document.createElement('div');
         title.className = 'level-chapter-title';
-        title.textContent = `第 ${ch.chapter} 章 · ${ch.name}`;
+        title.textContent = ch.groupLabel ?? `第 ${ch.chapter} 章 · ${ch.name}`;
         holder.appendChild(title);
         ch.levels.forEach((level) => holder.appendChild(makeBtn(level)));
       });

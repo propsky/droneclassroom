@@ -590,6 +590,9 @@ class RoomManager:
             except IntegrityError:  # 同時有人搶到同一碼（極罕見）→ 換碼再試
                 await session.rollback()
                 continue
+            from .levels_catalog import seed_team_catalog
+
+            await seed_team_catalog(session, team.id, teacher_id=teacher_id)
             return team
         raise RoomLimitError("班級碼空間耗盡")
 
