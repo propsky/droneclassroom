@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   LEVEL_KIT_SNIPPETS,
   applyLevelKitSnippet,
+  extractLevelKitPatch,
   getLevelKitSnippet,
+  inferLevelKitCategory,
   levelKitByCategory,
   validateAllLevelKitSnippets,
+  validateLevelKitPatch,
   validateLevelKitSnippet,
 } from './levelKit';
 import type { LevelDef, AltitudeZone } from './levels';
@@ -78,5 +81,26 @@ describe('levelKit', () => {
     expect(levelKitByCategory('draw').length).toBeGreaterThanOrEqual(6);
     expect(levelKitByCategory('races').length).toBeGreaterThanOrEqual(3);
     expect(LEVEL_KIT_SNIPPETS.length).toBeGreaterThanOrEqual(45);
+  });
+
+  it('extractLevelKitPatch 可抽出圈與障礙', () => {
+    const level: LevelDef = {
+      id: 'cl-1',
+      name: '測試',
+      rings: [{ x: 0, y: 2.5, z: -4, label: '1' }],
+      obstacles: [{ type: 'cube', solid: true, x: 2, y: 1, z: -3, size: 1 }],
+      hud: '提示',
+    };
+    const patch = extractLevelKitPatch(level, { includeMeta: true });
+    expect(patch.rings?.length).toBe(1);
+    expect(patch.obstacles?.length).toBe(1);
+    expect(patch.hud).toBe('提示');
+    expect(validateLevelKitPatch(patch)).toEqual([]);
+  });
+
+  it('inferLevelKitCategory 依內容推測分類', () => {
+    expect(inferLevelKitCategory({ draw: true, view: 'topdown' })).toBe('draw');
+    expect(inferLevelKitCategory({ passZones: [{ type: 'position', x: 0, z: 0, label: 'a' }] })).toBe('tasks');
+    expect(inferLevelKitCategory({ rings: [{ x: 0, y: 2, z: -3 }] })).toBe('rings');
   });
 });

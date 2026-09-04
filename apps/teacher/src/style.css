@@ -1302,6 +1302,126 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-2);
 }
+.lvl-kit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+.lvl-kit-head .lvl-kit-title { margin: 0; }
+.lvl-kit-card-mine {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.lvl-kit-card-mine .lvl-kit-card-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--sp-2);
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+}
+.lvl-kit-del {
+  padding: var(--sp-2);
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--line);
+  color: var(--text-3);
+  cursor: pointer;
+}
+.lvl-kit-del:hover { color: #f87171; }
+.lvl-kit-share {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--sp-1) var(--sp-2);
+  border-left: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.lvl-kit-share input { margin: 0; }
+.lvl-kit-subtitle {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+.lvl-empty-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.22);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.lvl-wizard-modal { max-width: 42rem; }
+.lvl-wizard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+  padding: 0 var(--sp-4) var(--sp-2);
+  max-height: min(60vh, 480px);
+  overflow-y: auto;
+}
+.lvl-wizard-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: var(--sp-3);
+  text-align: left;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.lvl-wizard-card:hover {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.06);
+}
+.lvl-wizard-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.lvl-wizard-name {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-1);
+}
+.lvl-wizard-desc {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  line-height: 1.35;
+}
+.lvl-wizard-foot {
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+.lvl-create-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
 .lvl-kit-card {
   display: flex;
   flex-direction: column;

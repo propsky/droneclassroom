@@ -1124,3 +1124,87 @@ export function getLevelKitSnippet(id: string): LevelKitSnippet | undefined {
 export function levelKitByCategory(category: LevelKitCategory): LevelKitSnippet[] {
   return LEVEL_KIT_SNIPPETS.filter((s) => s.category === category);
 }
+
+/** 從關卡 definition 抽出可重複使用的素材 patch */
+export interface ExtractLevelKitOptions {
+  /** 含 passZones、freeplay 等任務欄位 */
+  includeTasks?: boolean;
+  /** 含 draw / guide / view / orbit / penColors */
+  includeDraw?: boolean;
+  /** 含 hud / intro / returnHome */
+  includeMeta?: boolean;
+}
+
+export function extractLevelKitPatch(
+  level: LevelDef,
+  options: ExtractLevelKitOptions = {},
+): Partial<LevelDef> {
+  const { includeTasks = false, includeDraw = false, includeMeta = true } = options;
+  const patch: Partial<LevelDef> = {};
+
+  if (level.rings?.length) patch.rings = level.rings.map((r) => ({ ...r }));
+  if (level.obstacles?.length) patch.obstacles = level.obstacles.map((o) => ({ ...o }));
+  if (level.balloons?.length) patch.balloons = level.balloons.map((b) => ({ ...b }));
+
+  if (includeTasks) {
+    if (level.passZones?.length) patch.passZones = level.passZones.map((z) => ({ ...z }));
+    if (level.freeplay !== undefined) patch.freeplay = level.freeplay;
+  }
+
+  if (includeDraw) {
+    if (level.draw) patch.draw = true;
+    if (level.drawHeight != null) patch.drawHeight = level.drawHeight;
+    if (level.view) patch.view = level.view;
+    if (level.orbit) patch.orbit = { ...level.orbit };
+    if (level.guide?.length) patch.guide = level.guide.map((p) => [...p] as [number, number]);
+    if (level.penColors?.length) patch.penColors = [...level.penColors];
+  }
+
+  if (includeMeta) {
+    if (level.hud) patch.hud = level.hud;
+    if (level.intro) patch.intro = level.intro;
+    if (level.returnHome !== undefined) patch.returnHome = level.returnHome;
+  }
+
+  return patch;
+}
+
+/** 依 patch 內容推測素材分類（老師儲存素材時預填） */
+export function inferLevelKitCategory(patch: Partial<LevelDef>): LevelKitCategory {
+  if (patch.draw || (patch.guide?.length ?? 0) > 0) return 'draw';
+  if ((patch.passZones?.length ?? 0) > 0 && !(patch.rings?.length)) return 'tasks';
+  if ((patch.rings?.length ?? 0) >= 3 && (patch.obstacles?.length ?? 0) >= 2) return 'races';
+  if ((patch.rings?.length ?? 0) >= 4 && (patch.balloons?.length ?? 0) >= 6) return 'scenes';
+  if ((patch.obstacles?.length ?? 0) > 0 && !(patch.rings?.length)) return 'obstacles';
+  if ((patch.rings?.length ?? 0) > 0) return 'rings';
+  if ((patch.balloons?.length ?? 0) > 0) return 'scenes';
+  return 'rings';
+}
+
+/** 驗證 patch（不含名稱）；空陣列 = 通過 */
+export function validateLevelKitPatch(patch: Partial<LevelDef>, tag = 'patch'): string[] {
+  return validateLevelKitSnippet({
+    id: tag,
+    category: 'rings',
+    name: 'x',
+    desc: '',
+    patch,
+  });
+}
+
+/** 老師自訂素材 → 編輯器可用的 snippet 形狀 */
+export function teacherKitToSnippet(kit: {
+  id: number;
+  name: string;
+  desc: string;
+  category: LevelKitCategory;
+  patch: Partial<LevelDef>;
+}): LevelKitSnippet {
+  return {
+    id: `teacher-${kit.id}`,
+    category: kit.category,
+    name: kit.name,
+    desc: kit.desc,
+    patch: kit.patch,
+  };
+}

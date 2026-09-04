@@ -158,6 +158,37 @@ class TeamLevelEntry(Base):
     )
 
 
+# ---------- teacher_level_kits — 老師自訂關卡素材片段 ----------
+
+
+class TeacherLevelKit(Base):
+    __tablename__ = "teacher_level_kits"
+    __table_args__ = (
+        CheckConstraint(
+            "category IN ('rings', 'obstacles', 'tasks', 'scenes', 'draw', 'races')",
+            name="category",
+        ),
+        _json_object_check("patch"),
+        Index("ix_teacher_level_kits_teacher_id", "teacher_id"),
+    )
+
+    id: Mapped[int] = _id_column()
+    teacher_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("teachers.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    desc: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    patch: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=_EMPTY_JSON
+    )
+    shared_with_org: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _updated_at()
+
+
 # ---------- teachers — 老師帳號 ----------
 
 

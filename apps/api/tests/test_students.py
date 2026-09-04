@@ -18,14 +18,15 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, or_, select
+from sqlalchemy import select
 from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings
-from app.db.models import AuditEvent, Session, Student, Teacher, Team
+from app.db.models import Session, Student, Team
 from app.db.session import create_engine, create_sessionmaker
 from app.protocol import WS_CLOSE_KICKED
 from tests.conftest import recv_until
+from tests.db_cleanup import cleanup_test_teachers
 from tests.test_accounts import (
     DATABASE_URL,
     EMAIL_DOMAIN,
@@ -70,52 +71,9 @@ class FakeMailer:
 
 
 async def _cleanup() -> None:
-    """刪掉測試建的老師 / 班級 / 學生與其 session / 稽核事件（FK 順序：audit → 其餘）。"""
+    """刪掉測試建的老師 / 班級 / 學生與其 session / 稽核事件。"""
     assert DATABASE_URL
-    engine = create_engine(DATABASE_URL)
-    maker = create_sessionmaker(engine)
-    async with maker() as s:
-        teacher_ids = (
-            (await s.execute(select(Teacher.id).where(Teacher.email.like(f"%@{EMAIL_DOMAIN}"))))
-            .scalars()
-            .all()
-        )
-        team_ids = (
-            (await s.execute(select(Team.id).where(Team.owner_teacher_id.in_(teacher_ids))))
-            .scalars()
-            .all()
-        )
-        student_ids = (
-            (await s.execute(select(Student.id).where(Student.team_id.in_(team_ids))))
-            .scalars()
-            .all()
-        )
-        await s.execute(
-            delete(AuditEvent).where(
-                or_(
-                    AuditEvent.team_id.in_(team_ids),
-                    AuditEvent.student_id.in_(student_ids),
-                    # actor_id 是多型欄位：務必連 actor_type 一起比對，避免誤刪同號他人事件
-                    (AuditEvent.actor_type == "teacher") & AuditEvent.actor_id.in_(teacher_ids),
-                    (AuditEvent.actor_type == "student") & AuditEvent.actor_id.in_(student_ids),
-                )
-            )
-        )
-        await s.execute(
-            delete(Session).where(
-                or_(
-                    (Session.principal_type == "teacher")
-                    & Session.principal_id.in_(teacher_ids),
-                    (Session.principal_type == "student")
-                    & Session.principal_id.in_(student_ids),
-                )
-            )
-        )
-        await s.execute(delete(Student).where(Student.id.in_(student_ids)))
-        await s.execute(delete(Team).where(Team.id.in_(team_ids)))
-        await s.execute(delete(Teacher).where(Teacher.id.in_(teacher_ids)))
-        await s.commit()
-    await engine.dispose()
+    await cleanup_test_teachers(DATABASE_URL, email_domain=EMAIL_DOMAIN)
 
 
 @pytest.fixture

@@ -11,12 +11,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, or_, select
+from sqlalchemy import select
 
 from app.accounts import verify_password
-from app.db.models import AuditEvent, Session, Teacher, Team
+from app.db.models import AuditEvent, Team
 from app.db.session import create_engine, create_sessionmaker
 from tests.conftest import FakeClock, recv_until, settle
+from tests.db_cleanup import cleanup_test_teachers
 from tests.test_accounts import (
     DATABASE_URL,
     EMAIL_DOMAIN,
@@ -32,29 +33,9 @@ from tests.test_rooms import _join, _rooms_by_code
 
 
 async def _cleanup() -> None:
-    """刪掉測試老師建的班級、稽核事件、session 與老師本人（FK 順序：audit → teams → …）。"""
+    """刪掉測試老師建的班級、稽核事件、session 與老師本人。"""
     assert DATABASE_URL
-    engine = create_engine(DATABASE_URL)
-    maker = create_sessionmaker(engine)
-    async with maker() as s:
-        ids = (
-            (await s.execute(select(Teacher.id).where(Teacher.email.like(f"%@{EMAIL_DOMAIN}"))))
-            .scalars()
-            .all()
-        )
-        team_ids = (
-            (await s.execute(select(Team.id).where(Team.owner_teacher_id.in_(ids)))).scalars().all()
-        )
-        await s.execute(
-            delete(AuditEvent).where(
-                or_(AuditEvent.team_id.in_(team_ids), AuditEvent.actor_id.in_(ids))
-            )
-        )
-        await s.execute(delete(Team).where(Team.id.in_(team_ids)))
-        await s.execute(delete(Session).where(Session.principal_id.in_(ids)))
-        await s.execute(delete(Teacher).where(Teacher.id.in_(ids)))
-        await s.commit()
-    await engine.dispose()
+    await cleanup_test_teachers(DATABASE_URL, email_domain=EMAIL_DOMAIN)
 
 
 async def _team_row(team_id: int) -> Team | None:

@@ -176,6 +176,43 @@ export interface CreateCustomLevelRequest {
   templateLevelId?: string;
 }
 
+/** 老師自訂關卡素材（GET /api/teacher/level-kits） */
+export interface TeacherLevelKitBrief {
+  id: number;
+  name: string;
+  desc: string;
+  category: 'rings' | 'obstacles' | 'tasks' | 'scenes' | 'draw' | 'races';
+  updatedAt: number;
+  scope: 'mine' | 'org';
+  ownerName?: string;
+  sharedWithOrg?: boolean;
+}
+
+export interface TeacherLevelKitsResponse {
+  mine: TeacherLevelKitBrief[];
+  org: TeacherLevelKitBrief[];
+}
+
+export interface TeacherLevelKitDetail extends TeacherLevelKitBrief {
+  patch: Record<string, unknown>;
+}
+
+export interface CreateTeacherLevelKitRequest {
+  name: string;
+  desc?: string;
+  category: TeacherLevelKitBrief['category'];
+  patch: Record<string, unknown>;
+  sharedWithOrg?: boolean;
+}
+
+export interface PatchTeacherLevelKitRequest {
+  name?: string;
+  desc?: string;
+  category?: TeacherLevelKitBrief['category'];
+  patch?: Record<string, unknown>;
+  sharedWithOrg?: boolean;
+}
+
 /** 班級目錄一列（GET /api/teams/{id}/catalog） */
 export interface TeamCatalogEntry {
   levelId: string;

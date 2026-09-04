@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .accounts import CurrentTeacher, DbSession, bearer_token, resolve_student_session
 from .config import Settings
-from .db.models import Level, Team, TeamLevelEntry
+from .db.models import Level, Teacher, TeacherLevelKit, Team, TeamLevelEntry
 from .levels_catalog import (
     build_team_curriculum,
     create_custom_level_draft,
@@ -74,6 +74,107 @@ class CreateCustomLevelRequest(BaseModel):
 class PatchCustomLevelRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     definition: dict[str, Any] | None = None
+
+
+KIT_CATEGORIES = frozenset({"rings", "obstacles", "tasks", "scenes", "draw", "races"})
+KIT_BOUNDS = 14.5
+
+
+class TeacherLevelKitBrief(BaseModel):
+    id: int
+    name: str
+    desc: str
+    category: Literal["rings", "obstacles", "tasks", "scenes", "draw", "races"]
+    updatedAt: int  # noqa: N815
+    scope: Literal["mine", "org"] = "mine"
+    ownerName: str | None = None  # noqa: N815 — scope=org 時顯示
+    sharedWithOrg: bool = False  # noqa: N815 — scope=mine 時可切換
+
+
+class TeacherLevelKitsResponse(BaseModel):
+    mine: list[TeacherLevelKitBrief]
+    org: list[TeacherLevelKitBrief]
+
+
+class TeacherLevelKitDetail(TeacherLevelKitBrief):
+    patch: dict[str, Any]
+
+
+class CreateTeacherLevelKitRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    desc: str = Field(default="", max_length=400)
+    category: Literal["rings", "obstacles", "tasks", "scenes", "draw", "races"]
+    patch: dict[str, Any]
+    sharedWithOrg: bool = False  # noqa: N815
+
+
+class PatchTeacherLevelKitRequest(BaseModel):
+    name: str | None = Field(default=None, max_length=120)
+    desc: str | None = Field(default=None, max_length=400)
+    category: Literal["rings", "obstacles", "tasks", "scenes", "draw", "races"] | None = None
+    patch: dict[str, Any] | None = None
+    sharedWithOrg: bool | None = None  # noqa: N815
+
+
+def _in_bounds(x: float, z: float) -> bool:
+    return -KIT_BOUNDS <= x <= KIT_BOUNDS and -KIT_BOUNDS <= z <= KIT_BOUNDS
+
+
+def _validate_kit_patch(patch: dict[str, Any]) -> list[str]:
+    """驗證素材 patch；回傳錯誤訊息（空 = 通過）。"""
+    errs: list[str] = []
+
+    def check_xyz(item: dict[str, Any], label: str) -> None:
+        for key in ("x", "y", "z"):
+            if not isinstance(item.get(key), (int, float)):
+                errs.append(f"{label} 座標不完整")
+                return
+        if not _in_bounds(float(item["x"]), float(item["z"])):
+            errs.append(f"{label} 超出場地範圍")
+
+    for i, r in enumerate(patch.get("rings") or []):
+        if isinstance(r, dict):
+            check_xyz(r, f"圈 #{i + 1}")
+    for i, o in enumerate(patch.get("obstacles") or []):
+        if isinstance(o, dict):
+            check_xyz(o, f"障礙 #{i + 1}")
+    for i, b in enumerate(patch.get("balloons") or []):
+        if isinstance(b, dict):
+            check_xyz(b, f"氣球 #{i + 1}")
+    for i, z in enumerate(patch.get("passZones") or []):
+        if isinstance(z, dict):
+            if not isinstance(z.get("x"), (int, float)) or not isinstance(z.get("z"), (int, float)):
+                errs.append(f"任務點 #{i + 1} 座標不完整")
+            elif not _in_bounds(float(z["x"]), float(z["z"])):
+                errs.append(f"任務點 #{i + 1} 超出場地範圍")
+
+    has_content = any(
+        [
+            bool(patch.get("rings")),
+            bool(patch.get("obstacles")),
+            bool(patch.get("balloons")),
+            bool(patch.get("passZones")),
+            patch.get("draw") is True,
+            bool(patch.get("guide")),
+        ]
+    )
+    if not has_content:
+        errs.append("素材需至少包含圈、障礙、氣球、任務或畫畫內容")
+    if patch.get("draw") is True and not patch.get("view"):
+        errs.append("畫畫模式需指定 view（topdown 或 orbit3d）")
+
+    return errs
+
+
+async def _kit_readable(
+    session: AsyncSession, kit: TeacherLevelKit, teacher: CurrentTeacher
+) -> bool:
+    if kit.teacher_id == teacher.id:
+        return True
+    if not kit.shared_with_org:
+        return False
+    owner = await session.get(Teacher, kit.teacher_id)
+    return owner is not None and owner.org_id == teacher.org_id
 
 
 class CatalogAssignRequest(BaseModel):
@@ -246,6 +347,8 @@ async def create_teacher_level(
         title=body.title,
         template=template,
     )
+    await session.commit()
+    await session.refresh(lvl)
     return TeacherLevelBrief(
         id=lvl.id,
         levelId=lvl.level_id,
@@ -300,6 +403,167 @@ async def publish_teacher_level(
         status=lvl.status,
         updatedAt=_epoch_ms(lvl.updated_at),
     )
+
+
+# ---------- 老師自訂素材庫 ----------
+
+
+@router.get("/api/teacher/level-kits")
+async def list_teacher_level_kits(
+    teacher: CurrentTeacher, session: DbSession
+) -> TeacherLevelKitsResponse:
+    own_rows = (
+        await session.execute(
+            select(TeacherLevelKit)
+            .where(TeacherLevelKit.teacher_id == teacher.id)
+            .order_by(TeacherLevelKit.updated_at.desc())
+        )
+    ).scalars().all()
+    org_rows = (
+        await session.execute(
+            select(TeacherLevelKit, Teacher.name)
+            .join(Teacher, Teacher.id == TeacherLevelKit.teacher_id)
+            .where(
+                Teacher.org_id == teacher.org_id,
+                TeacherLevelKit.shared_with_org.is_(True),
+                TeacherLevelKit.teacher_id != teacher.id,
+            )
+            .order_by(TeacherLevelKit.updated_at.desc())
+        )
+    ).all()
+    return TeacherLevelKitsResponse(
+        mine=[
+            TeacherLevelKitBrief(
+                id=r.id,
+                name=r.name,
+                desc=r.desc,
+                category=r.category,
+                updatedAt=_epoch_ms(r.updated_at),
+                scope="mine",
+                sharedWithOrg=r.shared_with_org,
+            )
+            for r in own_rows
+        ],
+        org=[
+            TeacherLevelKitBrief(
+                id=row[0].id,
+                name=row[0].name,
+                desc=row[0].desc,
+                category=row[0].category,
+                updatedAt=_epoch_ms(row[0].updated_at),
+                scope="org",
+                ownerName=row[1],
+            )
+            for row in org_rows
+        ],
+    )
+
+
+@router.get("/api/teacher/level-kits/{kit_id}")
+async def get_teacher_level_kit(
+    kit_id: int, teacher: CurrentTeacher, session: DbSession
+) -> TeacherLevelKitDetail:
+    row = await session.get(TeacherLevelKit, kit_id)
+    if row is None or not await _kit_readable(session, row, teacher):
+        raise HTTPException(status_code=404, detail="素材不存在")
+    owner_name = None
+    if row.teacher_id != teacher.id:
+        owner = await session.get(Teacher, row.teacher_id)
+        owner_name = owner.name if owner else None
+    return TeacherLevelKitDetail(
+        id=row.id,
+        name=row.name,
+        desc=row.desc,
+        category=row.category,
+        updatedAt=_epoch_ms(row.updated_at),
+        scope="mine" if row.teacher_id == teacher.id else "org",
+        ownerName=owner_name,
+        sharedWithOrg=row.shared_with_org if row.teacher_id == teacher.id else False,
+        patch=row.patch,
+    )
+
+
+@router.post("/api/teacher/level-kits")
+async def create_teacher_level_kit(
+    body: CreateTeacherLevelKitRequest, teacher: CurrentTeacher, session: DbSession
+) -> TeacherLevelKitDetail:
+    if body.category not in KIT_CATEGORIES:
+        raise HTTPException(status_code=400, detail="無效分類")
+    errs = _validate_kit_patch(body.patch)
+    if errs:
+        raise HTTPException(status_code=400, detail="；".join(errs))
+    row = TeacherLevelKit(
+        teacher_id=teacher.id,
+        name=body.name.strip(),
+        desc=body.desc.strip(),
+        category=body.category,
+        patch=body.patch,
+        shared_with_org=body.sharedWithOrg,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return TeacherLevelKitDetail(
+        id=row.id,
+        name=row.name,
+        desc=row.desc,
+        category=row.category,
+        updatedAt=_epoch_ms(row.updated_at),
+        scope="mine",
+        sharedWithOrg=row.shared_with_org,
+        patch=row.patch,
+    )
+
+
+@router.patch("/api/teacher/level-kits/{kit_id}")
+async def patch_teacher_level_kit(
+    kit_id: int,
+    body: PatchTeacherLevelKitRequest,
+    teacher: CurrentTeacher,
+    session: DbSession,
+) -> TeacherLevelKitDetail:
+    row = await session.get(TeacherLevelKit, kit_id)
+    if row is None or row.teacher_id != teacher.id:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    if body.name is not None:
+        row.name = body.name.strip()
+    if body.desc is not None:
+        row.desc = body.desc.strip()
+    if body.category is not None:
+        if body.category not in KIT_CATEGORIES:
+            raise HTTPException(status_code=400, detail="無效分類")
+        row.category = body.category
+    if body.patch is not None:
+        errs = _validate_kit_patch(body.patch)
+        if errs:
+            raise HTTPException(status_code=400, detail="；".join(errs))
+        row.patch = body.patch
+    if body.sharedWithOrg is not None:
+        row.shared_with_org = body.sharedWithOrg
+    await session.commit()
+    await session.refresh(row)
+    return TeacherLevelKitDetail(
+        id=row.id,
+        name=row.name,
+        desc=row.desc,
+        category=row.category,
+        updatedAt=_epoch_ms(row.updated_at),
+        scope="mine",
+        sharedWithOrg=row.shared_with_org,
+        patch=row.patch,
+    )
+
+
+@router.delete("/api/teacher/level-kits/{kit_id}")
+async def delete_teacher_level_kit(
+    kit_id: int, teacher: CurrentTeacher, session: DbSession
+) -> dict[str, Literal[True]]:
+    row = await session.get(TeacherLevelKit, kit_id)
+    if row is None or row.teacher_id != teacher.id:
+        raise HTTPException(status_code=404, detail="素材不存在")
+    await session.delete(row)
+    await session.commit()
+    return {"ok": True}
 
 
 # ---------- 班級目錄 ----------

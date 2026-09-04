@@ -1,19 +1,44 @@
 // 自訂關卡編輯器 — 俯視 2D、格線吸附、物件選取與座標面板、素材庫。
-import type { LevelDef } from '@creafly/shared';
+import type {
+  AltitudeZone,
+  HeadingZone,
+  LevelDef,
+  PassZoneDef,
+  PositionZone,
+  TeacherLevelKitBrief,
+} from '@creafly/shared';
 import {
   EDITOR_HALF,
   EDITOR_WORLD,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
+  applyLevelGoalPreset,
+  extractLevelKitPatch,
+  getLevelGoalPreset,
   getLevelKitSnippet,
+  inferLevelKitCategory,
+  isLevelLayoutEmpty,
   levelKitByCategory,
   snapClampXZ,
+  teacherKitToSnippet,
+  validateLevelKitPatch,
+  type LevelKitCategory,
   type LevelKitSnippet,
 } from '@creafly/shared';
-import { ApiError, fetchTeacherLevel, patchTeacherLevel } from '../api';
+import {
+  ApiError,
+  createTeacherLevelKit,
+  deleteTeacherLevelKit,
+  fetchTeacherLevel,
+  fetchTeacherLevelKit,
+  fetchTeacherLevelKits,
+  patchTeacherLevel,
+  patchTeacherLevelKit,
+} from '../api';
 import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
+import { openLevelGoalWizard } from './levelGoalWizard';
 
 const HALF = EDITOR_HALF;
 const WORLD = EDITOR_WORLD;
@@ -24,7 +49,7 @@ export interface LevelEditorPanel {
 }
 
 type ObjKind = 'ring' | 'obstacle' | 'balloon' | 'zone';
-type PlaceMode = 'select' | 'ring' | 'obstacle-solid' | 'obstacle-soft' | 'balloon';
+type PlaceMode = 'select' | 'ring' | 'obstacle-solid' | 'obstacle-soft' | 'balloon' | 'zone';
 
 interface Selection {
   kind: ObjKind;
@@ -35,6 +60,7 @@ function errText(err: unknown, doing: string): string {
   if (err instanceof ApiError) {
     if (err.isNetwork) return '無法連到伺服器';
     if (err.status === 401) return '登入已過期';
+    if (err.message && err.message !== `HTTP ${err.status}`) return err.message;
     return `${doing}失敗（HTTP ${err.status}）`;
   }
   return `${doing}失敗`;
@@ -80,7 +106,16 @@ const KIND_LABEL: Record<ObjKind, string> = {
   zone: '任務點',
 };
 
-export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEditorPanel {
+export interface LevelEditorOptions {
+  /** 開啟後自動顯示教學目標精靈 */
+  showWizard?: boolean;
+}
+
+export function openLevelEditor(
+  levelPk: number,
+  onSaved?: () => void,
+  editorOpts?: LevelEditorOptions,
+): LevelEditorPanel {
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.innerHTML = `
@@ -94,6 +129,10 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
         <button type="button" class="btn btn-ghost btn-sm" id="le-close">${ICONS.x}關閉</button>
       </div>
       <div class="lvl-editor-body">
+        <div id="le-empty-banner" class="lvl-empty-banner" hidden>
+          <span>這是空白關卡，可用精靈快速起稿</span>
+          <button type="button" class="btn btn-primary btn-sm" id="le-wizard-btn">${ICONS.pencil}快速起稿</button>
+        </div>
         <div class="lvl-editor-form">
           <div class="field">
             <label class="field-label" for="le-name">關卡名稱</label>
@@ -108,6 +147,8 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
             <textarea id="le-intro" rows="3"></textarea>
           </div>
           <label class="check-row"><input type="checkbox" id="le-return">需返航降落才算過關</label>
+          <label class="check-row"><input type="checkbox" id="le-freeplay">自由活動（無順序過關）</label>
+          <label class="check-row"><input type="checkbox" id="le-draw">畫畫教室模式</label>
 
           <div class="lvl-editor-toolbar" id="le-toolbar">
             <button type="button" class="btn btn-ghost btn-sm le-tool active" data-mode="select">選取</button>
@@ -115,6 +156,7 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
             <button type="button" class="btn btn-ghost btn-sm le-tool" data-mode="obstacle-solid">實心障礙</button>
             <button type="button" class="btn btn-ghost btn-sm le-tool" data-mode="obstacle-soft">標記柱</button>
             <button type="button" class="btn btn-ghost btn-sm le-tool" data-mode="balloon">氣球</button>
+            <button type="button" class="btn btn-ghost btn-sm le-tool" data-mode="zone">任務點</button>
           </div>
           <div class="lvl-editor-snap">
             <span class="lvl-editor-snap-label">吸附格線</span>
@@ -132,12 +174,54 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
               <div class="field" id="le-size-wrap" hidden><label class="field-label" for="le-size">邊長</label><input id="le-size" type="number" step="0.5" min="0.5" max="6" class="mono"></div>
               <div class="field" id="le-label-wrap" hidden><label class="field-label" for="le-label">標籤</label><input id="le-label" type="text" maxlength="40"></div>
               <div class="field" id="le-solid-wrap" hidden><label class="check-row"><input type="checkbox" id="le-solid">實心碰撞（會擋住）</label></div>
+              <div class="field" id="le-face-wrap" hidden>
+                <label class="field-label" for="le-face-yaw">機頭朝向 yaw（度，空=不限）</label>
+                <input id="le-face-yaw" type="number" step="15" min="-180" max="180" class="mono" placeholder="不限">
+                <label class="field-label" for="le-face-tol">朝向容差（度）</label>
+                <input id="le-face-tol" type="number" step="5" min="5" max="90" value="35" class="mono">
+              </div>
+              <div id="le-zone-wrap" hidden>
+                <div class="field">
+                  <label class="field-label" for="le-zone-type">任務類型</label>
+                  <select id="le-zone-type" class="field-input">
+                    <option value="position">位置區域</option>
+                    <option value="altitude">高度</option>
+                    <option value="heading">朝向</option>
+                  </select>
+                </div>
+                <div class="lvl-props-grid" id="le-zone-position">
+                  <div class="field"><label class="field-label" for="le-zone-minx">minX</label><input id="le-zone-minx" type="number" step="0.5" class="mono"></div>
+                  <div class="field"><label class="field-label" for="le-zone-maxx">maxX</label><input id="le-zone-maxx" type="number" step="0.5" class="mono"></div>
+                  <div class="field"><label class="field-label" for="le-zone-minz">minZ</label><input id="le-zone-minz" type="number" step="0.5" class="mono"></div>
+                  <div class="field"><label class="field-label" for="le-zone-maxz">maxZ</label><input id="le-zone-maxz" type="number" step="0.5" class="mono"></div>
+                </div>
+                <div class="lvl-props-grid" id="le-zone-altitude" hidden>
+                  <div class="field"><label class="field-label" for="le-zone-miny">minY</label><input id="le-zone-miny" type="number" step="0.5" min="0" class="mono"></div>
+                  <div class="field"><label class="field-label" for="le-zone-maxy">maxY</label><input id="le-zone-maxy" type="number" step="0.5" min="0" class="mono"></div>
+                </div>
+                <div class="lvl-props-grid" id="le-zone-heading" hidden>
+                  <div class="field"><label class="field-label" for="le-zone-yaw">目標 yaw</label><input id="le-zone-yaw" type="number" step="15" class="mono"></div>
+                  <div class="field"><label class="field-label" for="le-zone-tol">容差</label><input id="le-zone-tol" type="number" step="5" min="5" class="mono"></div>
+                </div>
+              </div>
             </div>
             <button type="button" class="btn btn-ghost btn-sm" id="le-del-sel">刪除選取</button>
           </div>
 
           <div class="lvl-kit">
-            <h3 class="lvl-kit-title">素材庫</h3>
+            <div class="lvl-kit-head">
+              <h3 class="lvl-kit-title">我的素材</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-save-kit">${ICONS.plus}儲存為素材</button>
+            </div>
+            <p class="note lvl-kit-hint">完成佈局後可存成片段；勾選「分享」後同校老師也能使用。</p>
+            <div id="le-my-kits" class="lvl-kit-grid"></div>
+            <div id="le-org-kits-wrap" hidden>
+              <h4 class="lvl-kit-subtitle">同校分享</h4>
+              <div id="le-org-kits" class="lvl-kit-grid"></div>
+            </div>
+          </div>
+          <div class="lvl-kit">
+            <h3 class="lvl-kit-title">官方素材庫</h3>
             <p class="note lvl-kit-hint">點選插入片段；任務 / 畫畫類會覆寫步驟。</p>
             <div id="le-kit-panels"></div>
           </div>
@@ -204,6 +288,12 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
 
   const isSelected = (kind: ObjKind, index: number): boolean =>
     selection?.kind === kind && selection.index === index;
+
+  const emptyBanner = q<HTMLElement>('#le-empty-banner');
+
+  const updateEmptyBanner = (): void => {
+    emptyBanner.hidden = !isLevelLayoutEmpty(level);
+  };
 
   const draw = (): void => {
     const w = canvas.width;
@@ -286,15 +376,33 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     });
 
     (level.passZones ?? []).forEach((zone, i) => {
+      const isPos = zone.type === 'position' || zone.type === undefined;
+      if (isPos && (zone.minX != null || zone.maxX != null)) {
+        const minX = zone.minX ?? zone.x - 1;
+        const maxX = zone.maxX ?? zone.x + 1;
+        const minZ = zone.minZ ?? zone.z - 1;
+        const maxZ = zone.maxZ ?? zone.z + 1;
+        const [x1, z1] = worldToCanvas(minX, minZ);
+        const [x2, z2] = worldToCanvas(maxX, maxZ);
+        ctx.fillStyle = isSelected('zone', i) ? 'rgba(96,165,250,0.15)' : 'rgba(167,139,250,0.12)';
+        ctx.fillRect(x1, z1, x2 - x1, z2 - z1);
+        ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.65)';
+        ctx.lineWidth = isSelected('zone', i) ? 2.5 : 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(x1, z1, x2 - x1, z2 - z1);
+        ctx.setLineDash([]);
+      }
       const [zx, zz] = worldToCanvas(zone.x, zone.z);
       ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.85)';
       ctx.lineWidth = isSelected('zone', i) ? 2.5 : 2;
-      ctx.setLineDash([4, 4]);
-      ctx.strokeRect(zx - 12, zz - 12, 24, 24);
-      ctx.setLineDash([]);
+      if (!isPos || zone.minX == null) {
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(zx - 12, zz - 12, 24, 24);
+        ctx.setLineDash([]);
+      }
       ctx.fillStyle = '#c4b5fd';
       ctx.font = '9px sans-serif';
-      ctx.fillText(String(i + 1), zx - 3, zz + 3);
+      ctx.fillText(zone.label?.slice(0, 4) ?? String(i + 1), zx - 3, zz + 3);
     });
 
     (level.rings ?? []).forEach((ring, i) => {
@@ -308,6 +416,7 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
       ctx.font = '10px sans-serif';
       ctx.fillText(ring.label ?? String(i + 1), rx - 4, rz + 3);
     });
+    updateEmptyBanner();
   };
 
   const syncFormFromLevel = (): void => {
@@ -315,6 +424,8 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     q<HTMLInputElement>('#le-hud').value = level.hud ?? '';
     q<HTMLTextAreaElement>('#le-intro').value = level.intro ?? '';
     q<HTMLInputElement>('#le-return').checked = !!level.returnHome;
+    q<HTMLInputElement>('#le-freeplay').checked = !!level.freeplay;
+    q<HTMLInputElement>('#le-draw').checked = !!level.draw;
   };
 
   const syncLevelFromForm = (): void => {
@@ -322,6 +433,15 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     level.hud = q<HTMLInputElement>('#le-hud').value.trim();
     level.intro = q<HTMLTextAreaElement>('#le-intro').value;
     level.returnHome = q<HTMLInputElement>('#le-return').checked;
+    level.freeplay = q<HTMLInputElement>('#le-freeplay').checked;
+    level.draw = q<HTMLInputElement>('#le-draw').checked;
+    if (!level.draw) {
+      delete level.drawHeight;
+      delete level.guide;
+      delete level.view;
+      delete level.orbit;
+      delete level.penColors;
+    }
   };
 
   const scheduleSave = (): void => {
@@ -366,8 +486,12 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     const sizeWrap = q<HTMLElement>('#le-size-wrap');
     const labelWrap = q<HTMLElement>('#le-label-wrap');
     const solidWrap = q<HTMLElement>('#le-solid-wrap');
+    const faceWrap = q<HTMLElement>('#le-face-wrap');
+    const zoneWrap = q<HTMLElement>('#le-zone-wrap');
 
     syncingProps = true;
+    faceWrap.hidden = true;
+    zoneWrap.hidden = true;
     if (kind === 'ring') {
       const r = level.rings![index];
       if (!r) return setSelection(null);
@@ -378,7 +502,10 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
       sizeWrap.hidden = true;
       labelWrap.hidden = false;
       solidWrap.hidden = true;
+      faceWrap.hidden = false;
       q<HTMLInputElement>('#le-label').value = r.label ?? '';
+      q<HTMLInputElement>('#le-face-yaw').value = r.faceYaw != null ? String(r.faceYaw) : '';
+      q<HTMLInputElement>('#le-face-tol').value = String(r.faceTol ?? 35);
     } else if (kind === 'obstacle') {
       const o = level.obstacles![index];
       if (!o) return setSelection(null);
@@ -411,6 +538,27 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
       sizeWrap.hidden = true;
       labelWrap.hidden = false;
       solidWrap.hidden = true;
+      zoneWrap.hidden = false;
+      const ztype = z.type ?? 'position';
+      q<HTMLSelectElement>('#le-zone-type').value = ztype;
+      q<HTMLElement>('#le-zone-position').hidden = ztype !== 'position';
+      q<HTMLElement>('#le-zone-altitude').hidden = ztype !== 'altitude';
+      q<HTMLElement>('#le-zone-heading').hidden = ztype !== 'heading';
+      if (ztype === 'position') {
+        const pz = z as PositionZone;
+        q<HTMLInputElement>('#le-zone-minx').value = String(pz.minX ?? z.x - 1);
+        q<HTMLInputElement>('#le-zone-maxx').value = String(pz.maxX ?? z.x + 1);
+        q<HTMLInputElement>('#le-zone-minz').value = String(pz.minZ ?? z.z - 1);
+        q<HTMLInputElement>('#le-zone-maxz').value = String(pz.maxZ ?? z.z + 1);
+      } else if (ztype === 'altitude') {
+        const az = z as AltitudeZone;
+        q<HTMLInputElement>('#le-zone-miny').value = String(az.minY ?? 1);
+        q<HTMLInputElement>('#le-zone-maxy').value = String(az.maxY ?? 3);
+      } else if (ztype === 'heading') {
+        const hz = z as HeadingZone;
+        q<HTMLInputElement>('#le-zone-yaw').value = String(hz.targetYaw ?? 0);
+        q<HTMLInputElement>('#le-zone-tol').value = String(hz.tolerance ?? 30);
+      }
     }
     syncingProps = false;
   };
@@ -425,7 +573,18 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
       const rings = [...(level.rings ?? [])];
       const r = rings[selection.index];
       if (!r) return;
-      rings[selection.index] = { ...r, x, z, y, label: q<HTMLInputElement>('#le-label').value.trim() || r.label };
+      const faceRaw = q<HTMLInputElement>('#le-face-yaw').value.trim();
+      const faceYaw = faceRaw === '' ? undefined : Number(faceRaw);
+      const faceTol = Number(q<HTMLInputElement>('#le-face-tol').value) || 35;
+      rings[selection.index] = {
+        ...r,
+        x,
+        z,
+        y,
+        label: q<HTMLInputElement>('#le-label').value.trim() || r.label,
+        faceYaw,
+        faceTol: faceYaw != null ? faceTol : undefined,
+      };
       level.rings = rings;
     } else if (selection.kind === 'obstacle') {
       const obs = [...(level.obstacles ?? [])];
@@ -452,12 +611,40 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
       const zones = [...(level.passZones ?? [])];
       const zn = zones[selection.index];
       if (!zn) return;
-      zones[selection.index] = {
-        ...zn,
-        x,
-        z,
-        label: q<HTMLInputElement>('#le-label').value.trim() || zn.label,
-      };
+      const ztype = q<HTMLSelectElement>('#le-zone-type').value as PassZoneDef['type'];
+      const label = q<HTMLInputElement>('#le-label').value.trim() || zn.label;
+      let next: PassZoneDef;
+      if (ztype === 'altitude') {
+        next = {
+          type: 'altitude',
+          x,
+          z,
+          label,
+          minY: Number(q<HTMLInputElement>('#le-zone-miny').value) || 1,
+          maxY: Number(q<HTMLInputElement>('#le-zone-maxy').value) || 3,
+        };
+      } else if (ztype === 'heading') {
+        next = {
+          type: 'heading',
+          x,
+          z,
+          label,
+          targetYaw: Number(q<HTMLInputElement>('#le-zone-yaw').value) || 0,
+          tolerance: Number(q<HTMLInputElement>('#le-zone-tol').value) || 30,
+        };
+      } else {
+        next = {
+          type: 'position',
+          x,
+          z,
+          label,
+          minX: Number(q<HTMLInputElement>('#le-zone-minx').value),
+          maxX: Number(q<HTMLInputElement>('#le-zone-maxx').value),
+          minZ: Number(q<HTMLInputElement>('#le-zone-minz').value),
+          maxZ: Number(q<HTMLInputElement>('#le-zone-maxz').value),
+        };
+      }
+      zones[selection.index] = next;
       level.passZones = zones;
     }
     draw();
@@ -552,6 +739,22 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     } else if (placeMode === 'balloon') {
       level.balloons = [...(level.balloons ?? []), { x: wx, y: 2.5, z: wz }];
       setSelection({ kind: 'balloon', index: level.balloons.length - 1 });
+    } else if (placeMode === 'zone') {
+      const n = (level.passZones?.length ?? 0) + 1;
+      level.passZones = [
+        ...(level.passZones ?? []),
+        {
+          type: 'position',
+          x: wx,
+          z: wz,
+          label: `步驟 ${n}`,
+          minX: wx - 1,
+          maxX: wx + 1,
+          minZ: wz - 1,
+          maxZ: wz + 1,
+        },
+      ];
+      setSelection({ kind: 'zone', index: level.passZones.length - 1 });
     }
     scheduleSave();
   };
@@ -632,7 +835,9 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     });
   });
 
-  ['#le-px', '#le-pz', '#le-py', '#le-size', '#le-label', '#le-solid'].forEach((sel) => {
+  ['#le-px', '#le-pz', '#le-py', '#le-size', '#le-label', '#le-solid', '#le-face-yaw', '#le-face-tol',
+    '#le-zone-minx', '#le-zone-maxx', '#le-zone-minz', '#le-zone-maxz',
+    '#le-zone-miny', '#le-zone-maxy', '#le-zone-yaw', '#le-zone-tol'].forEach((sel) => {
     q<HTMLElement>(sel).addEventListener('input', () => applyPropsToSelection());
     q<HTMLElement>(sel).addEventListener('change', () => applyPropsToSelection());
   });
@@ -658,6 +863,16 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
   q<HTMLInputElement>('#le-hud').addEventListener('input', scheduleSave);
   q<HTMLTextAreaElement>('#le-intro').addEventListener('input', scheduleSave);
   q<HTMLInputElement>('#le-return').addEventListener('change', scheduleSave);
+  q<HTMLInputElement>('#le-freeplay').addEventListener('change', scheduleSave);
+  q<HTMLInputElement>('#le-draw').addEventListener('change', scheduleSave);
+
+  q<HTMLSelectElement>('#le-zone-type').addEventListener('change', () => {
+    const ztype = q<HTMLSelectElement>('#le-zone-type').value;
+    q<HTMLElement>('#le-zone-position').hidden = ztype !== 'position';
+    q<HTMLElement>('#le-zone-altitude').hidden = ztype !== 'altitude';
+    q<HTMLElement>('#le-zone-heading').hidden = ztype !== 'heading';
+    applyPropsToSelection();
+  });
 
   const applySnippet = (snippet: LevelKitSnippet): void => {
     const mode =
@@ -673,6 +888,221 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
     scheduleSave();
     toast(`已插入「${snippet.name}」`, 'success');
   };
+
+  const myKitsHost = q<HTMLElement>('#le-my-kits');
+  const orgKitsHost = q<HTMLElement>('#le-org-kits');
+  const orgKitsWrap = q<HTMLElement>('#le-org-kits-wrap');
+  let myKits: TeacherLevelKitBrief[] = [];
+  let orgKits: TeacherLevelKitBrief[] = [];
+
+  const insertKitById = (kitId: number): void => {
+    void fetchTeacherLevelKit(kitId)
+      .then((detail) => {
+        const snippet = teacherKitToSnippet({
+          id: detail.id,
+          name: detail.name,
+          desc: detail.desc,
+          category: detail.category,
+          patch: detail.patch as Partial<LevelDef>,
+        });
+        applySnippet(snippet);
+      })
+      .catch((e) => toast(errText(e, '載入'), 'error'));
+  };
+
+  const renderMyKits = (): void => {
+    if (!myKits.length) {
+      myKitsHost.innerHTML = '<p class="note">尚無自訂素材，完成佈局後點「儲存為素材」。</p>';
+    } else {
+      myKitsHost.innerHTML = myKits
+        .map(
+          (k) =>
+            `<div class="lvl-kit-card lvl-kit-card-mine" data-my-kit="${k.id}">
+              <button type="button" class="lvl-kit-card-main" data-insert-kit="${k.id}" title="${esc(k.desc || k.name)}">
+                <span class="lvl-kit-card-name">${esc(k.name)}</span>
+                <span class="lvl-kit-card-desc">${esc(k.desc || (LEVEL_KIT_CATEGORIES.find((c) => c.id === k.category)?.label ?? ''))}</span>
+              </button>
+              <label class="lvl-kit-share" title="分享給同校老師">
+                <input type="checkbox" data-share-kit="${k.id}" ${k.sharedWithOrg ? 'checked' : ''}>
+                <span>分享</span>
+              </label>
+              <button type="button" class="lvl-kit-del" data-del-kit="${k.id}" title="刪除素材">${ICONS.x}</button>
+            </div>`,
+        )
+        .join('');
+      myKitsHost.querySelectorAll<HTMLButtonElement>('[data-insert-kit]').forEach((btn) => {
+        btn.addEventListener('click', () => insertKitById(Number(btn.dataset['insertKit'])));
+      });
+      myKitsHost.querySelectorAll<HTMLInputElement>('[data-share-kit]').forEach((inp) => {
+        inp.addEventListener('change', () => {
+          const id = Number(inp.dataset['shareKit']);
+          void patchTeacherLevelKit(id, { sharedWithOrg: inp.checked })
+            .then((updated) => {
+              myKits = myKits.map((k) => (k.id === id ? { ...k, sharedWithOrg: updated.sharedWithOrg } : k));
+              toast(inp.checked ? '已分享給同校' : '已取消分享', 'success');
+            })
+            .catch((e) => {
+              inp.checked = !inp.checked;
+              toast(errText(e, '更新分享'), 'error');
+            });
+        });
+      });
+      myKitsHost.querySelectorAll<HTMLButtonElement>('[data-del-kit]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = Number(btn.dataset['delKit']);
+          if (!confirm('確定刪除此素材？')) return;
+          void deleteTeacherLevelKit(id)
+            .then(() => {
+              myKits = myKits.filter((k) => k.id !== id);
+              renderMyKits();
+              toast('已刪除素材', 'success');
+            })
+            .catch((e) => toast(errText(e, '刪除'), 'error'));
+        });
+      });
+    }
+
+    if (!orgKits.length) {
+      orgKitsWrap.hidden = true;
+      orgKitsHost.innerHTML = '';
+    } else {
+      orgKitsWrap.hidden = false;
+      orgKitsHost.innerHTML = orgKits
+        .map(
+          (k) =>
+            `<button type="button" class="lvl-kit-card" data-org-kit="${k.id}" title="${esc(k.desc || k.name)}">
+              <span class="lvl-kit-card-name">${esc(k.name)}</span>
+              <span class="lvl-kit-card-desc">${esc(k.ownerName ? `${k.ownerName} · ` : '')}${esc(LEVEL_KIT_CATEGORIES.find((c) => c.id === k.category)?.label ?? '')}</span>
+            </button>`,
+        )
+        .join('');
+      orgKitsHost.querySelectorAll<HTMLButtonElement>('[data-org-kit]').forEach((btn) => {
+        btn.addEventListener('click', () => insertKitById(Number(btn.dataset['orgKit'])));
+      });
+    }
+  };
+
+  const loadMyKits = (): void => {
+    void fetchTeacherLevelKits()
+      .then((res) => {
+        myKits = res.mine;
+        orgKits = res.org;
+        renderMyKits();
+      })
+      .catch(() => {
+        myKitsHost.innerHTML = '<p class="note">無法載入我的素材</p>';
+      });
+  };
+
+  const runGoalWizard = (): void => {
+    if (!isLevelLayoutEmpty(level) && !confirm('套用精靈會清空現有圈點與障礙，確定繼續？')) return;
+    openLevelGoalWizard({
+      onSelect: (presetId) => {
+        const preset = getLevelGoalPreset(presetId);
+        const applied = applyLevelGoalPreset(level, presetId, 'replace');
+        if (!applied || !preset) {
+          toast('模板不存在', 'error');
+          return;
+        }
+        level = applied;
+        q<HTMLInputElement>('#le-name').value = level.name;
+        setSelection(null);
+        syncFormFromLevel();
+        draw();
+        scheduleSave();
+        toast(`已套用「${preset.name}」`, 'success');
+      },
+    });
+  };
+
+  q<HTMLButtonElement>('#le-wizard-btn').addEventListener('click', runGoalWizard);
+
+  const openSaveKitDialog = (): void => {
+    syncLevelFromForm();
+    const includeTasks = (level.passZones?.length ?? 0) > 0 || !!level.freeplay;
+    const includeDraw = !!level.draw;
+    const patch = extractLevelKitPatch(level, {
+      includeTasks,
+      includeDraw,
+      includeMeta: false,
+    });
+    const errs = validateLevelKitPatch(patch);
+    if (errs.length) {
+      toast(errs[0] ?? '關卡尚無可儲存的佈局', 'error');
+      return;
+    }
+    const category = inferLevelKitCategory(patch);
+    const dlg = document.createElement('div');
+    dlg.className = 'modal-backdrop';
+    dlg.innerHTML = `
+      <div class="modal" role="dialog">
+        <div class="modal-head"><h2 class="modal-title">儲存為素材</h2></div>
+        <div class="field"><label class="field-label">名稱</label><input id="sk-name" type="text" maxlength="120" value="${esc(level.name)}"></div>
+        <div class="field"><label class="field-label">說明</label><input id="sk-desc" type="text" maxlength="400" placeholder="選填"></div>
+        <div class="field"><label class="field-label">分類</label>
+          <select id="sk-cat">${LEVEL_KIT_CATEGORIES.map((c) => `<option value="${c.id}" ${c.id === category ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
+        </div>
+        <label class="check-row"><input type="checkbox" id="sk-tasks" ${includeTasks ? 'checked' : ''}>含任務步驟（passZones）</label>
+        <label class="check-row"><input type="checkbox" id="sk-draw" ${includeDraw ? 'checked' : ''}>含畫畫設定（draw / guide）</label>
+        <label class="check-row"><input type="checkbox" id="sk-share">分享給同校老師</label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="sk-cancel">取消</button>
+          <button type="button" class="btn btn-primary" id="sk-save">儲存</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+    const closeDlg = (): void => dlg.remove();
+    dlg.querySelector('#sk-cancel')?.addEventListener('click', closeDlg);
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg) closeDlg();
+    });
+    dlg.querySelector('#sk-save')?.addEventListener('click', () => {
+      const tasks = (dlg.querySelector<HTMLInputElement>('#sk-tasks'))!.checked;
+      const draw = (dlg.querySelector<HTMLInputElement>('#sk-draw'))!.checked;
+      const finalPatch = extractLevelKitPatch(level, {
+        includeTasks: tasks,
+        includeDraw: draw,
+        includeMeta: false,
+      });
+      const valErrs = validateLevelKitPatch(finalPatch);
+      if (valErrs.length) {
+        toast(valErrs[0] ?? '素材內容無效', 'error');
+        return;
+      }
+      const name = (dlg.querySelector<HTMLInputElement>('#sk-name'))!.value.trim();
+      if (!name) {
+        toast('請輸入素材名稱', 'error');
+        return;
+      }
+      void createTeacherLevelKit({
+        name,
+        desc: (dlg.querySelector<HTMLInputElement>('#sk-desc'))!.value.trim(),
+        category: (dlg.querySelector<HTMLSelectElement>('#sk-cat'))!.value as LevelKitCategory,
+        patch: finalPatch as Record<string, unknown>,
+        sharedWithOrg: (dlg.querySelector<HTMLInputElement>('#sk-share'))!.checked,
+      })
+        .then((created) => {
+          myKits = [
+            {
+              id: created.id,
+              name: created.name,
+              desc: created.desc,
+              category: created.category,
+              updatedAt: created.updatedAt,
+              scope: 'mine',
+              sharedWithOrg: created.sharedWithOrg,
+            },
+            ...myKits,
+          ];
+          renderMyKits();
+          closeDlg();
+          toast(`已儲存「${created.name}」`, 'success');
+        })
+        .catch((e) => toast(errText(e, '儲存'), 'error'));
+    });
+  };
+
+  q<HTMLButtonElement>('#le-save-kit').addEventListener('click', openSaveKitDialog);
 
   const kitHost = q<HTMLElement>('#le-kit-panels');
   kitHost.innerHTML = LEVEL_KIT_CATEGORIES
@@ -731,7 +1161,11 @@ export function openLevelEditor(levelPk: number, onSaved?: () => void): LevelEdi
       snapStep = getSnapStep();
       syncFormFromLevel();
       draw();
+      loadMyKits();
       backdrop.focus();
+      if (editorOpts?.showWizard && isLevelLayoutEmpty(level)) {
+        runGoalWizard();
+      }
     })
     .catch((e) => {
       toast(errText(e, '載入'), 'error');

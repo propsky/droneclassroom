@@ -1,5 +1,6 @@
 // 關卡管理分頁 — 作品庫（草稿/發布）＋本班目錄（分類、學生可見、可廣播、啟用）。
 import type { LevelsResponse, TeacherLevelBrief, TeamCatalogEntry, LevelDef } from '@creafly/shared';
+import { applyLevelGoalPreset, getLevelGoalPreset } from '@creafly/shared';
 import {
   ApiError,
   assignToCatalog,
@@ -8,12 +9,14 @@ import {
   fetchTeacherLevels,
   fetchTeamCatalog,
   patchCatalogEntry,
+  patchTeacherLevel,
   publishTeacherLevel,
 } from '../api';
 import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
 import { openLevelEditor } from './levelEditor';
+import { openLevelGoalWizard } from './levelGoalWizard';
 
 export interface LevelsManageOptions {
   /** 目前選定班的 teamId；null = 訪客房 / 無 DB */
@@ -82,8 +85,9 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
           </div>
         </div>
       </div>
-      <div class="card-actions">
+      <div class="card-actions lvl-create-actions">
         <button type="button" class="btn btn-primary" id="lvl-create">${ICONS.plus}建立草稿</button>
+        <button type="button" class="btn btn-ghost" id="lvl-wizard">${ICONS.pencil}快速起稿</button>
       </div>
       <div class="lvl-scroll">
         <table class="lvl-table">
@@ -281,8 +285,43 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
         titleInput.value = '';
         templateSelect.value = '';
         void loadLibrary();
+        if (!templateLevelId) {
+          openLevelEditor(l.id, () => void loadLibrary(), { showWizard: true });
+        }
       })
       .catch((e) => toast(errText(e, '建立草稿'), 'error'));
+  });
+
+  q<HTMLButtonElement>('#lvl-wizard').addEventListener('click', () => {
+    openLevelGoalWizard({
+      title: '快速建立關卡',
+      subtitle: '選教學目標，自動建立草稿並開啟編輯器',
+      onSelect: (presetId) => {
+        const preset = getLevelGoalPreset(presetId);
+        const title = titleInput.value.trim() || preset?.titleHint || '新關卡';
+        void createTeacherLevel({ title })
+          .then(async (l) => {
+            const detail = await fetchTeacherLevel(l.id);
+            const base = detail.definition as unknown as LevelDef;
+            const applied = applyLevelGoalPreset(
+              { ...base, id: detail.levelId, name: title },
+              presetId,
+              'replace',
+            );
+            if (applied) {
+              await patchTeacherLevel(l.id, {
+                title: applied.name,
+                definition: applied as unknown as Record<string, unknown>,
+              });
+            }
+            titleInput.value = '';
+            toast(`已建立 ${l.levelId}：${preset?.name ?? ''}`, 'success');
+            void loadLibrary();
+            openLevelEditor(l.id, () => void loadLibrary());
+          })
+          .catch((e) => toast(errText(e, '建立'), 'error'));
+      },
+    });
   });
 
   libTbody.addEventListener('click', (ev) => {

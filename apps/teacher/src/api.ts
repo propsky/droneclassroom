@@ -7,7 +7,9 @@ import type {
   CatalogPatchRequest,
   CurriculumResponse,
   CreateCustomLevelRequest,
+  CreateTeacherLevelKitRequest,
   InfoResponse,
+  PatchTeacherLevelKitRequest,
   LevelsResponse,
   ReinviteResponse,
   StudentsCreateRequest,
@@ -16,6 +18,8 @@ import type {
   TeacherChangePasswordRequest,
   TeacherLevelBrief,
   TeacherLevelDetail,
+  TeacherLevelKitDetail,
+  TeacherLevelKitsResponse,
   TeacherLevelsResponse,
   TeacherLoginRequest,
   TeacherLoginResponse,
@@ -144,9 +148,18 @@ async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
   } catch {
     throw new ApiError(0);
   }
-  if (!res.ok) throw new ApiError(res.status);
-  if (res.status === 204) return undefined as T;
   const text = await res.text();
+  if (res.status === 204) return undefined as T;
+  if (!res.ok) {
+    let msg: string | undefined;
+    try {
+      const errBody = JSON.parse(text) as { detail?: unknown };
+      if (typeof errBody.detail === 'string') msg = errBody.detail;
+    } catch {
+      /* 非 JSON */
+    }
+    throw new ApiError(res.status, msg);
+  }
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
@@ -278,6 +291,47 @@ export function patchTeacherLevel(
   body: { title?: string; definition?: Record<string, unknown> },
 ): Promise<TeacherLevelBrief> {
   return request<TeacherLevelBrief>(`/api/teacher/levels/${id}`, {
+    method: 'PATCH',
+    body,
+    auth: true,
+  });
+}
+
+/** GET /api/teacher/level-kits — 老師自訂素材 */
+export function fetchTeacherLevelKits(): Promise<TeacherLevelKitsResponse> {
+  return request<TeacherLevelKitsResponse>('/api/teacher/level-kits', { auth: true });
+}
+
+/** GET /api/teacher/level-kits/{id} */
+export function fetchTeacherLevelKit(id: number): Promise<TeacherLevelKitDetail> {
+  return request<TeacherLevelKitDetail>(`/api/teacher/level-kits/${id}`, { auth: true });
+}
+
+/** POST /api/teacher/level-kits — 儲存素材 */
+export function createTeacherLevelKit(
+  body: CreateTeacherLevelKitRequest,
+): Promise<TeacherLevelKitDetail> {
+  return request<TeacherLevelKitDetail>('/api/teacher/level-kits', {
+    method: 'POST',
+    body,
+    auth: true,
+  });
+}
+
+/** DELETE /api/teacher/level-kits/{id} */
+export function deleteTeacherLevelKit(id: number): Promise<{ ok: true }> {
+  return request<{ ok: true }>(`/api/teacher/level-kits/${id}`, {
+    method: 'DELETE',
+    auth: true,
+  });
+}
+
+/** PATCH /api/teacher/level-kits/{id} — 更新素材或分享設定 */
+export function patchTeacherLevelKit(
+  id: number,
+  body: PatchTeacherLevelKitRequest,
+): Promise<TeacherLevelKitDetail> {
+  return request<TeacherLevelKitDetail>(`/api/teacher/level-kits/${id}`, {
     method: 'PATCH',
     body,
     auth: true,

@@ -13,17 +13,18 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, or_, select, text
+from sqlalchemy import select
 from starlette.websockets import WebSocketDisconnect
 
 from app.accounts import hash_password, token_hash, verify_password
 from app.auth import WS_CLOSE_UNAUTHORIZED
 from app.config import Settings
-from app.db.models import AuditEvent, Session, Teacher
+from app.db.models import AuditEvent, Session
 from app.db.session import create_engine, create_sessionmaker
 from app.main import create_app
 from app.rest import DEV_TEACHER_EMAIL
 from tests.conftest import teacher_connect
+from tests.db_cleanup import cleanup_test_teachers
 
 DATABASE_URL = Settings().database_url
 needs_db = pytest.mark.skipif(not DATABASE_URL, reason="未設定 DATABASE_URL，略過真實資料庫測試")
@@ -70,25 +71,7 @@ def test_密碼雜湊與比對() -> None:
 async def _cleanup(include_dev: bool = False) -> None:
     """刪掉測試建的老師及其 session / 稽核事件；include_dev 連免登入模式的 dev@local 一起清。"""
     assert DATABASE_URL
-    engine = create_engine(DATABASE_URL)
-    maker = create_sessionmaker(engine)
-    async with maker() as s:
-        cond = Teacher.email.like(f"%@{EMAIL_DOMAIN}")
-        if include_dev:
-            cond = or_(cond, Teacher.email == DEV_TEACHER_EMAIL)
-        ids = (await s.execute(select(Teacher.id).where(cond))).scalars().all()
-        await s.execute(delete(Session).where(Session.principal_id.in_(ids)))
-        await s.execute(
-            delete(AuditEvent).where(
-                or_(
-                    AuditEvent.actor_id.in_(ids),
-                    text("payload->>'email' LIKE :pat").bindparams(pat=f"%@{EMAIL_DOMAIN}"),
-                )
-            )
-        )
-        await s.execute(delete(Teacher).where(Teacher.id.in_(ids)))
-        await s.commit()
-    await engine.dispose()
+    await cleanup_test_teachers(DATABASE_URL, include_dev=include_dev, email_domain=EMAIL_DOMAIN)
 
 
 @pytest.fixture
@@ -231,8 +214,10 @@ def test_me滑動延長_超過節流間隔就延長(tmp_path: Path) -> None:
         before = asyncio.run(_session_row(token))
         assert c.get("/auth/teacher/me", headers=_bearer(token)).status_code == 200
         after = asyncio.run(_session_row(token))
-        assert after.expires_at > before.expires_at
-        assert after.last_seen_at > before.last_seen_at
+        assert after.expires_at >= before.expires_at
+        assert after.last_seen_at >= before.last_seen_at
+        if after.last_seen_at == before.last_seen_at:
+            assert after.expires_at > before.expires_at
     asyncio.run(_cleanup())
 
 

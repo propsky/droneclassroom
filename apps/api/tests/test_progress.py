@@ -12,10 +12,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
-from app.db.models import AuditEvent, Progress, Student, Teacher, Team
+from app.db.models import AuditEvent, Progress
 from app.db.session import create_engine, create_sessionmaker
+from tests.db_cleanup import cleanup_test_teachers
 from tests.test_accounts import (
     DATABASE_URL,
     EMAIL_DOMAIN,
@@ -28,36 +29,14 @@ from tests.test_accounts import (
 from tests.test_rooms import Teacher as TeacherWS
 from tests.test_rooms import _rooms_by_code
 from tests.test_students import _account_login, _create_students
-from tests.test_students import _cleanup as _students_cleanup
 
 # ---------- fixture 與 DB helpers ----------
 
 
 async def _cleanup() -> None:
-    """先刪測試學生的 progress（FK 指向 students），其餘交給 test_students 的清理。"""
+    """刪除測試資料（含 progress）。"""
     assert DATABASE_URL
-    engine = create_engine(DATABASE_URL)
-    maker = create_sessionmaker(engine)
-    async with maker() as s:
-        teacher_ids = (
-            (await s.execute(select(Teacher.id).where(Teacher.email.like(f"%@{EMAIL_DOMAIN}"))))
-            .scalars()
-            .all()
-        )
-        team_ids = (
-            (await s.execute(select(Team.id).where(Team.owner_teacher_id.in_(teacher_ids))))
-            .scalars()
-            .all()
-        )
-        student_ids = (
-            (await s.execute(select(Student.id).where(Student.team_id.in_(team_ids))))
-            .scalars()
-            .all()
-        )
-        await s.execute(delete(Progress).where(Progress.student_id.in_(student_ids)))
-        await s.commit()
-    await engine.dispose()
-    await _students_cleanup()
+    await cleanup_test_teachers(DATABASE_URL, email_domain=EMAIL_DOMAIN)
 
 
 @pytest.fixture
