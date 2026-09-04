@@ -3,7 +3,8 @@
 // - 換關 / 清關（老師廣播、進大亂鬥 / 足球）時自動收起；
 // - 1-0 熱身關走 duration 自動跳關（core/level.ts checkDuration），不發 level-complete、不經過這裡。
 import { bus } from '../core/events';
-import { levelState, loadLevel } from '../core/level';
+import { levelState } from '../core/level';
+import { loadLevel } from '../net/levelLoad';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -57,11 +58,11 @@ export function initLevelComplete(): void {
   nextBtn.addEventListener('click', () => {
     close();
     const nextId = completedId ? nextIdOf(completedId) : null;
-    if (nextId) loadLevel(nextId);
+    if (nextId) void loadLevel(nextId);
   });
   replayBtn.addEventListener('click', () => {
     close();
-    if (completedId) loadLevel(completedId);
+    if (completedId) void loadLevel(completedId);
   });
   stayBtn.addEventListener('click', close);
 }

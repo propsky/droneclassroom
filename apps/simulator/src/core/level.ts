@@ -69,6 +69,11 @@ export function setLevelLoadGuard(guard: ((levelId: string) => boolean) | null):
   levelLoadGuard = guard;
 }
 
+export function checkLevelLoadGuard(levelId: string): boolean {
+  if (!levelLoadGuard) return true;
+  return levelLoadGuard(levelId);
+}
+
 export function setInitialLevelResolver(
   fn: ((levels: LevelDef[], requested: string) => string) | null,
 ): void {
@@ -120,13 +125,11 @@ export async function loadChapters(): Promise<void> {
   const lp = new URLSearchParams(location.search).get('level');
   const requested = /^[123]-[0-6]$/.test(lp ?? '') ? (lp as string) : '1-0';
   const id = initialLevelResolver?.(levelState.levels, requested) ?? requested;
-  loadLevel(id);
+  void import('../net/levelLoad').then((m) => m.loadLevel(id));
 }
 
-export function loadLevel(levelId: string, opts?: LoadLevelOptions): void {
-  if (!opts?.bypassGuard && levelLoadGuard && !levelLoadGuard(levelId)) {
-    return;
-  }
+/** 實際套用關卡資料（授權通過後；老師廣播 bypass 亦走此） */
+export function applyLoadLevel(levelId: string): void {
   const level = levelState.levels.find((l) => l.id === levelId);
   if (!level) {
     console.warn('找不到關卡：', levelId);
@@ -432,7 +435,7 @@ function checkDuration(): void {
   const next = s.levels[idx + 1];
   if (next) {
     toast(`⏰ 熱身結束，進入下一關：${next.name}`, 'success');
-    loadLevel(next.id);
+    void import('../net/levelLoad').then((m) => m.loadLevel(next.id));
   }
 }
 

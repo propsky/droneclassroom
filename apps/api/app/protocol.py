@@ -64,6 +64,13 @@ class LevelStartMsg(_StrictModel):
     levelId: str
 
 
+class LevelLoadReqMsg(_StrictModel):
+    """載入關卡前請求授權（enforce / demo 模式；伺服器回 level_load_ok / denied）。"""
+
+    type: Literal["level_load_req"]
+    levelId: str
+
+
 class PingMsg(_StrictModel):
     """學生心跳（約 8 秒一次）：更新 last_seen；伺服器回 pong 供 client 偵測死連線。"""
 
@@ -149,6 +156,7 @@ StudentMessage = Annotated[
     RegisterMsg
     | ProgressMsg
     | LevelStartMsg
+    | LevelLoadReqMsg
     | PingMsg
     | CompleteLevelMsg
     | ArenaJoinMsg
@@ -165,6 +173,7 @@ STUDENT_MESSAGE_ADAPTER: TypeAdapter[
     RegisterMsg
     | ProgressMsg
     | LevelStartMsg
+    | LevelLoadReqMsg
     | PingMsg
     | CompleteLevelMsg
     | ArenaJoinMsg
@@ -615,6 +624,21 @@ class ProgressSyncMsg(BaseModel):
 
     type: Literal["progress_sync"] = "progress_sync"
     progress: dict[str, ProgressEntry]
+
+
+class LevelLoadOkMsg(BaseModel):
+    """伺服器允許載入關卡。"""
+
+    type: Literal["level_load_ok"] = "level_load_ok"
+    levelId: str
+
+
+class LevelLoadDeniedMsg(BaseModel):
+    """伺服器拒絕載入關卡（未授權）。"""
+
+    type: Literal["level_load_denied"] = "level_load_denied"
+    levelId: str
+    reason: Literal["not_authorized"] = "not_authorized"
 
 
 class RoomListMsg(BaseModel):

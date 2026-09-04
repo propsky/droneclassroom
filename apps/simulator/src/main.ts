@@ -17,7 +17,8 @@ import {
   resolveObstacleCollisions,
   tickAutopilot,
 } from './core/physics';
-import { loadChapters, loadLevel, tickLevel, resetMission, levelState, setLevelLoadGuard, setInitialLevelResolver } from './core/level';
+import { loadChapters, tickLevel, resetMission, levelState, setLevelLoadGuard, setInitialLevelResolver } from './core/level';
+import { loadLevel } from './net/levelLoad';
 import {
   CREAFLY_API,
   runProgram,

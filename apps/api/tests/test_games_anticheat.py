@@ -32,7 +32,7 @@ def test_arena座標clamp到場地邊界(client: TestClient, teacher_ticket: str
             _register_and_join(s, t, "小明", "arena")
             s.send_json({"type": "arena_pos", "x": 100, "y": 50, "z": -100, "yaw": 1.5})
             settle(client)
-            p = arena.players["s1"]
+            p = arena.players["g:小明"]
             assert (p.x, p.y, p.z, p.yaw) == (22.0, 20.0, -22.0, 1.5)
 
 
@@ -46,7 +46,7 @@ def test_soccer座標clamp到場地邊界(client: TestClient, teacher_ticket: st
             _register_and_join(s, t, "小明", "soccer")
             s.send_json({"type": "soccer_pos", "x": -100, "y": 99, "z": 100, "yaw": 0})
             settle(client)
-            p = soccer.players["s1"]
+            p = soccer.players["g:小明"]
             assert (p.x, p.y, p.z) == (-f.half_x, f.ceil, f.half_z) == (-10.0, 15.0, 20.0)
 
 
@@ -62,7 +62,7 @@ def test_超速回報忽略且strike累積標suspect(
             # 第一筆回報不測速（基準點）
             s.send_json({"type": "arena_pos", "x": 0, "y": 0.4, "z": 0, "yaw": 0})
             settle(client)
-            p = arena.players["s1"]
+            p = arena.players["g:小明"]
             assert p.last_pos_ms is not None
 
             # 連續 5 次「100ms 內瞬移 22 單位」（220 單位/秒 >> 18）→ 全部忽略 + strike
@@ -100,7 +100,7 @@ def test_合法移動不記strike(client: TestClient, teacher_ticket: str, clock
                 x += 0.9  # 0.9 單位 / 100ms = 9 單位/秒（合法極速）
                 s.send_json({"type": "arena_pos", "x": x, "y": 0.4, "z": 0, "yaw": 0})
                 settle(client)  # 每筆在各自的（假）時間點被處理，dt 才是 100ms
-            p = arena.players["s1"]
+            p = arena.players["g:小明"]
             assert p.strikes == 0
             assert p.x == x
 
@@ -125,7 +125,7 @@ def test_pop距離驗證strike(client: TestClient, teacher_ticket: str, clock: F
             )
             s.send_json({"type": "arena_pop", "id": far["id"]})
             settle(client)
-            p = arena.players["s1"]
+            p = arena.players["g:小明"]
             assert p.strikes == 1
             assert p.score == 0
             assert arena.balloons[far["id"]].alive is True

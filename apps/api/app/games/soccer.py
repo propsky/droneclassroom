@@ -27,7 +27,7 @@ from fastapi import WebSocket
 from ..config import Settings
 from ..protocol import SoccerPosMsg
 from ..roster import Roster, StudentRecord
-from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds
+from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
 
 logger = logging.getLogger("creafly.api.games.soccer")
 
@@ -114,10 +114,12 @@ class SoccerBall:
 
 @dataclass
 class SoccerPlayer:
-    """足球玩家狀態。active=False = 收過 soccer_leave（隊伍保留）；斷線整筆移除。"""
+    """足球玩家狀態。active=False = 收過 soccer_leave；disconnected=True = WS 斷線可 resume。"""
 
     record: StudentRecord
     active: bool = True
+    disconnected: bool = False
+    was_striker: bool = False
     team: str | None = None
     striker: bool = False
     x: float = 0.0
@@ -175,8 +177,16 @@ class SoccerGame(BaseGame):
     # ---------- 內部狀態 ----------
 
     def _active(self) -> list[SoccerPlayer]:
-        """在場玩家（加入中且連線中）— 對齊 legacy soccerPlayers()。"""
-        return [p for p in self.players.values() if p.active and p.record.connected]
+        """在場且連線中（遊戲邏輯）。"""
+        return [
+            p
+            for p in self.players.values()
+            if p.active and not p.disconnected and p.record.connected
+        ]
+
+    def _present(self) -> list[SoccerPlayer]:
+        """在場玩家（含斷線保留 slot）。"""
+        return [p for p in self.players.values() if p.active]
 
     def _team(self, team: str | None) -> list[SoccerPlayer]:
         return [p for p in self._active() if p.team == team]
@@ -261,7 +271,7 @@ class SoccerGame(BaseGame):
             "scores": self.scores,
             "armed": self.armed,
             "winner": self.winner,
-            "players": [self._player_info(p) for p in self._active()],
+            "players": [self._player_info(p) for p in self._present()],
             "spawns": self._spawns(),
             "field": self.field.payload(),
             "ball": self._ball_payload(),
@@ -270,7 +280,7 @@ class SoccerGame(BaseGame):
     async def broadcast_state(self) -> None:
         """完整快照廣播：在場玩家 + 老師後台（分隊 / 前鋒異動都走這裡）。"""
         snap = self.snapshot()
-        await self._broadcast(self._active(), snap)
+        await self._broadcast(self._present(), snap)
         await self._broadcast_teachers(snap)
 
     async def broadcast_scores(self) -> None:
@@ -287,18 +297,54 @@ class SoccerGame(BaseGame):
     # ---------- 學生訊息 ----------
 
     async def join(self, record: StudentRecord) -> None:
-        """加入足球：自動平均分隊（曾加入過則沿用原隊）＋ 確保該隊恰一前鋒。"""
-        p = self.players.get(record.id)
+        """加入足球：自動平均分隊；斷線恢復保留位置與前鋒。"""
+        key = game_player_key(record)
+        p = self.players.get(key)
+        resuming = p is not None and p.active and p.disconnected
+
         if p is None:
             p = SoccerPlayer(record=record)
-            self.players[record.id] = p
+            self.players[key] = p
+            p.x, p.y, p.z, p.yaw = 0.0, 0.4, 0.0, 0.0
+            p.last_pos_ms = None
+        elif resuming:
+            p.record = record
+            p.disconnected = False
+        elif not p.active:
+            p.record = record
+            p.active = True
+            p.disconnected = False
+            p.x, p.y, p.z, p.yaw = 0.0, 0.4, 0.0, 0.0
+            p.last_pos_ms = None
+        else:
+            p.record = record
+
         p.active = True
-        p.record = record
-        p.last_pos_ms = None  # 新加入不測速第一筆回報
+        p.disconnected = False
         if p.team not in SOCCER_TEAM_NAMES:
             self._auto_assign_team(p)
-        self._ensure_striker(p.team)
+        if resuming and p.was_striker and p.team in SOCCER_TEAM_NAMES:
+            for other in self.players.values():
+                if other.team == p.team and other is not p:
+                    other.striker = False
+            p.striker = True
+            p.was_striker = False
+        else:
+            self._ensure_striker(p.team)
+        if not resuming:
+            p.last_pos_ms = None
         await self._send(record, self.snapshot())
+        if resuming:
+            await self._send(
+                record,
+                {
+                    "type": "soccer_resume",
+                    "x": p.x,
+                    "y": p.y,
+                    "z": p.z,
+                    "yaw": p.yaw,
+                },
+            )
         await self.broadcast_state()
         logger.info(
             "[Soccer] %s%s 加入 → %s%s",
@@ -310,29 +356,46 @@ class SoccerGame(BaseGame):
 
     async def leave(self, record: StudentRecord) -> None:
         """離開足球（soccer_leave 或加入大亂鬥時的互斥退出）；前鋒離開 → 遞補。"""
-        p = self.players.get(record.id)
+        p = self.players.get(game_player_key(record))
         if p is None or not p.active:
             return
         was_striker, team = p.striker, p.team
         p.active = False
+        p.disconnected = False
         p.striker = False
+        p.was_striker = False
         if was_striker and team:
             self._ensure_striker(team)
         await self.broadcast_state()
 
+    async def disconnect(self, record: StudentRecord) -> None:
+        """WS 斷線：保留 slot；前鋒暫時遞補給連線隊友。"""
+        p = self.players.get(game_player_key(record))
+        if p is None or not p.active or p.disconnected:
+            return
+        p.was_striker = p.striker
+        p.disconnected = True
+        if p.striker and p.team:
+            p.striker = False
+            self._ensure_striker(p.team)
+        await self.broadcast_state()
+
     async def drop(self, record: StudentRecord) -> None:
-        """斷線清理：整筆移除；前鋒斷線 → 遞補。"""
-        p = self.players.pop(record.id, None)
+        """強制移除（踢人 / 移房）。"""
+        p = self.players.pop(game_player_key(record), None)
         if p is None or not p.active:
             return
         if p.striker and p.team:
             self._ensure_striker(p.team)
         await self.broadcast_state()
 
+    def _player_for(self, record: StudentRecord) -> SoccerPlayer | None:
+        return self.players.get(game_player_key(record))
+
     async def pos(self, record: StudentRecord, msg: SoccerPosMsg) -> None:
         """位置回報：clamp + 速度上限（防作弊，見 base.py）＋ 推球用的速度估計。"""
-        p = self.players.get(record.id)
-        if p is None or not p.active:
+        p = self._player_for(record)
+        if p is None or not p.active or p.disconnected:
             return
         prev = (p.x, p.y, p.z)
         prev_ms = p.last_pos_ms
@@ -349,11 +412,12 @@ class SoccerGame(BaseGame):
         """
         if self.mode == "ball":
             return
-        p = self.players.get(record.id)
+        p = self._player_for(record)
         if (
             self.status != "running"
             or p is None
             or not p.active
+            or p.disconnected
             or not p.striker
             or p.team not in SOCCER_TEAM_NAMES
             or not self.armed[p.team]
@@ -648,7 +712,7 @@ class SoccerGame(BaseGame):
                 await self._tick_ball()
         if self.status == "running" and now >= self.end_time:
             await self._end("time")
-        players = self._active()
+        players = self._present()
         if players:
             await self._broadcast(
                 players,

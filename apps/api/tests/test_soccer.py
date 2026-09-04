@@ -8,6 +8,10 @@ from fastapi.testclient import TestClient
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
+def _gkey(name: str) -> str:
+    return f"g:{name}"
+
+
 def _register(ws, t, name: str) -> None:
     """學生註冊並消化老師端對應的名冊訊息。"""
     ws.receive_json()  # welcome
@@ -45,9 +49,9 @@ def test_自動分隊平衡與前鋒保證(client: TestClient, teacher_ticket: s
                 _register(ws, t, name)
                 _join_soccer(ws)
             teams = {pid: p.team for pid, p in soccer.players.items()}
-            assert teams == {"s1": "blue", "s2": "red", "s3": "blue"}
+            assert teams == {_gkey("小明"): "blue", _gkey("小華"): "red", _gkey("小美"): "blue"}
             strikers = {pid for pid, p in soccer.players.items() if p.striker}
-            assert strikers == {"s1", "s2"}  # 每隊恰一前鋒（第一人）
+            assert strikers == {_gkey("小明"), _gkey("小華")}  # 每隊恰一前鋒（第一人）
 
 
 def test_老師手動分隊與指定前鋒(client: TestClient, teacher_ticket: str) -> None:
@@ -66,14 +70,14 @@ def test_老師手動分隊與指定前鋒(client: TestClient, teacher_ticket: s
             # s3（藍）→ 紅：藍剩 s1（前鋒不變）、紅 s2 仍前鋒、s3 非前鋒
             t.send_json({"type": "soccer_set_team", "studentId": "s3", "team": "red"})
             settle(client)
-            assert soccer.players["s3"].team == "red"
-            assert soccer.players["s3"].striker is False
-            assert soccer.players["s2"].striker is True
+            assert soccer.players[_gkey("小美")].team == "red"
+            assert soccer.players[_gkey("小美")].striker is False
+            assert soccer.players[_gkey("小華")].striker is True
             # 指定 s3 為紅隊前鋒 → s2 卸下
             t.send_json({"type": "soccer_set_striker", "studentId": "s3"})
             settle(client)
-            assert soccer.players["s3"].striker is True
-            assert soccer.players["s2"].striker is False
+            assert soccer.players[_gkey("小美")].striker is True
+            assert soccer.players[_gkey("小華")].striker is False
 
 
 def test_striker模式進球驗證與半場重置與勝負(
@@ -196,11 +200,13 @@ def test_倒數中soccer_reset取消與重新分隊(
 
 
 def test_前鋒斷線遞補與離開保留隊伍(client: TestClient, teacher_ticket: str) -> None:
-    """前鋒斷線 → 同隊遞補；soccer_leave 後重新加入沿用原隊。
+    """前鋒斷線 → 同隊連線者遞補；slot 保留；soccer_leave 後重新加入沿用原隊。
 
     連線順序決定 id：s_stay 先連（s1）、s_leave 後連（s2）。
     """
     soccer = client.app.state.soccer
+    key_leave = "g:小華"
+    key_stay = "g:小明"
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s_stay:  # id s1
@@ -212,21 +218,22 @@ def test_前鋒斷線遞補與離開保留隊伍(client: TestClient, teacher_tic
                 # s1 改到藍隊當防守（藍隊前鋒仍是 s2）
                 t.send_json({"type": "soccer_set_team", "studentId": "s1", "team": "blue"})
                 settle(client)
-                assert soccer.players["s1"].team == "blue"
-                assert soccer.players["s1"].striker is False
-                assert soccer.players["s2"].striker is True
-            # s2（前鋒）斷線 → 整筆移除、s1 遞補藍隊前鋒
+                assert soccer.players[key_stay].team == "blue"
+                assert soccer.players[key_stay].striker is False
+                assert soccer.players[key_leave].striker is True
+            # s2（前鋒）斷線 → slot 保留、s1 遞補藍隊前鋒
             recv_until(t, "student_list")
-            assert "s2" not in soccer.players
-            assert soccer.players["s1"].striker is True
+            assert key_leave in soccer.players
+            assert soccer.players[key_leave].disconnected is True
+            assert soccer.players[key_stay].striker is True
 
             # soccer_leave：隊伍保留，重新加入回原隊
             s_stay.send_json({"type": "soccer_leave"})
             settle(client)
-            assert soccer.players["s1"].active is False
+            assert soccer.players[key_stay].active is False
             s_stay.send_json({"type": "soccer_join"})
             recv_until(s_stay, "soccer_state")
-            assert soccer.players["s1"].team == "blue"
+            assert soccer.players[key_stay].team == "blue"
 
 
 def test_與大亂鬥互斥(client: TestClient, teacher_ticket: str) -> None:
@@ -241,9 +248,9 @@ def test_與大亂鬥互斥(client: TestClient, teacher_ticket: str) -> None:
             recv_until(s, "arena_state")
             s.send_json({"type": "soccer_join"})
             recv_until(s, "soccer_state")
-            assert arena.players["s1"].active is False
-            assert soccer.players["s1"].active is True
+            assert arena.players[_gkey("小明")].active is False
+            assert soccer.players[_gkey("小明")].active is True
             s.send_json({"type": "arena_join"})
             recv_until(s, "arena_state")
-            assert soccer.players["s1"].active is False
-            assert arena.players["s1"].active is True
+            assert soccer.players[_gkey("小明")].active is False
+            assert arena.players[_gkey("小明")].active is True

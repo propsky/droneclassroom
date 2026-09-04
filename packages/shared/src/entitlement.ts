@@ -21,3 +21,59 @@ export interface Entitlement {
   /** 伺服器簽發時間（ms epoch） */
   issuedAt: number;
 }
+
+/** enforce / demo 模式：須連網驗證（open 或無 entitlement 則否） */
+export function isOnlineOnlyEntitlement(ent: Entitlement | null | undefined): boolean {
+  return ent?.mode === 'demo' || ent?.mode === 'licensed';
+}
+
+/** 斷線寬限內且僅限指定關卡（關內容錯；換關仍須連網） */
+export function isInLevelGrace(
+  ent: Entitlement | null | undefined,
+  levelId: string,
+  nowMs = Date.now(),
+): boolean {
+  if (!ent || ent.mode === 'open') return false;
+  return (
+    ent.graceUntil != null &&
+    ent.graceUntil > nowMs &&
+    ent.graceLevelId != null &&
+    ent.graceLevelId === levelId
+  );
+}
+
+/** 是否可載入關卡；缺 entitlement / open 視為全開 */
+export function canLoadLevelWithEntitlement(
+  ent: Entitlement | null | undefined,
+  levelId: string,
+  nowMs = Date.now(),
+): boolean {
+  if (!ent || ent.mode === 'open') return true;
+  if (isInLevelGrace(ent, levelId, nowMs)) return true;
+  return ent.levelIds.includes(levelId);
+}
+
+/** 從清單挑第一個可玩的關卡 id */
+export function firstAllowedLevelId(
+  allLevelIds: readonly string[],
+  ent: Entitlement | null | undefined,
+  fallback = '1-0',
+  nowMs = Date.now(),
+): string {
+  const hit = allLevelIds.find((id) => canLoadLevelWithEntitlement(ent, id, nowMs));
+  return hit ?? allLevelIds[0] ?? fallback;
+}
+
+/** 斷線寬限：允許在期限內玩完指定關卡 */
+export function withOfflineGrace(
+  ent: Entitlement,
+  levelId: string,
+  graceMs: number,
+  nowMs = Date.now(),
+): Entitlement {
+  return {
+    ...ent,
+    graceUntil: nowMs + graceMs,
+    graceLevelId: levelId,
+  };
+}

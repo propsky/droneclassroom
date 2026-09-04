@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "test:e2e": "playwright test",
     "verify:determinism": "tsx scripts/verify-determinism.mts"
   },
   "dependencies": {
@@ -20,10 +21,12 @@
     "nipplejs": "^0.10.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "babylonjs-gltf2interface": "^8.56.2",
     "esbuild": "^0.28.1",
     "tsx": "^4.23.1",
     "vite": "^6.0.0",
-    "vite-plugin-pwa": "^1.3.0"
+    "vite-plugin-pwa": "^1.3.0",
+    "vitest": "^3.2.4"
   }
 }

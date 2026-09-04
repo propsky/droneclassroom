@@ -18,7 +18,7 @@ from fastapi import WebSocket
 
 from ..protocol import ArenaPopMsg, ArenaPosMsg, ArenaStartMsg
 from ..roster import Roster, StudentRecord
-from .base import BaseGame, FieldBounds
+from .base import BaseGame, FieldBounds, game_player_key
 
 logger = logging.getLogger("creafly.api.games.arena")
 
@@ -56,10 +56,14 @@ class Balloon:
 
 @dataclass
 class ArenaPlayer:
-    """大亂鬥玩家狀態。active=False = 收過 arena_leave（分數保留）；斷線整筆移除。"""
+    """大亂鬥玩家狀態。
+
+    active=False = arena_leave（分數保留）；disconnected=True = WS 斷線可 resume。
+    """
 
     record: StudentRecord
     active: bool = True
+    disconnected: bool = False
     score: int = 0
     role: str = "runner"
     stunned_until: float = 0.0
@@ -94,8 +98,16 @@ class ArenaGame(BaseGame):
     # ---------- 內部狀態 ----------
 
     def _active(self) -> list[ArenaPlayer]:
-        """在場玩家（加入中且連線中）— 對齊 legacy arenaPlayers()。"""
-        return [p for p in self.players.values() if p.active and p.record.connected]
+        """在場且連線中（遊戲邏輯：抓捕 / 戳氣球等）。"""
+        return [
+            p
+            for p in self.players.values()
+            if p.active and not p.disconnected and p.record.connected
+        ]
+
+    def _present(self) -> list[ArenaPlayer]:
+        """在場玩家（含斷線保留 slot — 位置廣播與排行）。"""
+        return [p for p in self.players.values() if p.active]
 
     def _stunned(self, p: ArenaPlayer) -> bool:
         return self.now_ms() < p.stunned_until
@@ -160,7 +172,7 @@ class ArenaGame(BaseGame):
 
     def _ranking(self) -> list[dict[str, Any]]:
         return sorted(
-            (self._player_info(p) for p in self._active()),
+            (self._player_info(p) for p in self._present()),
             key=lambda x: -x["score"],
         )
 
@@ -187,7 +199,7 @@ class ArenaGame(BaseGame):
                 if self.mode == "balloon"
                 else []
             ),
-            "players": [self._player_info(p) for p in self._active()],
+            "players": [self._player_info(p) for p in self._present()],
             "spawns": self._spawns(),
         }
 
@@ -207,43 +219,84 @@ class ArenaGame(BaseGame):
     # ---------- 學生訊息 ----------
 
     async def join(self, record: StudentRecord) -> None:
-        """加入大亂鬥：位置歸零、分數保留（離開再加入不清空 — legacy 行為）。"""
-        p = self.players.get(record.id)
+        """加入大亂鬥：新玩家歸零；arena_leave 後再加入歸零；斷線恢復保留位置。"""
+        key = game_player_key(record)
+        p = self.players.get(key)
+        resuming = p is not None and p.active and p.disconnected
+
         if p is None:
             p = ArenaPlayer(record=record)
-            self.players[record.id] = p
+            self.players[key] = p
+            p.x, p.y, p.z, p.yaw = 0.0, 0.4, 0.0, 0.0
+            p.last_pos_ms = None
+        elif resuming:
+            p.record = record
+            p.disconnected = False
+        elif not p.active:
+            p.record = record
+            p.active = True
+            p.disconnected = False
+            p.x, p.y, p.z, p.yaw = 0.0, 0.4, 0.0, 0.0
+            p.last_pos_ms = None
+        else:
+            p.record = record
+
         p.active = True
-        p.record = record
-        p.x, p.y, p.z, p.yaw = 0.0, 0.4, 0.0, 0.0
-        p.last_pos_ms = None  # 新加入不測速第一筆回報
+        p.disconnected = False
+        if not resuming:
+            p.last_pos_ms = None
+
         await self._send(record, self.snapshot())
+        if resuming:
+            await self._send(
+                record,
+                {
+                    "type": "arena_resume",
+                    "x": p.x,
+                    "y": p.y,
+                    "z": p.z,
+                    "yaw": p.yaw,
+                },
+            )
         await self.broadcast_scores()
 
     async def leave(self, record: StudentRecord) -> None:
         """離開大亂鬥（arena_leave 或加入足球時的互斥退出）。"""
-        p = self.players.get(record.id)
+        p = self.players.get(game_player_key(record))
         if p is None or not p.active:
             return
         p.active = False
+        p.disconnected = False
+        await self.broadcast_scores()
+
+    async def disconnect(self, record: StudentRecord) -> None:
+        """WS 斷線：保留 slot 與位置，重連後 resume。"""
+        p = self.players.get(game_player_key(record))
+        if p is None or not p.active or p.disconnected:
+            return
+        p.disconnected = True
         await self.broadcast_scores()
 
     async def drop(self, record: StudentRecord) -> None:
-        """斷線清理：整筆移除；其他人會在下個 tick 的 arena_players 移除其分身。"""
-        p = self.players.pop(record.id, None)
+        """強制移除（踢人 / 移房）：整筆清掉。"""
+        p = self.players.pop(game_player_key(record), None)
         if p is not None and p.active:
             await self.broadcast_scores()
 
+    def _player_for(self, record: StudentRecord) -> ArenaPlayer | None:
+        return self.players.get(game_player_key(record))
+
     async def pos(self, record: StudentRecord, msg: ArenaPosMsg) -> None:
         """位置回報：clamp + 速度上限（防作弊，見 base.py）。"""
-        p = self.players.get(record.id)
-        if p is None or not p.active:
+        p = self._player_for(record)
+        if p is None or not p.active or p.disconnected:
             return
         await self._apply_pos(p, ARENA_CLAMP, msg.x, msg.y, msg.z, msg.yaw, "大亂鬥")
 
     async def pop(self, record: StudentRecord, msg: ArenaPopMsg) -> None:
         """戳氣球：伺服器權威判定 + 距離驗證（防作弊，legacy 只驗氣球存活）。"""
-        p = self.players.get(record.id)
-        if self.status != "running" or p is None or not p.active:
+        p = self._player_for(record)
+        if self.status != "running" or p is None or not p.active or p.disconnected:
             return
         if not 0 <= msg.id < len(self.balloons):
             return
@@ -367,7 +420,7 @@ class ArenaGame(BaseGame):
                 await self._tick_balloon(now)
             else:
                 await self._tick_tag(now)
-        players = self._active()
+        players = self._present()
         if players:
             await self._broadcast(
                 players,

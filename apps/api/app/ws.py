@@ -54,6 +54,9 @@ from .protocol import (
     ArenaStopMsg,
     CompleteAckMsg,
     CompleteLevelMsg,
+    LevelLoadDeniedMsg,
+    LevelLoadOkMsg,
+    LevelLoadReqMsg,
     LevelStartMsg,
     PingMsg,
     PongMsg,
@@ -370,6 +373,18 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 case LevelStartMsg():
                     # 計時真正起算（按開始 / 倒數結束）→ 校正防作弊觀察起點
                     roster.level_start(record, valid.levelId)
+                case LevelLoadReqMsg():
+                    allowed = record.allowed_level_ids
+                    if allowed is not None and valid.levelId not in allowed:
+                        await send_safe(
+                            ws,
+                            LevelLoadDeniedMsg(levelId=valid.levelId).model_dump_json(),
+                        )
+                    else:
+                        await send_safe(
+                            ws,
+                            LevelLoadOkMsg(levelId=valid.levelId).model_dump_json(),
+                        )
                 case CompleteLevelMsg():
                     reasons = await roster.complete_level(
                         record, valid.levelId, valid.timeMs, offline=valid.offline
@@ -430,8 +445,8 @@ async def _student_endpoint(ws: WebSocket) -> None:
         with anyio.CancelScope(shield=True):
             if room is not None:
                 # 賽局先清（前鋒遞補 / 排行更新要在名冊移除前算），再走名冊斷線流程
-                await room.arena.drop(record)
-                await room.soccer.drop(record)
+                await room.arena.disconnect(record)
+                await room.soccer.disconnect(record)
                 await room.roster.remove_student(record)
 
 

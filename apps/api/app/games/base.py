@@ -38,6 +38,15 @@ STRIKE_SUSPECT_LIMIT = 5
 COUNTDOWN_STEP_MS = 1000.0  # 3-2-1 倒數的間隔（legacy setTimeout 1000）
 
 
+def game_player_key(record: StudentRecord) -> str:
+    """賽局 slot 鍵：帳號用 student_id；訪客用名字（同房同名 register 會取代）。"""
+    if record.student_id is not None:
+        return f"u{record.student_id}"
+    if record.name and record.name != "?":
+        return f"g:{record.name}"
+    return record.id
+
+
 @dataclass(frozen=True)
 class FieldBounds:
     """場地邊界（clamp 用）：x/z 對稱（±max）、y 給上下限。"""

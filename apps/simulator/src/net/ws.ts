@@ -6,10 +6,12 @@ import type { RegisterMsg, RoomInfo, ServerToClient, SoccerBallMsg, StudentToSer
 import { WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
-import { applyEntitlement, grantOfflineGrace, clearEntitlement } from './entitlement';
+import { applyEntitlement, grantOfflineGrace, clearEntitlement, isOnlineOnlyMode } from './entitlement';
+import { handleLevelLoadResponse } from './levelLoad';
 import { handleCompleteAck, handleProgressSync, initProgressQueue, reportComplete } from './progressQueue';
 import { getStudentToken } from './studentAuth';
-import { armLevelStart, loadLevel, levelState, resetMission } from '../core/level';
+import { armLevelStart, levelState, resetMission } from '../core/level';
+import { loadLevel } from './levelLoad';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
 
@@ -99,7 +101,7 @@ export function initWs(): void {
     if (pendingLevelId) {
       const id = pendingLevelId;
       pendingLevelId = null;
-      loadLevel(id, { bypassGuard: true });
+      void loadLevel(id, { bypassGuard: true });
     }
   });
 }
@@ -182,8 +184,8 @@ export function connectToTeacher(): void {
       onRoomLeft('kicked');
       return;
     }
-    // 斷線寬限：允許在離線狀態玩完當前關（主動登出 / 被踢除外）
-    if (!wsState.stopped && levelState.current) {
+    // 斷線寬限：enforce 模式允許在離線狀態玩完當前關（主動登出 / 被踢除外）
+    if (!wsState.stopped && levelState.current && isOnlineOnlyMode()) {
       grantOfflineGrace(levelState.current.id);
     }
     // 首次斷線提示（重連期間不重複洗版；恢復時 onopen 會 toast「已恢復連線」）
@@ -310,6 +312,12 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       // 帳號模式進房後下行：歷史進度（關卡選單勾勾、跨裝置同步）
       handleProgressSync(msg.progress);
       break;
+    case 'level_load_ok':
+      handleLevelLoadResponse(msg.levelId, true);
+      break;
+    case 'level_load_denied':
+      handleLevelLoadResponse(msg.levelId, false);
+      break;
     case 'load_level': {
       if (levelState.levels.length === 0) {
         // 關卡資料還沒載完（剛連上就收到伺服器補送的鎖定關卡）→ 暫存待補
@@ -319,7 +327,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       const level = levelState.levels.find((l) => l.id === msg.levelId);
       if (level) {
         exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再載入
-        loadLevel(msg.levelId, { bypassGuard: true });
+        void loadLevel(msg.levelId, { bypassGuard: true });
         toast(`📋 老師切換到：${level.name}`, 'success');
       }
       break;
@@ -334,14 +342,14 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       break;
     case 'reset_all':
       exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再重置
-      if (levelState.current) loadLevel(levelState.current.id, { bypassGuard: true });
+      if (levelState.current) void loadLevel(levelState.current.id, { bypassGuard: true });
       else resetMission();
       toast('🔄 老師廣播：重置', 'success');
       break;
     case 'race_start':
       exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再開賽
       setMode('manual');
-      loadLevel(msg.levelId || '1-4', { bypassGuard: true });
+      void loadLevel(msg.levelId || '1-4', { bypassGuard: true });
       // 直接進入倒數並開始計時（跳過 intro 的「開始」按鈕 — 比賽全班同步起跑；
       // 修掉舊寫法只跑 runCountdown 導致 startTime 沒設定、成績為 0 還被標可疑的 bug）
       armLevelStart();
@@ -361,6 +369,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
     case 'arena_respawn':
     case 'arena_scores':
     case 'arena_end':
+    case 'arena_resume':
       bus.emit('arena-message', { msg });
       break;
     case 'soccer_state':
@@ -371,6 +380,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
     case 'soccer_goal_ok':
     case 'soccer_scores':
     case 'soccer_end':
+    case 'soccer_resume':
       bus.emit('soccer-message', { msg });
       break;
     default:

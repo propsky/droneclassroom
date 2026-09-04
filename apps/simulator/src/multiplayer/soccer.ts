@@ -266,6 +266,14 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
     case 'soccer_end':
       showMatchResult(msg);
       break;
+    case 'soccer_resume':
+      droneState.position.x = msg.x;
+      droneState.position.y = msg.y;
+      droneState.position.z = msg.z;
+      droneState.yaw = msg.yaw;
+      droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
+      toast('🟢 已恢復連線，回到斷線前位置', 'success');
+      break;
   }
 }
 

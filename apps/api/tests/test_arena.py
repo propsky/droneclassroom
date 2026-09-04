@@ -10,6 +10,10 @@ from fastapi.testclient import TestClient
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
+def _gkey(name: str) -> str:
+    return f"g:{name}"
+
+
 def _register(ws, t, name: str) -> None:
     """學生註冊並消化老師端對應的名冊訊息。"""
     ws.receive_json()  # welcome
@@ -69,7 +73,7 @@ def test_balloon完整流程(client: TestClient, teacher_ticket: str, clock: Fak
             s1.send_json({"type": "arena_pop", "id": 0})
             popped = recv_until(s1, "arena_balloon")
             assert popped == {"type": "arena_balloon", "id": 0, "alive": False}
-            assert arena.players["s1"].score == 1  # 收到 arena_balloon = pop 已處理完
+            assert arena.players[_gkey("小明")].score == 1  # 收到 arena_balloon = pop 已處理完
 
             # 超距 pop：挑一顆離目前位置 > 2.5 的氣球 → 丟棄 + strike，氣球不消
             far = next(
@@ -80,8 +84,8 @@ def test_balloon完整流程(client: TestClient, teacher_ticket: str, clock: Fak
             s1.send_json({"type": "arena_pop", "id": far["id"]})
             settle(client)
             assert arena.balloons[far["id"]].alive is True
-            assert arena.players["s1"].strikes == 1
-            assert arena.players["s1"].score == 1  # 分數沒被加
+            assert arena.players[_gkey("小明")].strikes == 1
+            assert arena.players[_gkey("小明")].score == 1  # 分數沒被加
 
             # 氣球重生：2.5 秒後 tick → 廣播新位置
             clock.advance(2500)
@@ -126,21 +130,26 @@ def test_tag抓捕與respawn與勝負(client: TestClient, teacher_ticket: str, c
             assert caught["id"] == runner_id and caught["by"] == ghost_id
             respawn = recv_until(runner_ws, "arena_respawn")
             assert respawn["stunMs"] == 3000 and respawn["invincibleMs"] == 2000
-            assert arena.players[ghost_id].score == 1
-            assert arena.players[runner_id].caught_count == 1
+            ghost_p = next(p for p in arena.players.values() if p.record.id == ghost_id)
+            runner_p = next(p for p in arena.players.values() if p.record.id == runner_id)
+            assert ghost_p.score == 1
+            assert runner_p.caught_count == 1
 
             # 暈眩 + 無敵（共 5 秒）內不會重複抓
             clock.advance(1000)
             tick(client)
-            assert arena.players[ghost_id].score == 1
+            ghost_p = next(p for p in arena.players.values() if p.record.id == ghost_id)
+            assert ghost_p.score == 1
 
             # 無敵結束 → 再抓 2 次，總抓捕 3 ≥ 跑者 1 × 3 → 鬼隊勝
             clock.advance(4100)
             tick(client)
-            assert arena.players[ghost_id].score == 2
+            ghost_p = next(p for p in arena.players.values() if p.record.id == ghost_id)
+            assert ghost_p.score == 2
             clock.advance(5100)
             tick(client)
-            assert arena.players[ghost_id].score == 3
+            ghost_p = next(p for p in arena.players.values() if p.record.id == ghost_id)
+            assert ghost_p.score == 3
             clock.advance(60_000)
             tick(client)
             assert recv_until(t, "arena_end")["winner"] == "ghosts"
@@ -189,9 +198,10 @@ def test_倒數中reset取消(client: TestClient, teacher_ticket: str, clock: Fa
             assert arena.status == "idle"  # 沒有 GO
 
 
-def test_老師state_req與leave斷線清理(client: TestClient, teacher_ticket: str) -> None:
-    """arena_state_req 回快照；arena_leave 保留分數；斷線整筆移除。"""
+def test_老師state_req與leave斷線保留slot(client: TestClient, teacher_ticket: str) -> None:
+    """arena_state_req 回快照；arena_leave 保留分數；斷線保留 slot 與位置。"""
     arena = client.app.state.arena
+    key = _gkey("小明")
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         with client.websocket_connect("/") as s:
@@ -201,13 +211,16 @@ def test_老師state_req與leave斷線清理(client: TestClient, teacher_ticket:
             snap = recv_until(t, "arena_state")
             assert [p["name"] for p in snap["players"]] == ["小明"]
 
-            arena.players["s1"].score = 7
+            arena.players[key].score = 7
             s.send_json({"type": "arena_leave"})
             settle(client)
-            assert arena.players["s1"].active is False
+            assert arena.players[key].active is False
             s.send_json({"type": "arena_join"})  # 重新加入 → 分數保留（legacy 行為）
             recv_until(s, "arena_state")
-            assert arena.players["s1"].score == 7
-        # 斷線 → 整筆移除
+            assert arena.players[key].score == 7
+            arena.players[key].x = 3.5
+        # 斷線（未 leave）→ slot 保留位置
         recv_until(t, "student_list")
-        assert "s1" not in arena.players
+        assert key in arena.players
+        assert arena.players[key].disconnected is True
+        assert arena.players[key].x == 3.5

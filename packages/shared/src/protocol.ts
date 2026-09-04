@@ -26,6 +26,11 @@ export interface LevelStartMsg {
   type: 'level_start';
   levelId: string;
 }
+/** 載入關卡前向伺服器請求授權（enforce / demo 模式） */
+export interface LevelLoadReqMsg {
+  type: 'level_load_req';
+  levelId: string;
+}
 /** 心跳（約 8 秒一次）：伺服器更新 last_seen 並回 pong；client 以 pong 偵測死連線 */
 export interface PingMsg {
   type: 'ping';
@@ -58,7 +63,7 @@ export interface SoccerPosMsg {
 export interface SoccerGoalMsg { type: 'soccer_goal' }
 
 export type StudentToServer =
-  | RegisterMsg | ProgressMsg | LevelStartMsg | PingMsg | CompleteLevelMsg
+  | RegisterMsg | ProgressMsg | LevelStartMsg | LevelLoadReqMsg | PingMsg | CompleteLevelMsg
   | ArenaJoinMsg | ArenaLeaveMsg | ArenaPosMsg | ArenaPopMsg
   | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg;
 
@@ -230,6 +235,13 @@ export interface ProgressSyncMsg {
   type: 'progress_sync';
   progress: Record<string, { bestTimeMs: number | null; attempts: number }>;
 }
+/** 伺服器允許載入關卡（enforce 模式換關驗證） */
+export interface LevelLoadOkMsg { type: 'level_load_ok'; levelId: string }
+export interface LevelLoadDeniedMsg {
+  type: 'level_load_denied';
+  levelId: string;
+  reason: 'not_authorized';
+}
 /** 老師端：房間列表（建立/關閉/設定變更/人數變動時推送） */
 export interface RoomListMsg {
   type: 'room_list';
@@ -303,11 +315,17 @@ export interface ArenaEndMsg {
   /** 結束原因：時間到（缺省）/ 老師手動停止 / 老師切換關卡（智能停止） */
   reason?: 'time_up' | 'teacher_stop' | 'level_switch';
 }
+/** 大亂鬥斷線恢復：伺服器下發斷線前最後位置 */
+export interface ArenaResumeMsg {
+  type: 'arena_resume';
+  x: number; y: number; z: number; yaw: number;
+}
 
 /** 學生端會收到的所有 arena_* 訊息（ws 分派 → multiplayer/arena 用） */
 export type ArenaServerMsg =
   | ArenaStateMsg | ArenaCountdownMsg | ArenaGoMsg | ArenaPlayersMsg
-  | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg;
+  | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
+  | ArenaResumeMsg;
 
 export interface SoccerPlayerState {
   id: string; name: string; emoji: string;
@@ -383,21 +401,29 @@ export interface SoccerEndMsg {
   scores: Record<SoccerTeam, number>;
   players: SoccerPlayerState[];
 }
+/** 足球斷線恢復：伺服器下發斷線前最後位置 */
+export interface SoccerResumeMsg {
+  type: 'soccer_resume';
+  x: number; y: number; z: number; yaw: number;
+}
 
 /** 學生端會收到的所有 soccer_* 訊息（ws 分派 → multiplayer/soccer 用） */
 export type SoccerServerMsg =
   | SoccerStateMsg | SoccerCountdownMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg;
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg
+  | SoccerResumeMsg;
 
 export type ServerToClient =
   | WelcomeMsg | PongMsg | StudentListMsg | StudentUpdateMsg
   | RoomJoinedMsg | RoomRejectedMsg | RoomClosedMsg | RoomListMsg
-  | CompleteAckMsg | ProgressSyncMsg
+  | CompleteAckMsg | ProgressSyncMsg | LevelLoadOkMsg | LevelLoadDeniedMsg
   | TeacherBroadcastPayload
   | ArenaStateMsg | ArenaCountdownMsg | ArenaGoMsg | ArenaPlayersMsg
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
+  | ArenaResumeMsg
   | SoccerStateMsg | SoccerCountdownMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg;
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg
+  | SoccerResumeMsg;
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */
 export const WS_CLOSE_REPLACED = 4000;

@@ -95,7 +95,7 @@ def test_arena_stop_進行中含排行(
             _join(s, "arena")
             t.send_json({"type": "arena_start", "durationSec": 40, "mode": "balloon"})
             _countdown_to_go(client, clock, s, "arena")
-            arena.players["s1"].score = 3  # 當下戰績
+            arena.players["g:小明"].score = 3  # 當下戰績
 
             t.send_json({"type": "arena_stop"})
             end = recv_until(s, "arena_end")
@@ -272,7 +272,7 @@ def test_ball模式_開賽下發場地與球_推球位移與廣播(
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": -1.0, "yaw": 0})
             tick(client)
             assert soccer.ball.z > 0  # 球被往 +z（紅隊門）推
-            assert soccer.ball.last_touch is soccer.players["s1"]
+            assert soccer.ball.last_touch is soccer.players["g:小明"]
             # GO 那個 tick 已廣播過一則球在中場（z=0）的 soccer_ball，收到推球後的那則為止
             ball_msg = _ball_until_moved(s1)
             assert ball_msg["z"] > 0 and ball_msg["r"] == BALL_RADIUS
@@ -314,7 +314,7 @@ def test_ball模式_進球烏龍與重置(
 
             # 藍隊員最後觸球、球由場內穿越 +z 門面（goal_z=16，藍隊攻門）→ 藍得分、非烏龍
             ball = soccer.ball
-            ball.last_touch = soccer.players["s1"]
+            ball.last_touch = soccer.players["g:小明"]
             ball.x, ball.y, ball.z, ball.vz = 0.0, 4.5, 15.5, 10.0
             tick(client)  # z: 15.5 + 0.8 = 16.3，跨越門面 16 且在門環內
             ok = recv_until(s1, "soccer_goal_ok")
@@ -328,7 +328,7 @@ def test_ball模式_進球烏龍與重置(
             assert b.last_touch is None
 
             # 藍隊員把球推進自家（-z）門 → 烏龍球：得分歸紅隊、own=true、by=觸球者
-            b.last_touch = soccer.players["s1"]
+            b.last_touch = soccer.players["g:小明"]
             b.x, b.y, b.z, b.vz = 0.0, 4.5, -15.5, -10.0
             tick(client)
             ok = recv_until(s1, "soccer_goal_ok")
@@ -351,7 +351,7 @@ def test_ball模式_門環外撞端牆反彈不進球(
             _start_ball_game(client, t, clock, s1, s2)
 
             ball = soccer.ball
-            ball.last_touch = soccer.players["s1"]
+            ball.last_touch = soccer.players["g:小明"]
             ball.x, ball.y, ball.z, ball.vz = 8.0, 4.5, 19.5, 10.0  # x=8 在門環（r=3）外
             tick(client)
             assert soccer.scores == {"blue": 0, "red": 0}  # 沒進球

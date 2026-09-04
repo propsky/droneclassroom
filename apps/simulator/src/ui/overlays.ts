@@ -15,9 +15,10 @@ import {
   type StudentSession,
 } from '../net/studentAuth';
 import { progressState } from '../net/progressQueue';
-import { canLoadLevel, loadEntitlement } from '../net/entitlement';
+import { canLoadLevel, isOnlineOnlyMode, loadEntitlement } from '../net/entitlement';
 import { flags } from '../core/droneState';
-import { levelState, loadLevel, armLevelStart, resetMission } from '../core/level';
+import { levelState, armLevelStart, resetMission } from '../core/level';
+import { loadLevel } from '../net/levelLoad';
 import { setMode, runProgram, stopProgram, programState } from '../core/program';
 import { togglePause, resumeGame } from '../core/pause';
 import { goHome } from '../core/physics';
@@ -39,8 +40,9 @@ const LS_PLAYER = 'creafly_player';
 const LS_ROOM = 'creafly_room';
 /** 房間密碼只留在本分頁（重整可自動重進有密碼的房；關分頁即忘） */
 const SS_ROOM_PW = 'creafly_room_pw';
-/** 進房等待逾時：伺服器沒回 room_joined / room_rejected（離線教室）→ 先放行單機遊玩 */
+/** 進房等待逾時：open 模式伺服器沒回 → 先放行單機；enforce 模式必須連上 */
 const JOIN_TIMEOUT_MS = 6000;
+const JOIN_STRICT_TIMEOUT_MS = 30000;
 
 /** 房間碼正規化：去空白、大寫、只留英數、最多 4 碼 */
 export function normalizeRoomCode(raw: string): string {
@@ -579,21 +581,52 @@ export function initPlayer(onJoin: () => void): void {
       setRoomTag(null);
     }
     if (!code) {
-      // 預設房：不等伺服器（離線也要能玩）
-      finishLogin();
-      toast(`✓ 歡迎 ${player.name}${player.emoji}！`, 'success');
-      setTimeout(onJoin, 200);
+      // 預設房：enforce 須等 room_joined；open 逾時後可離線玩
+      setJoinPending(true);
+      onJoin();
+      joinTimer = window.setTimeout(() => {
+        joinTimer = null;
+        if (!$('login-modal')?.classList.contains('show')) return;
+        if (isOnlineOnlyMode()) {
+          setJoinPending(false);
+          toast('📡 無法連線伺服器，請檢查網路後重試', 'error');
+          return;
+        }
+        finishLogin();
+        toast(`✓ 歡迎 ${player.name}${player.emoji}！`, 'success');
+        toast('⚠️ 還沒連上老師伺服器，連上後會自動加入房間', 'warning');
+      }, JOIN_TIMEOUT_MS);
       return;
     }
-    // 指定房間：等 room_joined / room_rejected；逾時放行
+    // 指定房間：等 room_joined / room_rejected；open 逾時放行、enforce 不放行
     setJoinPending(true);
     onJoin();
     joinTimer = window.setTimeout(() => {
       joinTimer = null;
       if (!$('login-modal')?.classList.contains('show')) return;
+      if (isOnlineOnlyMode()) {
+        setJoinPending(false);
+        toast('📡 無法連線伺服器，請檢查網路後重試', 'error');
+        return;
+      }
       finishLogin();
       toast('⚠️ 還沒連上老師伺服器，連上後會自動加入房間', 'warning');
     }, JOIN_TIMEOUT_MS);
+  });
+
+  // welcome 後若為 enforce：延長等待、取消 open 的逾時放行
+  bus.on('entitlement-updated', () => {
+    if (!isOnlineOnlyMode() || !$('login-modal')?.classList.contains('show')) return;
+    if (joinTimer) {
+      clearTimeout(joinTimer);
+      joinTimer = null;
+    }
+    joinTimer = window.setTimeout(() => {
+      joinTimer = null;
+      if (!$('login-modal')?.classList.contains('show')) return;
+      setJoinPending(false);
+      toast('📡 無法連線伺服器，請檢查網路後重試', 'error');
+    }, JOIN_STRICT_TIMEOUT_MS);
   });
 
   // ---- 房間事件（net/ws.ts）----
@@ -848,7 +881,7 @@ export function initOverlays(): void {
           toast('🔒 老師已鎖定關卡，無法自行切換', 'warning');
           return;
         }
-        loadLevel(level.id);
+        void loadLevel(level.id);
         closeLevelMenu();
       });
       return btn;
@@ -963,7 +996,7 @@ function initPause(): void {
   $('pause-resume')?.addEventListener('click', () => resumeGame());
   $('pause-restart')?.addEventListener('click', () => {
     resumeGame();
-    if (levelState.current) loadLevel(levelState.current.id);
+    if (levelState.current) void loadLevel(levelState.current.id);
   });
 
   // P 鍵切換（輸入框聚焦時不攔截）

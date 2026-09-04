@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.db.models import Team
+from app.db.session import create_engine, create_sessionmaker
 from app.entitlement import (
     build_register_entitlement,
     build_welcome_entitlement,
@@ -16,12 +18,25 @@ from app.entitlement import (
 )
 from app.main import create_app
 from app.rest import known_level_ids, load_levels
-from tests.test_accounts import _bearer, _email, _make_client, _register, needs_db
+from tests.test_accounts import DATABASE_URL, _bearer, _email, _make_client, _register, needs_db
 from tests.test_rooms import Teacher as TeacherWS
 from tests.test_rooms import _rooms_by_code
 from tests.test_students import _account_login, _cleanup, _create_students
 
 TEACHER_PASSWORD = "test123"
+
+
+async def _patch_team_settings(team_id: int, settings: dict) -> None:
+    """測試用：寫入 teams.settings（如 level_ids 子集）。"""
+    assert DATABASE_URL
+    engine = create_engine(DATABASE_URL)
+    maker = create_sessionmaker(engine)
+    async with maker() as s:
+        team = await s.get(Team, team_id)
+        assert team is not None
+        team.settings = settings
+        await s.commit()
+    await engine.dispose()
 
 
 def _known_levels() -> frozenset[str]:
@@ -158,6 +173,24 @@ def test_register_enforce_訪客room_joined試玩(enforce_client: TestClient) ->
         assert ent["canSaveProgress"] is False
 
 
+def test_level_load_req_enforce_授權與拒絕(enforce_client: TestClient) -> None:
+    with enforce_client.websocket_connect("/") as ws:
+        ws.receive_json()  # welcome demo
+        ws.send_json({"type": "register", "name": "試", "emoji": "🐱"})
+        joined = ws.receive_json()
+        assert joined["type"] == "room_joined"
+        ws.send_json({"type": "level_load_req", "levelId": "1-1"})
+        ok = ws.receive_json()
+        assert ok == {"type": "level_load_ok", "levelId": "1-1"}
+        ws.send_json({"type": "level_load_req", "levelId": "2-1"})
+        denied = ws.receive_json()
+        assert denied == {
+            "type": "level_load_denied",
+            "levelId": "2-1",
+            "reason": "not_authorized",
+        }
+
+
 @pytest.fixture
 def enforce_db_client(tmp_path: Path) -> Iterator[TestClient]:
     """enforce 模式 + 真實 DB（帳號升級 licensed 測試用）。"""
@@ -229,5 +262,42 @@ def test_complete_enforce_未授權關卡不入庫(enforce_db_client: TestClient
                 }
             )
             # 無 complete_ack（略過入庫）；下一則不應是 ack
+            s.send_json({"type": "register", "name": "x", "emoji": "x", "studentToken": token})
+            assert s.receive_json()["type"] == "room_joined"
+
+
+@needs_db
+def test_register_enforce_班級level_ids子集(enforce_db_client: TestClient) -> None:
+    """teams.settings.level_ids 限制帳號 licensed 清單；未授權關 complete 不入庫。"""
+    ticket = _register(enforce_db_client, _email("entL"))["ticket"]
+    with enforce_db_client.websocket_connect(f"/teacher?ticket={ticket}") as ws:
+        t = TeacherWS(ws)
+        code = t.create_room({"name": "子集班"})
+        team_id = _rooms_by_code(t.room_list(lambda lst: code in _rooms_by_code(lst)))[code][
+            "teamId"
+        ]
+        asyncio.run(_patch_team_settings(team_id, {"level_ids": ["1-0", "1-1"]}))
+        headers = _bearer(ticket)
+        _create_students(
+            enforce_db_client, headers, team_id, [{"name": "小子"}], sendInvites=False
+        )
+        token = _account_login(enforce_db_client, code)
+        with enforce_db_client.websocket_connect("/") as s:
+            s.receive_json()  # welcome demo
+            s.send_json(
+                {"type": "register", "name": "x", "emoji": "x", "studentToken": token}
+            )
+            joined = s.receive_json()
+            assert joined["entitlement"]["mode"] == "licensed"
+            assert joined["entitlement"]["levelIds"] == ["1-0", "1-1"]
+            s.receive_json()  # progress_sync
+            s.send_json(
+                {
+                    "type": "complete_level",
+                    "levelId": "2-1",
+                    "timeMs": 5000,
+                    "clientEventId": "evt-subset-21",
+                }
+            )
             s.send_json({"type": "register", "name": "x", "emoji": "x", "studentToken": token})
             assert s.receive_json()["type"] == "room_joined"

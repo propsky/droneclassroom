@@ -10,6 +10,8 @@
     "build": "pnpm -r build",
     "build:pages": "pnpm --filter @creafly/simulator build && VITE_TEACHER_BASE=/teacher/ pnpm --filter @creafly/teacher build && rm -rf apps/simulator/dist/teacher && cp -r apps/teacher/dist apps/simulator/dist/teacher",
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @creafly/shared test && pnpm --filter @creafly/api test",
+    "test:e2e": "pnpm --filter @creafly/simulator test:e2e",
     "legacy": "node legacy/server.js"
   },
   "devDependencies": {
