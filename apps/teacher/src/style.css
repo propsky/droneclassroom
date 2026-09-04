@@ -1165,8 +1165,8 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 
 /* ===== 關卡編輯器 / 預覽 modal ===== */
 .modal-xl {
-  width: min(960px, 96vw);
-  max-height: 92vh;
+  width: min(1040px, 98vw);
+  max-height: 94vh;
   display: flex;
   flex-direction: column;
 }
@@ -1183,16 +1183,76 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 }
 .lvl-editor-body {
   display: grid;
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: minmax(280px, 340px) 1fr;
   gap: var(--sp-4);
   padding: var(--sp-4);
   overflow: auto;
   flex: 1;
   min-height: 0;
 }
-@media (max-width: 800px) {
+@media (max-width: 860px) {
   .lvl-editor-body { grid-template-columns: 1fr; }
 }
+.lvl-editor-canvas-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.lvl-canvas-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.lvl-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.lvl-editor-toolbar .le-tool.active {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+.lvl-editor-snap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.lvl-editor-snap-label { color: var(--text-3); font-weight: 600; }
+.lvl-props {
+  padding: var(--sp-3);
+  background: var(--bg-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+}
+.lvl-props-title {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  margin: 0 0 var(--sp-2);
+}
+.lvl-props-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.lvl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+}
+.le-legend-ring { color: #38bdf8; }
+.le-legend-solid { color: #f87171; }
+.le-legend-soft { color: #4ade80; }
+.le-legend-balloon { color: #fbbf24; }
+.le-legend-zone { color: #c4b5fd; }
 .lvl-editor-form {
   display: flex;
   flex-direction: column;
@@ -1213,7 +1273,7 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 }
 #le-canvas {
   width: 100%;
-  max-width: 400px;
+  max-width: 480px;
   aspect-ratio: 1;
   border-radius: var(--r-sm);
   cursor: crosshair;

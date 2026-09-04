@@ -1,5 +1,6 @@
 export * from './levels';
 export * from './levelKit';
+export * from './levelEditorUtils';
 export * from './protocol';
 export * from './entitlement';
 export * from './math';
