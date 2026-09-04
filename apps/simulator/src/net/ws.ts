@@ -6,6 +6,7 @@ import type { RegisterMsg, RoomInfo, ServerToClient, SoccerBallMsg, StudentToSer
 import { WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
+import { applyEntitlement, grantOfflineGrace, clearEntitlement } from './entitlement';
 import { handleCompleteAck, handleProgressSync, initProgressQueue, reportComplete } from './progressQueue';
 import { getStudentToken } from './studentAuth';
 import { armLevelStart, loadLevel, levelState, resetMission } from '../core/level';
@@ -70,6 +71,7 @@ function stopHeartbeat(): void {
 export function initWs(): void {
   // 登出學生帳號（頭像下拉）：主動斷線、不自動重連（token 已清；使用者重送登入表單才連 → rejoin）
   bus.on('student-logout', () => {
+    clearEntitlement();
     wsState.stopped = true;
     wsState.room = null;
     wsState.connected = false;
@@ -97,7 +99,7 @@ export function initWs(): void {
     if (pendingLevelId) {
       const id = pendingLevelId;
       pendingLevelId = null;
-      loadLevel(id);
+      loadLevel(id, { bypassGuard: true });
     }
   });
 }
@@ -179,6 +181,10 @@ export function connectToTeacher(): void {
       // 老師踢人 / 關房（伺服器可能先送 room_closed 再關；已處理過的話 wsState.ws 已被清空、走不到這）
       onRoomLeft('kicked');
       return;
+    }
+    // 斷線寬限：允許在離線狀態玩完當前關（主動登出 / 被踢除外）
+    if (!wsState.stopped && levelState.current) {
+      grantOfflineGrace(levelState.current.id);
     }
     // 首次斷線提示（重連期間不重複洗版；恢復時 onopen 會 toast「已恢復連線」）
     if (wsState.everConnected && !wsState.wasDown) {
@@ -268,6 +274,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
   switch (msg.type) {
     case 'welcome':
       wsState.myId = msg.id;
+      if (msg.entitlement) applyEntitlement(msg.entitlement);
       break;
     case 'room_joined': {
       // 老師移房（一班多房）：同一條連線收到不同房碼 → 退出進行中的多人模式
@@ -275,6 +282,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       // 重連 rejoin 進同一房（房碼相同）不觸發，大亂鬥自動回賽局的流程不受影響。
       const moved = wsState.room !== null && wsState.room.code !== msg.room.code;
       wsState.room = msg.room;
+      if (msg.entitlement) applyEntitlement(msg.entitlement);
       if (moved) {
         bus.emit('mode-takeover', { mode: 'level' });
         toast(`🚪 老師把你移到「${msg.room.name || msg.room.code}」`, 'success');
@@ -311,7 +319,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       const level = levelState.levels.find((l) => l.id === msg.levelId);
       if (level) {
         exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再載入
-        loadLevel(msg.levelId);
+        loadLevel(msg.levelId, { bypassGuard: true });
         toast(`📋 老師切換到：${level.name}`, 'success');
       }
       break;
@@ -326,14 +334,14 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       break;
     case 'reset_all':
       exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再重置
-      if (levelState.current) loadLevel(levelState.current.id);
+      if (levelState.current) loadLevel(levelState.current.id, { bypassGuard: true });
       else resetMission();
       toast('🔄 老師廣播：重置', 'success');
       break;
     case 'race_start':
       exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再開賽
       setMode('manual');
-      loadLevel(msg.levelId || '1-4');
+      loadLevel(msg.levelId || '1-4', { bypassGuard: true });
       // 直接進入倒數並開始計時（跳過 intro 的「開始」按鈕 — 比賽全班同步起跑；
       // 修掉舊寫法只跑 runCountdown 導致 startTime 沒設定、成績為 0 還被標可疑的 bug）
       armLevelStart();

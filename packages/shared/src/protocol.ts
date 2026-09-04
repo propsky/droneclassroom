@@ -1,6 +1,8 @@
 // WebSocket 訊息協定 — 與 legacy server.js 線上格式相容（過渡期新舊 client 可混連）。
 // 角色判定沿用 legacy：URL path === '/teacher' 為老師，其餘為學生。
 
+import type { Entitlement } from './entitlement';
+
 // ---------- Student → Server ----------
 
 export interface RegisterMsg {
@@ -201,9 +203,19 @@ export interface StudentInfo {
 /** 心跳回覆（echo ping 的 t） */
 export interface PongMsg { type: 'pong'; t?: number | null }
 
-export interface WelcomeMsg { type: 'welcome'; id: string }
+export interface WelcomeMsg {
+  type: 'welcome';
+  id: string;
+  /** 能力包（welcome 時下發；舊 client 可忽略） */
+  entitlement?: Entitlement;
+}
 /** 學生成功進房（register 通過）：帶房間資訊供 HUD 顯示 */
-export interface RoomJoinedMsg { type: 'room_joined'; room: RoomInfo }
+export interface RoomJoinedMsg {
+  type: 'room_joined';
+  room: RoomInfo;
+  /** register 後更新的能力包（帳號升級 licensed 等；舊 client 可忽略） */
+  entitlement?: Entitlement;
+}
 /** 學生進房被拒：reason 給 UI 顯示對應文案 */
 export interface RoomRejectedMsg {
   type: 'room_rejected';

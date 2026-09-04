@@ -15,6 +15,7 @@ import {
   type StudentSession,
 } from '../net/studentAuth';
 import { progressState } from '../net/progressQueue';
+import { canLoadLevel, loadEntitlement } from '../net/entitlement';
 import { flags } from '../core/droneState';
 import { levelState, loadLevel, armLevelStart, resetMission } from '../core/level';
 import { setMode, runProgram, stopProgram, programState } from '../core/program';
@@ -805,11 +806,30 @@ export function initOverlays(): void {
       } else {
         mark?.remove();
         btn.classList.remove('completed');
-        btn.removeAttribute('title');
+        if (!btn.classList.contains('entitlement-locked')) btn.removeAttribute('title');
       }
     });
   };
-  bus.on('progress-updated', applyProgressMarks);
+  const applyEntitlementMarks = (): void => {
+    const ent = loadEntitlement();
+    document.querySelectorAll<HTMLButtonElement>('.level-btn').forEach((btn) => {
+      const lid = btn.dataset['level'] ?? '';
+      const gated = !!(ent && ent.mode !== 'open' && !canLoadLevel(lid));
+      btn.classList.toggle('entitlement-locked', gated);
+      if (gated) {
+        btn.title =
+          ent?.mode === 'licensed'
+            ? '此關卡不在班級授權範圍內'
+            : '試玩版未開放此關卡';
+      }
+    });
+  };
+  const refreshLevelButtons = (): void => {
+    applyProgressMarks();
+    applyEntitlementMarks();
+  };
+  bus.on('progress-updated', refreshLevelButtons);
+  bus.on('entitlement-updated', refreshLevelButtons);
   bus.on('levels-ready', ({ levels }) => {
     const holder = $('level-selector-btns');
     if (!holder) return;
@@ -846,6 +866,7 @@ export function initOverlays(): void {
       levels.forEach((level) => holder.appendChild(makeBtn(level)));
     }
     applyProgressMarks(); // progress_sync 比關卡資料早到（帳號模式剛連上）→ 建完選單補畫勾勾
+    applyEntitlementMarks();
   });
   bus.on('level-loaded', ({ level }) => {
     document

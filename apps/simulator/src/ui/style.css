@@ -515,6 +515,13 @@ body:not(.gamepad-connected) .header-btn-calib {
 .level-btn.active .lvl-check {
   color: #fff;
 }
+.level-btn.entitlement-locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.level-btn.entitlement-locked:hover {
+  background: var(--bg-2);
+}
 
 /* =============================================================================
  * Blockly 面板 + 工具列（執行 = primary / 停止 = danger / 重置 = ghost）

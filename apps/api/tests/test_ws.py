@@ -18,9 +18,13 @@ from tests.conftest import teacher_connect
 def test_welcome_遞增配發id(client: TestClient) -> None:
     """學生連上（/ 或 /ws）立刻收到 welcome，id 為 s<n> 遞增。"""
     with client.websocket_connect("/") as ws1:
-        assert ws1.receive_json() == {"type": "welcome", "id": "s1"}
+        msg1 = ws1.receive_json()
+        assert msg1["type"] == "welcome" and msg1["id"] == "s1"
+        assert msg1["entitlement"]["mode"] == "open"
         with client.websocket_connect("/ws") as ws2:
-            assert ws2.receive_json() == {"type": "welcome", "id": "s2"}
+            msg2 = ws2.receive_json()
+            assert msg2["type"] == "welcome" and msg2["id"] == "s2"
+            assert msg2["entitlement"]["mode"] == "open"
 
 
 # ---------- register → student_list ----------

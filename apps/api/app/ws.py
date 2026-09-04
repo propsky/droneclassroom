@@ -40,6 +40,7 @@ from .accounts import resolve_session, resolve_student_session
 from .auth import WS_CLOSE_BAD_ORIGIN, WS_CLOSE_UNAUTHORIZED, TeacherAuth, origin_allowed
 from .config import Settings
 from .db.models import Student, Teacher, Team
+from .entitlement import build_register_entitlement
 from .progress import latest_completion, load_progress, progress_sync_msg, save_completion
 from .protocol import (
     STUDENT_MESSAGE_ADAPTER,
@@ -85,6 +86,7 @@ from .protocol import (
     TeacherBroadcastMsg,
     TeacherBroadcastPayload,
 )
+from .rest import known_level_ids
 from .rooms import Room, RoomLimitError, RoomManager
 from .roster import StudentRecord, send_safe
 
@@ -287,6 +289,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 #       token 無效退回訪客路徑照舊處理（不斷線）-----
                 name, emoji, student_id = valid.name, valid.emoji, None
                 skip_password = False
+                team_settings: dict | None = None
                 account = (
                     await _resolve_student_token(ws, valid.studentToken)
                     if valid.studentToken
@@ -295,6 +298,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 if account is not None:
                     student, team = account
                     name, emoji, student_id = student.name, student.emoji, student.id
+                    team_settings = team.settings if isinstance(team.settings, dict) else None
                     skip_password = True  # token 已驗明身分（本來就是這班的學生），免房間密碼
                     # 進房路由：老師有指派分房且該分房開著 → 分房；否則主房
                     target = rooms.route_room_for(team.id, student.id)
@@ -339,7 +343,19 @@ async def _student_endpoint(ws: WebSocket) -> None:
                         float(latest.best_time_ms) if latest.best_time_ms is not None else None
                     )
                 await room.roster.register(record, name, emoji)
-                await send_safe(ws, RoomJoinedMsg(room=room.info()).model_dump_json())
+                entitlement = build_register_entitlement(
+                    ws.app.state.settings,
+                    known_level_ids(ws.app.state.levels),
+                    student_id=student_id,
+                    team_settings=team_settings,
+                )
+                record.allowed_level_ids = (
+                    frozenset(entitlement.levelIds)
+                    if entitlement is not None and entitlement.mode != "open"
+                    else None
+                )
+                joined = RoomJoinedMsg(room=room.info(), entitlement=entitlement)
+                await send_safe(ws, joined.model_dump_json(exclude_none=True))
                 if student_id is not None:
                     # 空進度也送：client 以此確認同步完成（進房即知道哪些關已完成）
                     await send_safe(ws, progress_sync_msg(progress_rows).model_dump_json())
@@ -362,6 +378,16 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     # 訪客 / 無 DB：行為與從前完全相同（不入庫、不回 ack）
                     maker = ws.app.state.db_sessionmaker
                     if record.student_id is not None and maker is not None:
+                        if (
+                            record.allowed_level_ids is not None
+                            and valid.levelId not in record.allowed_level_ids
+                        ):
+                            logger.info(
+                                "[WS] %s 完成未授權關卡 %s，略過入庫",
+                                record.id,
+                                valid.levelId,
+                            )
+                            continue
                         saved = await save_completion(
                             maker,
                             student_id=record.student_id,

@@ -46,6 +46,7 @@ from .accounts import hash_password, verify_password
 from .config import Settings
 from .db.audit import record_event
 from .db.models import Teacher, Team
+from .entitlement import build_welcome_entitlement
 from .games import ArenaGame, SoccerField, SoccerGame
 from .protocol import (
     WS_CLOSE_KICKED,
@@ -761,7 +762,8 @@ class RoomManager:
         """學生連上：配發全域遞增 id、發 welcome（進哪房由之後的 register 決定）。"""
         self._student_counter += 1
         record = StudentRecord(id=f"s{self._student_counter}", ws=ws)
-        await send_safe(ws, WelcomeMsg(id=record.id).model_dump_json())
+        entitlement = build_welcome_entitlement(self._cfg, self._known_levels)
+        await send_safe(ws, WelcomeMsg(id=record.id, entitlement=entitlement).model_dump_json())
         return record
 
     # ---------- 老師 ----------

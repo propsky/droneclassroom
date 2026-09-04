@@ -17,7 +17,7 @@ import {
   resolveObstacleCollisions,
   tickAutopilot,
 } from './core/physics';
-import { loadChapters, loadLevel, tickLevel, resetMission, levelState } from './core/level';
+import { loadChapters, loadLevel, tickLevel, resetMission, levelState, setLevelLoadGuard, setInitialLevelResolver } from './core/level';
 import {
   CREAFLY_API,
   runProgram,
@@ -52,6 +52,7 @@ import { initAudio } from './ui/audio';
 import { initEndCountdown } from './ui/endCountdown';
 import { initBroadcastBanner } from './ui/broadcastBanner';
 import { initWs, rejoin } from './net/ws';
+import { canLoadLevel, firstAllowedLevelId, loadEntitlement } from './net/entitlement';
 import { initBlockly } from './blockly';
 import {
   initArena,
@@ -120,6 +121,23 @@ initBroadcastBanner(); // 老師廣播大字橫幅（獨立於 toast）
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進：以目前身分（含房間碼）重新連線 register
+
+// 關卡授權 gate（enforce / demo 模式；open 或無 entitlement 時恆放行）
+setInitialLevelResolver((levels, requested) =>
+  canLoadLevel(requested) ? requested : firstAllowedLevelId(levels),
+);
+setLevelLoadGuard((levelId) => {
+  if (canLoadLevel(levelId)) return true;
+  const ent = loadEntitlement();
+  if (ent?.mode === 'licensed') {
+    toast('🔒 此關卡不在班級授權範圍內', 'warning');
+  } else if (ent?.mode === 'demo') {
+    toast('🔒 試玩版僅開放部分關卡，請登入班級帳號解鎖', 'warning');
+  } else {
+    toast('🔒 無法載入此關卡', 'warning');
+  }
+  return false;
+});
 
 const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
 document.getElementById('view-btn')?.addEventListener('click', doToggleView);

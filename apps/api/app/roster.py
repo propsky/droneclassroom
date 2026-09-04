@@ -71,6 +71,8 @@ class StudentRecord:
     suspect: bool = False
     suspect_reasons: list[str] = field(default_factory=list)
     level_started_at: dict[str, float] = field(default_factory=dict)
+    # enforce / demo_only：register 時快取的允許關卡；None = 不限制（open 模式）
+    allowed_level_ids: frozenset[str] | None = None
     # 心跳：最後收到任何訊息的 monotonic 秒；pinged = 這個 client 會送心跳（新版）。
     # 注意：class body 內名稱 `time` 被上面的欄位遮蔽 → 用 lambda 延遲到呼叫時解析模組
     last_seen: float = field(default_factory=lambda: time.monotonic())

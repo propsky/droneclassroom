@@ -496,11 +496,24 @@ class StudentBrief(BaseModel):
     studentId: int | None = None
 
 
+class EntitlementMsg(BaseModel):
+    """學生能力包（welcome / 後續 room_joined 可更新）。"""
+
+    mode: Literal["open", "demo", "licensed"]
+    levelIds: list[str]
+    canSaveProgress: bool
+    canOfflineComplete: bool
+    graceUntil: int | None = None
+    graceLevelId: str | None = None
+    issuedAt: int
+
+
 class WelcomeMsg(BaseModel):
     """學生連上後的第一則訊息（配發 id）。"""
 
     type: Literal["welcome"] = "welcome"
     id: str
+    entitlement: EntitlementMsg | None = None
 
 
 class PongMsg(BaseModel):
@@ -563,6 +576,7 @@ class RoomJoinedMsg(BaseModel):
 
     type: Literal["room_joined"] = "room_joined"
     room: RoomInfo
+    entitlement: EntitlementMsg | None = None
 
 
 RejectReason = Literal["not_found", "locked", "full", "bad_password", "closed"]

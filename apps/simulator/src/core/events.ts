@@ -26,6 +26,8 @@ export interface CoreEventMap {
   'player-ready': Record<string, never>;
   /** 老師鎖定 / 解鎖關卡選擇（UI 停用關卡選單） */
   'level-lock': { locked: boolean };
+  /** 授權能力包更新（welcome / room_joined 後；UI 重刷關卡選單鎖定狀態） */
+  'entitlement-updated': Record<string, never>;
   /** 3-2-1 倒數：n=3,2,1；n=0 表示 GO */
   'countdown': { n: number };
   /** 穿過一個圈 */

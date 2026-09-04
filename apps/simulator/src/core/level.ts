@@ -60,6 +60,26 @@ let ringFaceHintAt = 0; // 「機頭沒對準圈」提示節流
 let lastFaceAligned: boolean | null = null;
 let lastFaceRing = -1;
 
+/** 關卡載入前檢查（由 main 注入；core 不依賴 net/） */
+let levelLoadGuard: ((levelId: string) => boolean) | null = null;
+/** 首關選擇（由 main 注入；依授權挑可玩的關） */
+let initialLevelResolver: ((levels: LevelDef[], requested: string) => string) | null = null;
+
+export function setLevelLoadGuard(guard: ((levelId: string) => boolean) | null): void {
+  levelLoadGuard = guard;
+}
+
+export function setInitialLevelResolver(
+  fn: ((levels: LevelDef[], requested: string) => string) | null,
+): void {
+  initialLevelResolver = fn;
+}
+
+export interface LoadLevelOptions {
+  /** 老師廣播切關等伺服器指令：略過授權 gate */
+  bypassGuard?: boolean;
+}
+
 /** ring 上下漂浮的即時世界 Y（core 判定與 render 視覺共用同一公式；nowMs = 模擬時間） */
 export function ringWorldY(index: number, baseY: number, nowMs: number): number {
   return baseY + detSin(nowMs * 0.001 + index) * 0.2;
@@ -98,10 +118,15 @@ export async function loadChapters(): Promise<void> {
   console.log(`[Chapter] 載入 ${chapters.map((c) => c.levels.length).join(' + ')} 個關卡`);
   bus.emit('levels-ready', { levels: levelState.levels });
   const lp = new URLSearchParams(location.search).get('level');
-  loadLevel(/^[123]-[0-6]$/.test(lp ?? '') ? (lp as string) : '1-0');
+  const requested = /^[123]-[0-6]$/.test(lp ?? '') ? (lp as string) : '1-0';
+  const id = initialLevelResolver?.(levelState.levels, requested) ?? requested;
+  loadLevel(id);
 }
 
-export function loadLevel(levelId: string): void {
+export function loadLevel(levelId: string, opts?: LoadLevelOptions): void {
+  if (!opts?.bypassGuard && levelLoadGuard && !levelLoadGuard(levelId)) {
+    return;
+  }
   const level = levelState.levels.find((l) => l.id === levelId);
   if (!level) {
     console.warn('找不到關卡：', levelId);

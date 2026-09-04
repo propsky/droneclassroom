@@ -1,6 +1,7 @@
 """應用程式設定 — pydantic-settings，環境變數可覆寫（PORT / TEACHER_PASSWORD / …）。"""
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,6 +45,9 @@ class Settings(BaseSettings):
     - student_session_ttl_sec：學生 session 有效秒數（預設 90 天，滑動延長 —— 一學期不重登）
     - invite_ttl_sec：學生邀請 token 有效秒數（預設 7 天；過期老師可 reinvite 重發）
     - public_student_url：學生端對外網址（邀請信連結用；正式 = Cloudflare Pages）
+    - entitlement_mode：關卡授權模式（預設 open = 全關卡，行為與改版前相同）
+      open = 測試全開；demo_only = 訪客試玩關；enforce = 正式（welcome 試玩、帳號後續升級）
+    - demo_level_ids：試玩關卡 id（逗號分隔）；enforce / demo_only 用
     """
 
     model_config = SettingsConfigDict(
@@ -88,6 +92,8 @@ class Settings(BaseSettings):
     student_session_ttl_sec: int = 90 * 24 * 3600
     invite_ttl_sec: int = 7 * 24 * 3600
     public_student_url: str = "https://droneclassroom.pages.dev"
+    entitlement_mode: Literal["open", "enforce", "demo_only"] = "open"
+    demo_level_ids: str = "1-0,1-1,1-2"
 
     @property
     def allowed_origins_set(self) -> frozenset[str]:
