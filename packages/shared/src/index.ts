@@ -9,3 +9,5 @@ export * from './math';
 export * from './rest';
 export * from './detmath';
 export * from './rng';
+export * from './progressMerge';
+export * from './browserSupport';

@@ -13,6 +13,9 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
   font-family: var(--font);
   font-size: var(--fs-md);
   background: var(--bg-0);
@@ -51,6 +54,8 @@ svg.ic {
   grid-template-columns: 1fr;
   grid-template-rows: 56px 1fr;
   height: 100vh;
+  height: 100dvh;
+  min-height: -webkit-fill-available;
 }
 
 /* 程式模式：左欄 Blockly panel、場景在右欄 */
@@ -75,7 +80,9 @@ body.mode-program #app {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: 0 var(--sp-4);
+  padding: env(safe-area-inset-top, 0) var(--sp-4) 0;
+  padding-left: max(var(--sp-4), env(safe-area-inset-left, 0));
+  padding-right: max(var(--sp-4), env(safe-area-inset-right, 0));
   background: var(--bg-1);
   border-bottom: 1px solid var(--line);
   /* 內容過寬時不許撐大整條 grid 軌（否則 3D 場景跟著變寬、整頁橫向捲動） */

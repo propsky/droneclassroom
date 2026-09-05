@@ -4,15 +4,30 @@ import { defineConfig, devices } from '@playwright/test';
 
 const rootDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+/** L-04 Chrome / Edge / Safari + L-02 iPad Safari 展場最低規格 */
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,
-  use: {
-    ...devices['Desktop Chrome'],
-    baseURL: 'http://localhost:5173',
-  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:5173' },
+    },
+    {
+      name: 'webkit-desktop',
+      use: { ...devices['Desktop Safari'], baseURL: 'http://localhost:5173' },
+    },
+    {
+      name: 'webkit-ipad',
+      use: { ...devices['iPad Pro 11'], baseURL: 'http://localhost:5173' },
+    },
+    {
+      name: 'edge',
+      use: { ...devices['Desktop Edge'], baseURL: 'http://localhost:5173' },
+    },
+  ],
   webServer: [
     {
       command:

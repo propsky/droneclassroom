@@ -15,7 +15,7 @@ import {
   touchStudentSession,
   type StudentSession,
 } from '../net/studentAuth';
-import { progressState } from '../net/progressQueue';
+import { progressState, refreshProgressFromCache } from '../net/progressQueue';
 import { canLoadLevel, isOnlineOnlyMode, loadEntitlement } from '../net/entitlement';
 import { flags } from '../core/droneState';
 import { levelState, armLevelStart, resetMission } from '../core/level';
@@ -184,6 +184,7 @@ function onStudentLoggedIn(
   onJoin: () => void,
 ): void {
   saveStudentSession(data.token, data.me, data.expiresIn);
+  refreshProgressFromCache();
   studentSession = loadStudentSession();
   player.name = data.me.name;
   player.emoji = data.me.emoji;

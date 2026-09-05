@@ -160,6 +160,26 @@ def test_帳號過關_入庫收ack_更快更新best_重送去重_重連progress_
         assert rec.level == "1-1" and rec.time == 20000
 
 
+@needs_db
+def test_多關卡進度_新連線全量sync(db_client: TestClient) -> None:
+    """模擬換裝置 / 伺服器重啟後重連：DB 進度完整下發。"""
+    code, _, student_id, token = _setup_account_student(db_client, "prg2")
+    eid1, eid2 = str(uuid.uuid4()), str(uuid.uuid4())
+    with _account_ws(db_client, token) as (s, _):
+        _complete(s, "1-1", 22000, eid1)
+        assert s.receive_json()["type"] == "complete_ack"
+        _complete(s, "1-2", 31000, eid2)
+        assert s.receive_json()["type"] == "complete_ack"
+    with _account_ws(db_client, token) as (s, sync):
+        assert sync["progress"] == {
+            "1-1": {"bestTimeMs": 22000, "attempts": 1},
+            "1-2": {"bestTimeMs": 31000, "attempts": 1},
+        }
+        roster = db_client.app.state.rooms.get(code).roster
+        rec = next(r for r in roster.students if r.student_id == student_id)
+        assert rec.level in ("1-1", "1-2")
+
+
 # ---------- 離線補傳：跳過對時規則、留痕；< 1 秒照標 ----------
 
 

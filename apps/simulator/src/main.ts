@@ -27,6 +27,7 @@ import {
   programState,
   setMode,
 } from './core/program';
+import { meetsMinimumPlayRequirements, probeBrowserCapabilities } from '@creafly/shared';
 import { tickPen } from './core/pen';
 import { bus, toast } from './core/events';
 import { initInputs, tickInputDevices, collectControlFrame, isTouchDevice } from './input';
@@ -217,6 +218,14 @@ window.CREAFLY = {
 
 // ---- 關卡資料 ----
 void loadChapters();
+
+const browserCaps = probeBrowserCapabilities();
+if (!meetsMinimumPlayRequirements(browserCaps)) {
+  setTimeout(
+    () => toast('此瀏覽器可能無法執行 3D 模擬，請改用 Chrome / Edge / Safari 現行版', 'error'),
+    600,
+  );
+}
 
 // ---- 離線可玩：註冊 Service Worker（僅正式 build；docs/offline.md）----
 initPwa();

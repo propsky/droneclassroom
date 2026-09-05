@@ -10,7 +10,9 @@
 //   - progress_sync / complete_ack → progressState 更新 + 發 progress-updated（關卡選單勾勾）
 // 與 net/ws.ts 互相 import（皆為函式內延遲取用，無模組初始化循環問題）。
 import type { ProgressSyncMsg } from '@creafly/shared';
+import { mergeLevelProgress, replaceProgressMap } from '@creafly/shared';
 import { bus, toast } from '../core/events';
+import { clearProgressCache, loadProgressCache, saveProgressCache } from './progressLocalCache';
 import { getStudentToken, loadStudentSession } from './studentAuth';
 import { sendToServer, wsState } from './ws';
 
@@ -179,26 +181,42 @@ export function handleCompleteAck(clientEventId: string): void {
 
 /** net/ws.ts 收到 progress_sync：伺服器為準整份覆蓋（跨裝置同步） */
 export function handleProgressSync(progress: ProgressSyncMsg['progress']): void {
-  progressState.progress = { ...progress };
+  progressState.progress = replaceProgressMap(progress);
+  const sid = loadStudentSession()?.me.id;
+  if (sid != null) saveProgressCache(sid, progressState.progress);
   bus.emit('progress-updated', {});
 }
 
 function markLocalComplete(levelId: string, timeMs: number): void {
-  const cur = progressState.progress[levelId];
-  progressState.progress[levelId] = {
-    bestTimeMs: cur?.bestTimeMs == null ? timeMs : Math.min(cur.bestTimeMs, timeMs),
-    attempts: (cur?.attempts ?? 0) + 1,
-  };
+  progressState.progress[levelId] = mergeLevelProgress(progressState.progress[levelId], timeMs);
+  const sid = loadStudentSession()?.me.id;
+  if (sid != null) saveProgressCache(sid, progressState.progress);
   bus.emit('progress-updated', {});
+}
+
+function hydrateProgressFromCache(): void {
+  const session = loadStudentSession();
+  if (!session) return;
+  const cached = loadProgressCache(session.me.id);
+  if (!cached) return;
+  progressState.progress = cached;
+  bus.emit('progress-updated', {});
+}
+
+/** 帳號登入成功後呼叫（init 時可能尚未登入） */
+export function refreshProgressFromCache(): void {
+  hydrateProgressFromCache();
 }
 
 /** net/ws.ts initWs() 呼叫一次：接上重連 flush 與登出清空 */
 export function initProgressQueue(): void {
+  hydrateProgressFromCache();
   // register 在 ws.onopen 同步先送、ws-connected 後發 — 同一條 WS 訊息有序，補傳一定排在 register 之後
   bus.on('ws-connected', () => flushQueue());
   // 登出：勾勾是帳號的資料 → 清畫面狀態；佇列保留（按 sid 隔離，本人再登入才補傳）
   bus.on('student-logout', () => {
     progressState.progress = {};
+    clearProgressCache();
     bus.emit('progress-updated', {});
   });
 }
