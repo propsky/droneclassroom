@@ -7,6 +7,9 @@ import {
   EDITOR_WORLD,
   heightHueColor,
   isoCanvasToWorld,
+  isoDepthKey,
+  isoGroundToCanvas,
+  isoLayout,
   isoWorldToCanvas,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
@@ -219,7 +222,7 @@ export function openLevelEditor(
                 <div><dt>游標 Z</dt><dd class="mono" id="le-readout-z">0</dd></div>
                 <div><dt>放置高度</dt><dd class="mono" id="le-readout-place-y">2.5 m</dd></div>
               </dl>
-              <p class="note">滾輪調整放置高度 · 側視可拖曳調 Y</p>
+              <p class="note" id="le-view-hint">滾輪調整放置高度 · 側視可拖曳調 Y</p>
             </div>
             ${propsPanelHtml()}
           </aside>
@@ -271,11 +274,18 @@ export function openLevelEditor(
     return topWorldToCanvas(x, z, w, h);
   };
 
-  const unproject = (px: number, py: number): { x: number; z: number } => {
+  const unproject = (px: number, py: number, planeY = placeHeightY): { x: number; z: number } => {
     const w = canvas.width;
     const h = canvas.height;
-    if (viewMode === 'iso') return isoCanvasToWorld(px, py, w, h, placeHeightY, snapStep);
+    if (viewMode === 'iso') return isoCanvasToWorld(px, py, w, h, planeY, snapStep);
     return topCanvasToWorld(px, py, w, h, snapStep);
+  };
+
+  const objectPlaneY = (sel: Selection): number => {
+    if (sel.kind === 'ring') return level.rings?.[sel.index]?.y ?? placeHeightY;
+    if (sel.kind === 'obstacle') return level.obstacles?.[sel.index]?.y ?? placeHeightY;
+    if (sel.kind === 'balloon') return level.balloons?.[sel.index]?.y ?? placeHeightY;
+    return 0;
   };
 
   const ringPxRadius = (diam: number): number =>
@@ -300,6 +310,97 @@ export function openLevelEditor(
     q<HTMLInputElement>('#le-py').value = String(y);
     q<HTMLInputElement>('#le-py-range').value = String(y);
     q<HTMLElement>('#le-py-readout').textContent = ` ${y.toFixed(1)} m`;
+  };
+
+  const syncViewHint = (): void => {
+    const el = q<HTMLElement>('#le-view-hint');
+    if (viewMode === 'iso') {
+      el.textContent = '2.5D：拖曳沿地面移動 X/Z · 滾輪調放置高度 · 藍柱=高度';
+    } else if (viewMode === 'side') {
+      el.textContent = '側視：拖曳調 Y · 放置請切換俯視或 2.5D';
+    } else {
+      el.textContent = '滾輪調整放置高度 · 側視可拖曳調 Y';
+    }
+  };
+
+  const drawIsoStem = (x: number, z: number, y: number, w: number, h: number): void => {
+    if (y <= 0.05) return;
+    const [gx, gy] = isoGroundToCanvas(x, z, w, h);
+    const [ox, oy] = project(x, z, y);
+    ctx.strokeStyle = heightHueColor(y, 0.75);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(gx, gy);
+    ctx.lineTo(ox, oy);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath();
+    ctx.ellipse(gx, gy, 7, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  const drawIsoFloor = (w: number, h: number): void => {
+    const gridStep = snapStep >= 1 ? 5 : 2.5;
+    const { cx, cy } = isoLayout(w, h);
+
+    // 場地菱形外框
+    const corners: [number, number][] = [
+      [-HALF, -HALF],
+      [HALF, -HALF],
+      [HALF, HALF],
+      [-HALF, HALF],
+    ];
+    ctx.fillStyle = 'rgba(30,45,65,0.55)';
+    ctx.beginPath();
+    corners.forEach(([x, z], i) => {
+      const [px, py] = isoGroundToCanvas(x, z, w, h);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(96,165,250,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // 等距格線（沿 X 與 Z 軸）
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 1;
+    for (let m = -HALF; m <= HALF; m += gridStep) {
+      const [x1, y1] = isoGroundToCanvas(m, -HALF, w, h);
+      const [x2, y2] = isoGroundToCanvas(m, HALF, w, h);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      const [x3, y3] = isoGroundToCanvas(-HALF, m, w, h);
+      const [x4, y4] = isoGroundToCanvas(HALF, m, w, h);
+      ctx.beginPath();
+      ctx.moveTo(x3, y3);
+      ctx.lineTo(x4, y4);
+      ctx.stroke();
+    }
+
+    // 軸向標示（業界常見：+X 右、-Z 前）
+    const drawAxis = (x: number, z: number, label: string, color: string): void => {
+      const [ax, ay] = isoGroundToCanvas(0, 0, w, h);
+      const [bx, by] = isoGroundToCanvas(x, z, w, h);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText(label, bx + 4, by + 4);
+    };
+    drawAxis(6, 0, '+X', '#38bdf8');
+    drawAxis(0, -6, '-Z 前', '#fbbf24');
+
+    ctx.fillStyle = 'rgba(148,163,184,0.7)';
+    ctx.font = '9px monospace';
+    ctx.fillText('原點', cx - 8, cy + 14);
   };
 
   const updateEmptyBanner = (): void => {
@@ -403,35 +504,37 @@ export function openLevelEditor(
         ctx.fillText(String(m), gx + 2, h - 4);
         ctx.fillText(String(m), 4, gz - 2);
       }
-    } else {
-      ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-      ctx.lineWidth = 1;
-      for (let m = -10; m <= 10; m += 5) {
-        const [x1, y1] = project(m, -HALF);
-        const [x2, y2] = project(m, HALF);
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-        const [x3, y3] = project(-HALF, m);
-        const [x4, y4] = project(HALF, m);
-        ctx.beginPath();
-        ctx.moveTo(x3, y3);
-        ctx.lineTo(x4, y4);
-        ctx.stroke();
-      }
+    } else if (viewMode === 'iso') {
+      drawIsoFloor(w, h);
+    }
+
+    type IsoDrawItem = { depth: number; draw: () => void };
+    const isoQueue: IsoDrawItem[] = [];
+
+    const queueIso = (x: number, z: number, y: number, drawFn: () => void): void => {
+      isoQueue.push({ depth: isoDepthKey(x, z, y), draw: drawFn });
+    };
+
+    if (viewMode === 'iso') {
+      (level.obstacles ?? []).forEach((obs) => drawIsoStem(obs.x, obs.z, obs.y, w, h));
+      (level.balloons ?? []).forEach((b) => drawIsoStem(b.x, b.z, b.y, w, h));
+      (level.rings ?? []).forEach((ring) => drawIsoStem(ring.x, ring.z, ring.y, w, h));
     }
 
     const [hx, hz] = project(0, 0, 0);
-    ctx.fillStyle = '#fbbf24';
-    ctx.beginPath();
-    ctx.arc(hx, hz, viewMode === 'iso' ? 6 : 8, 0, Math.PI * 2);
-    ctx.fill();
-    if (viewMode === 'top') {
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '11px sans-serif';
-      ctx.fillText('起飛墊 0,0', hx + 10, hz + 4);
-    }
+    const drawHomePad = (): void => {
+      ctx.fillStyle = '#fbbf24';
+      ctx.beginPath();
+      ctx.arc(hx, hz, viewMode === 'iso' ? 6 : 8, 0, Math.PI * 2);
+      ctx.fill();
+      if (viewMode === 'top') {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('起飛墊 0,0', hx + 10, hz + 4);
+      }
+    };
+    if (viewMode === 'iso') queueIso(0, 0, 0, drawHomePad);
+    else drawHomePad();
 
     const guide = level.guide;
     if (guide?.length && viewMode === 'top') {
@@ -447,52 +550,57 @@ export function openLevelEditor(
     }
 
     (level.obstacles ?? []).forEach((obs, i) => {
-      const [ox, oz] = project(obs.x, obs.z, obs.y);
-      const r = ((obs.size ?? 1) / WORLD) * w * 0.5;
-      const sel = isSelected('obstacle', i);
-      const fill = parseLevelColor(obs.color, obstacleDefaultColor(!!obs.solid));
-      ctx.globalAlpha = obs.solid ? 0.85 : 0.6;
-      ctx.fillStyle = fill;
-      if (viewMode === 'iso') {
-        ctx.beginPath();
-        ctx.ellipse(ox, oz, r, r * 0.55, 0, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.fillRect(ox - r, oz - r, r * 2, r * 2);
-      }
-      ctx.fillStyle = '#cbd5e1';
-      ctx.font = '8px monospace';
-      ctx.fillText(`${obs.y}m`, ox - 10, oz - r - 3);
-      if (sel) {
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 2;
+      const drawObs = (): void => {
+        const [ox, oz] = project(obs.x, obs.z, obs.y);
+        const r = ((obs.size ?? 1) / WORLD) * w * 0.5;
+        const sel = isSelected('obstacle', i);
+        const fill = parseLevelColor(obs.color, obstacleDefaultColor(!!obs.solid));
+        ctx.globalAlpha = obs.solid ? 0.85 : 0.6;
+        ctx.fillStyle = fill;
         if (viewMode === 'iso') {
-          ctx.stroke();
+          ctx.beginPath();
+          ctx.ellipse(ox, oz, r, r * 0.55, 0, 0, Math.PI * 2);
+          ctx.fill();
         } else {
-          ctx.strokeRect(ox - r - 2, oz - r - 2, r * 2 + 4, r * 2 + 4);
+          ctx.fillRect(ox - r, oz - r, r * 2, r * 2);
         }
-      }
-      ctx.globalAlpha = 1;
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '8px monospace';
+        ctx.fillText(`${obs.y}m`, ox - 10, oz - r - 3);
+        if (sel) {
+          ctx.strokeStyle = '#60a5fa';
+          ctx.lineWidth = 2;
+          if (viewMode === 'iso') ctx.stroke();
+          else ctx.strokeRect(ox - r - 2, oz - r - 2, r * 2 + 4, r * 2 + 4);
+        }
+        ctx.globalAlpha = 1;
+      };
+      if (viewMode === 'iso') queueIso(obs.x, obs.z, obs.y, drawObs);
+      else drawObs();
     });
 
     (level.balloons ?? []).forEach((b, i) => {
-      const [bx, bz] = project(b.x, b.z, b.y);
-      const bFill = parseLevelColor(b.color, DEFAULT_BALLOON_COLORS[i % DEFAULT_BALLOON_COLORS.length]!);
-      const bR = Math.max(8, ringPxRadius(balloonDiameter(b)) * 0.45);
-      ctx.fillStyle = bFill;
-      ctx.globalAlpha = 0.9;
-      ctx.beginPath();
-      ctx.arc(bx, bz, viewMode === 'iso' ? bR * 0.85 : bR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#cbd5e1';
-      ctx.font = '8px monospace';
-      ctx.fillText(`${b.y}m`, bx - 10, bz - 12);
-      if (isSelected('balloon', i)) {
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
+      const drawBalloon = (): void => {
+        const [bx, bz] = project(b.x, b.z, b.y);
+        const bFill = parseLevelColor(b.color, DEFAULT_BALLOON_COLORS[i % DEFAULT_BALLOON_COLORS.length]!);
+        const bR = Math.max(8, ringPxRadius(balloonDiameter(b)) * 0.45);
+        ctx.fillStyle = bFill;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(bx, bz, viewMode === 'iso' ? bR * 0.85 : bR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '8px monospace';
+        ctx.fillText(`${b.y}m`, bx - 10, bz - 12);
+        if (isSelected('balloon', i)) {
+          ctx.strokeStyle = '#60a5fa';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      };
+      if (viewMode === 'iso') queueIso(b.x, b.z, b.y, drawBalloon);
+      else drawBalloon();
     });
 
     if (viewMode === 'top') {
@@ -528,21 +636,30 @@ export function openLevelEditor(
     }
 
     (level.rings ?? []).forEach((ring, i) => {
-      const [rx, rz] = project(ring.x, ring.z, ring.y);
-      const sel = isSelected('ring', i);
-      const rPx = ringPxRadius(ringDiameter(ring));
-      ctx.strokeStyle = sel ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : parseLevelColor(ring.color, DEFAULT_RING_COLOR);
-      ctx.lineWidth = sel ? 3 : 2;
-      ctx.beginPath();
-      ctx.arc(rx, rz, rPx, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = '#e2e8f0';
-      ctx.font = '10px sans-serif';
-      ctx.fillText(ring.label ?? String(i + 1), rx - 4, rz + 3);
-      ctx.font = '8px monospace';
-      ctx.fillStyle = '#cbd5e1';
-      ctx.fillText(`${ring.y}m`, rx - 10, rz - rPx - 4);
+      const drawRing = (): void => {
+        const [rx, rz] = project(ring.x, ring.z, ring.y);
+        const sel = isSelected('ring', i);
+        const rPx = ringPxRadius(ringDiameter(ring));
+        ctx.strokeStyle = sel ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : parseLevelColor(ring.color, DEFAULT_RING_COLOR);
+        ctx.lineWidth = sel ? 3 : 2;
+        ctx.beginPath();
+        ctx.arc(rx, rz, rPx, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(ring.label ?? String(i + 1), rx - 4, rz + 3);
+        ctx.font = '8px monospace';
+        ctx.fillStyle = '#cbd5e1';
+        ctx.fillText(`${ring.y}m`, rx - 10, rz - rPx - 4);
+      };
+      if (viewMode === 'iso') queueIso(ring.x, ring.z, ring.y, drawRing);
+      else drawRing();
     });
+
+    if (viewMode === 'iso') {
+      isoQueue.sort((a, b) => a.depth - b.depth);
+      isoQueue.forEach((item) => item.draw());
+    }
   };
 
   const draw = (): void => {
@@ -842,7 +959,9 @@ export function openLevelEditor(
 
   canvas.addEventListener('mousemove', (e) => {
     const [px, py] = canvasPos(e);
-    const { x, z } = unproject(px, py);
+    const planeY =
+      dragSel && dragSel.kind !== 'zone' ? objectPlaneY(dragSel) : placeHeightY;
+    const { x, z } = unproject(px, py, planeY);
     syncInspectorIdle(x, z);
     if (!dragSel) return;
     const drag = dragSel;
@@ -919,6 +1038,7 @@ export function openLevelEditor(
       q<HTMLElement>('#le-view-tabs').querySelectorAll('.le-view').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       dragSel = null;
+      syncViewHint();
       draw();
     });
   });
@@ -1265,6 +1385,7 @@ export function openLevelEditor(
       snapStep = getSnapStep();
       syncFormFromLevel();
       syncPlaceHeightReadout();
+      syncViewHint();
       draw();
       loadMyKits();
       backdrop.focus();

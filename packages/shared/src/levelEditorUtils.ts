@@ -54,11 +54,36 @@ export function ringPassRadius(ring: { diameter?: number } | undefined): number 
   return ringDiameter(ring) / 2;
 }
 
-const ISO_COS = Math.SQRT1_2;
-const ISO_SIN = Math.SQRT1_2;
+/**
+ * 2.5D 斜投影布局（2:1 dimetric，Tiled / Unity 等距瓦片常用比例）。
+ * 世界 +X → 螢幕右下、+Z → 螢幕左下、+Y → 螢幕向上。
+ */
+export interface IsoLayout {
+  cx: number;
+  cy: number;
+  /** 世界 1m 在 X 方向的螢幕跨度（經 (x-z) 合成） */
+  tileW: number;
+  /** 世界 1m 在 Z 深度的螢幕跨度（經 (x+z) 合成），約為 tileW 一半 */
+  tileH: number;
+  /** 世界 1m 高度對應螢幕向上像素 */
+  yLift: number;
+}
 
-function canvasScale(w: number): number {
-  return w / (EDITOR_WORLD + 4);
+export function isoLayout(w: number, h: number): IsoLayout {
+  const tileW = (w / (EDITOR_WORLD + 4)) * 2.4;
+  const tileH = tileW * 0.5;
+  return {
+    cx: w / 2,
+    cy: h * 0.52,
+    tileW,
+    tileH,
+    yLift: tileH * 1.4,
+  };
+}
+
+/** 繪製排序：越大越靠近觀察者（先畫後方） */
+export function isoDepthKey(x: number, z: number, y = 0): number {
+  return x + z - y * 0.02;
 }
 
 /** 俯視：世界 XZ → canvas 像素 */
@@ -78,7 +103,10 @@ export function topCanvasToWorld(
   return snapClampXZ(rawX, rawZ, step);
 }
 
-/** 2.5D 等距：Y 越大畫面越往上浮 */
+/**
+ * 2.5D 斜投影：世界 → 螢幕。
+ * 與俯視不同：X/Z 分別沿兩條斜軸散開，Y 僅向上偏移（不混入 X/Z）。
+ */
 export function isoWorldToCanvas(
   x: number,
   z: number,
@@ -86,31 +114,38 @@ export function isoWorldToCanvas(
   w: number,
   h: number,
 ): [number, number] {
-  const scale = canvasScale(w);
-  const cx = w / 2;
-  const cy = h * 0.58;
-  const isoX = (x - z) * ISO_COS * scale;
-  const groundZ = (x + z) * ISO_SIN * scale;
-  const lift = y * scale * 1.15;
-  return [cx + isoX, cy + groundZ - lift];
+  const { cx, cy, tileW, tileH, yLift } = isoLayout(w, h);
+  const halfW = tileW * 0.5;
+  const halfH = tileH * 0.5;
+  const sx = cx + (x - z) * halfW;
+  const sy = cy + (x + z) * halfH - y * yLift;
+  return [sx, sy];
 }
 
+/**
+ * 螢幕 → 世界 XZ，投射到水平面 y = planeY（拖曳時用物件實際高度，放置時用放置高度）。
+ */
 export function isoCanvasToWorld(
   px: number,
   py: number,
   w: number,
   h: number,
-  placeY: number,
+  planeY: number,
   step: number,
 ): { x: number; z: number } {
-  const scale = canvasScale(w);
-  const cx = w / 2;
-  const cy = h * 0.58;
+  const { cx, cy, tileW, tileH, yLift } = isoLayout(w, h);
+  const halfW = tileW * 0.5;
+  const halfH = tileH * 0.5;
   const isoX = px - cx;
-  const groundZ = py - cy + placeY * scale * 1.15;
-  const x = (isoX / (ISO_COS * scale) + groundZ / (ISO_SIN * scale)) / 2;
-  const z = (groundZ / (ISO_SIN * scale) - isoX / (ISO_COS * scale)) / 2;
+  const depth = py - cy + planeY * yLift;
+  const x = (isoX / halfW + depth / halfH) / 2;
+  const z = (depth / halfH - isoX / halfW) / 2;
   return snapClampXZ(x, z, step);
+}
+
+/** 地面落點（y=0） */
+export function isoGroundToCanvas(x: number, z: number, w: number, h: number): [number, number] {
+  return isoWorldToCanvas(x, z, 0, w, h);
 }
 
 /** 側視：X 水平、Y 垂直 */
