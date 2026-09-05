@@ -17,10 +17,9 @@ import {
 } from './gamepad';
 import { gamepadConfig, initCalibration, tickCalibration, calibration } from './calibration';
 import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
+import { resolveStickSource, type StickAxes } from './padMath';
 
 export { isTouchDevice };
-
-type StickAxes = { throttle: number; yaw: number; pitch: number; roll: number };
 
 export function initInputs(opts: { toggleView: () => void }): void {
   initKeyboard(opts);
@@ -79,10 +78,13 @@ export function tickInputDevices(manualLocked: boolean): void {
 }
 
 function activeStickAxes(): StickAxes {
-  if (!calibration.active && gamepadState.connected) return gamepadAxes();
-  const ble = bleAxes();
-  if (ble) return ble;
-  return virtualStick;
+  return resolveStickSource({
+    calibrating: calibration.active,
+    gamepadConnected: gamepadState.connected,
+    gamepad: gamepadAxes(),
+    ble: bleAxes(),
+    virtual: virtualStick,
+  });
 }
 
 function stickHasInput(s: StickAxes): boolean {
@@ -95,9 +97,7 @@ export function collectControlFrame(): ControlFrame {
     return { lift: 0, forward: 0, right: 0, yawDelta: 0, wantsTakeoff: false, anyInput: false };
   }
 
-  const stick = calibration.active
-    ? { throttle: 0, yaw: 0, pitch: 0, roll: 0 }
-    : activeStickAxes();
+  const stick = activeStickAxes();
 
   const frame: ControlFrame = {
     lift: 0,

@@ -2,8 +2,8 @@
 // 純邏輯與 UI 分離：狀態機只透過 bus 發事件，ui/calibrationOverlay.ts 訂閱渲染。
 // 流程：rest 5s → 左桿置中 5s → 左桿畫圈 10s → 右桿置中 5s → 右桿畫圈 10s
 //       → 起飛 / 降落 / 重置 3 個按鍵偵測（按下邊緣捕捉 + 完全放開才進下一步）。
-// 置中步驟取平均為 center；畫圈步驟取 min/max 為 range；存 localStorage 沿用 legacy key。
 import { bus, toast } from '../core/events';
+import { computeCalibRanges, urlPresetOverrides } from './padMath';
 
 // =============================================================================
 // 搖桿設定（校正資料的載體；gamepad.ts 每 tick 讀取套用）
@@ -48,21 +48,7 @@ const DEFAULT_CONFIG: GamepadConfig = {
 
 /** URL 快速 preset（教室常見手把；對齊 legacy ?map= / ?inv=） */
 export function applyUrlPresets(): void {
-  const q = new URLSearchParams(location.search);
-  const map = q.get('map');
-  if (map === 'switch') {
-    gamepadConfig.buttonMap = { takeoff: 1, land: 0, reset: 3 };
-  } else if (map === 'ipega') {
-    gamepadConfig.invertThrottle = true;
-    gamepadConfig.buttonMap = { takeoff: 9, land: 8, reset: 0 };
-  }
-  const inv = q.get('inv');
-  if (inv === 'y' || inv === '1') {
-    gamepadConfig.invertThrottle = true;
-    gamepadConfig.invertPitch = true;
-  }
-  const dz = parseFloat(q.get('dz') ?? '');
-  if (!Number.isNaN(dz) && dz > 0) gamepadConfig.deadzone = dz;
+  Object.assign(gamepadConfig, urlPresetOverrides(location.search));
 }
 
 /** 重置為預設並清除 localStorage 校正資料 */
@@ -218,14 +204,7 @@ export function endCalibration(save: boolean): void {
     calibTimer = null;
   }
   if (save) {
-    // 每軸 range 取 center 兩側最大飄移；沒收集到的軸（min===max===0）保底 0.5
-    const newRange = [1, 1, 1, 1];
-    for (let i = 0; i < 4; i++) {
-      const c = calibration.center[i] ?? 0;
-      const downRange = Math.abs((calibration.min[i] ?? 0) - c);
-      const upRange = Math.abs((calibration.max[i] ?? 0) - c);
-      newRange[i] = Math.max(downRange, upRange, 0.5);
-    }
+    const newRange = computeCalibRanges(calibration.center, calibration.min, calibration.max);
     gamepadConfig.center = calibration.center.slice();
     gamepadConfig.range = newRange;
     (['takeoff', 'land', 'reset'] as const).forEach((k) => {

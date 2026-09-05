@@ -5,6 +5,7 @@
 import { bus, toast } from '../core/events';
 import { iconHtml } from '../ui/icons';
 import { decodeFrame, NUS_SERVICE, NUS_TX, NUS_RX, type BleControllerState } from './bleDecode';
+import { applyDeadzone, detectButtonEdge } from './padMath';
 
 // ---- Web Bluetooth 最小型別（tsconfig DOM lib 不含；只宣告用到的部分）----
 interface BleCharacteristic extends EventTarget {
@@ -49,7 +50,7 @@ export const bleState = {
 
 const BLE_DEADZONE = 0.08;
 
-const dz = (v: number): number => (Math.abs(v) < BLE_DEADZONE ? 0 : v);
+const dz = (v: number): number => applyDeadzone(v, BLE_DEADZONE);
 
 type BleBtnKey = keyof BleControllerState['buttons'];
 const BLE_BTN_KEYS: BleBtnKey[] = ['A', 'B', 'X', 'Y', 'Back', 'Start', 'RStick', 'LStick'];
@@ -78,11 +79,11 @@ function setBleConnected(on: boolean, name = ''): void {
 export function bleButtonEdges(): { takeoff: boolean; land: boolean; reset: boolean } {
   const b = bleState.pad?.buttons;
   if (!b) return { takeoff: false, land: false, reset: false };
-  const edge = (k: BleBtnKey, prev: boolean): boolean => !!b[k] && !prev;
+  const edge = (k: BleBtnKey): boolean => detectButtonEdge(!!b[k], prevBleButtons[k]);
   return {
-    takeoff: edge('A', prevBleButtons.A),
-    land: edge('B', prevBleButtons.B),
-    reset: edge('X', prevBleButtons.X),
+    takeoff: edge('A'),
+    land: edge('B'),
+    reset: edge('X'),
   };
 }
 

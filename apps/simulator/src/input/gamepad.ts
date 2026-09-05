@@ -4,6 +4,7 @@
 // 開發後門：?fakepad=1 注入假搖桿訊號（headless 驗收 / 沒實體搖桿時測校正精靈用）。
 import { bus, toast } from '../core/events';
 import { gamepadConfig } from './calibration';
+import { normalizeGamepadAxis } from './padMath';
 
 export const gamepadState = {
   connected: false,
@@ -117,9 +118,7 @@ function axis(i: number): number {
   const raw = gamepadState.axes[i] ?? 0;
   const c = gamepadConfig.center[i] ?? 0;
   const r = gamepadConfig.range[i] || 1;
-  const norm = (raw - c) / r;
-  const clamped = Math.max(-1, Math.min(1, norm));
-  return Math.abs(clamped) < gamepadConfig.deadzone ? 0 : clamped;
+  return normalizeGamepadAxis(raw, c, r, gamepadConfig.deadzone);
 }
 
 export function gamepadAxes(): { throttle: number; yaw: number; pitch: number; roll: number } {
