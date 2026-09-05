@@ -54,7 +54,7 @@
             <!-- 群組 3：搖桿 / 校正 / 全螢幕 -->
             <div class="header-group">
                 <button id="connect-gamepad-btn" class="header-btn" title="用藍牙連線 pyController 實體搖桿（需 HTTPS；iPad 請用 Bluefy）"><span class="btn-ic" data-icon="bluetooth"></span><span>連線搖桿</span></button>
-                <button id="calib-fab" class="header-btn header-btn-calib" title="搖桿校正精靈（偵測到搖桿才會亮起）"><span class="btn-ic" data-icon="settings"></span><span>校正</span></button>
+                <button id="calib-fab" class="header-btn header-btn-calib" title="搖桿設定與校正（連線後出現）"><span class="btn-ic" data-icon="settings"></span><span>搖桿</span></button>
                 <button id="fullscreen-btn" class="header-btn" title="全螢幕（iPad / 桌機）"><span class="btn-ic" data-icon="expand"></span><span>全螢幕</span></button>
             </div>
             <!-- 「更多」下拉：header 塞不下時由 ui/headerOverflow.ts 把低頻按鈕收進來（平常隱藏） -->
@@ -371,6 +371,40 @@
     <div class="hud-title arena-title"><span class="btn-ic" data-icon="users"></span>大亂鬥 <span id="arena-timer" class="mono">等待老師開始</span></div>
     <div id="arena-field-label" class="hud-note"></div>
     <div id="arena-scoreboard"><div class="arena-row">等待玩家加入…</div></div>
+</div>
+
+<!-- 搖桿設定面板（微調死區 / 反轉 + 校正精靈入口） -->
+<div id="pad-settings-overlay" class="pad-overlay" role="dialog" aria-labelledby="pad-settings-title" aria-modal="true">
+    <div class="pad-settings-card">
+        <h2 id="pad-settings-title"><span class="btn-ic" data-icon="gamepad" data-icon-size="20"></span>搖桿設定</h2>
+        <div id="pad-settings-status" class="pad-status"><span class="pad-status-dot"></span><span>尚未連線</span></div>
+        <div id="pad-settings-tuning" class="pad-tuning">
+            <div class="pad-tuning-row">
+                <span class="pad-tuning-label">死區</span>
+                <input id="pad-dz" class="pad-slider" type="range" min="0.02" max="0.30" step="0.01" value="0.10">
+                <span id="pad-dz-val" class="pad-tuning-val mono">0.10</span>
+            </div>
+            <div class="pad-tuning-row">
+                <button type="button" id="pad-inv-throttle" class="pad-toggle">升降反轉：關</button>
+            </div>
+        </div>
+        <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。A=起飛、B=降落、X=重置。</p>
+        <div id="pad-settings-gamepad-only" class="pad-section">
+            <button type="button" id="pad-start-calib" class="pad-btn-primary">開始校正精靈</button>
+            <p class="pad-note">約 30 秒：量測置中與行程、對映起飛／降落／重置按鍵。非標準手把建議跑一次。</p>
+        </div>
+        <button type="button" id="pad-reset-all" class="pad-btn-ghost">重置所有搖桿設定</button>
+        <div class="pad-settings-actions">
+            <button type="button" id="pad-settings-close" class="pad-btn-secondary">關閉</button>
+        </div>
+    </div>
+</div>
+
+<!-- 搖桿連線提示（未連線時底部顯示；可關閉） -->
+<div id="pad-hint" class="pad-hint" role="status">
+    <span class="pad-hint-ic btn-ic" data-icon="gamepad"></span>
+    <span id="pad-hint-text" class="pad-hint-text"></span>
+    <button type="button" id="pad-hint-dismiss" class="pad-hint-dismiss">知道了</button>
 </div>
 
 <!-- 搖桿校正精靈（8 步驟；狀態機在 src/input/calibration.ts、渲染在 src/ui/calibrationOverlay.ts） -->

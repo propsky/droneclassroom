@@ -42,6 +42,7 @@ import { initOverlays, initPlayer, syncViewButton } from './ui/overlays';
 import { initHeaderOverflow } from './ui/headerOverflow';
 import { initLevelComplete } from './ui/levelComplete';
 import { initCalibrationOverlay } from './ui/calibrationOverlay';
+import { initPadSettings, initPadHint } from './ui/padSettings';
 import {
   calibration,
   gamepadConfig,
@@ -147,6 +148,8 @@ const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
 document.getElementById('view-btn')?.addEventListener('click', doToggleView);
 initInputs({ toggleView: doToggleView });
 initCalibrationOverlay(); // 搖桿校正精靈 overlay（在 initInputs 之後：狀態機已就緒）
+initPadSettings();
+initPadHint();
 
 // ---- Blockly 積木編輯器（生成碼經 window.__creaflyGetCode → runProgram 注入 CREAFLY 執行）----
 initBlockly();

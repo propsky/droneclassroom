@@ -110,8 +110,7 @@ export function initCalibrationOverlay(): void {
     if (saved) renderResult();
   });
 
-  // ---- 按鈕接線 ----
-  $('calib-fab')?.addEventListener('click', () => startCalibration());
+  // ---- 按鈕接線（「搖桿」按鈕 → padSettings.ts 開啟設定面板） ----
   $('calib-skip')?.addEventListener('click', () => skipCalibStep());
   $('calib-cancel')?.addEventListener('click', () => endCalibration(false));
   $('calib-save')?.addEventListener('click', () => endCalibration(true));

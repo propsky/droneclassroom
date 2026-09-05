@@ -2,7 +2,7 @@
 // 事件驅動 ~20Hz（裝置每 50ms notify 一筆）覆寫虛擬搖桿四軸；斷線自動歸零恢復。
 // 僅 Chrome/Edge（Windows/Android/ChromeOS/macOS）支援；iPad 請改用 Bluefy 瀏覽器。
 // 不支援 Web Bluetooth 的瀏覽器：header 按鈕直接隱藏。
-import { toast } from '../core/events';
+import { bus, toast } from '../core/events';
 import { iconHtml } from '../ui/icons';
 import { decodeFrame, NUS_SERVICE, NUS_TX, NUS_RX, type BleControllerState } from './bleDecode';
 
@@ -44,11 +44,53 @@ export function isBleSupported(): boolean {
 export const bleState = {
   connected: false,
   pad: null as BleControllerState | null,
+  deviceName: '',
 };
 
-const BLE_DEADZONE = 0.08; // 死區，避免搖桿中點飄移
+const BLE_DEADZONE = 0.08;
 
 const dz = (v: number): number => (Math.abs(v) < BLE_DEADZONE ? 0 : v);
+
+type BleBtnKey = keyof BleControllerState['buttons'];
+const BLE_BTN_KEYS: BleBtnKey[] = ['A', 'B', 'X', 'Y', 'Back', 'Start', 'RStick', 'LStick'];
+let prevBleButtons: Record<BleBtnKey, boolean> = {
+  A: false,
+  B: false,
+  X: false,
+  Y: false,
+  Back: false,
+  Start: false,
+  RStick: false,
+  LStick: false,
+};
+
+function setBleConnected(on: boolean, name = ''): void {
+  bleState.connected = on;
+  document.body.classList.toggle('ble-connected', on);
+  bus.emit('pad-connection', {
+    kind: 'ble',
+    connected: on,
+    label: name || bleState.deviceName,
+  });
+}
+
+/** BLE 面鍵邊緣（A=起飛 B=降落 X=重置，對齊操作說明） */
+export function bleButtonEdges(): { takeoff: boolean; land: boolean; reset: boolean } {
+  const b = bleState.pad?.buttons;
+  if (!b) return { takeoff: false, land: false, reset: false };
+  const edge = (k: BleBtnKey, prev: boolean): boolean => !!b[k] && !prev;
+  return {
+    takeoff: edge('A', prevBleButtons.A),
+    land: edge('B', prevBleButtons.B),
+    reset: edge('X', prevBleButtons.X),
+  };
+}
+
+export function syncBleButtonSample(): void {
+  const b = bleState.pad?.buttons;
+  if (!b) return;
+  for (const k of BLE_BTN_KEYS) prevBleButtons[k] = b[k];
+}
 
 /**
  * BLE 搖桿的語意軸讀值（虛擬搖桿慣例：推上 = 負 = 上升 / 前進）。
@@ -84,8 +126,10 @@ function setBleButton(text: string, connected: boolean): void {
 
 /** 斷線 / 連線失敗 → 重置狀態 + 歸零搖桿輸入（對齊 legacy onStatus 的斷線分支） */
 function resetToDisconnected(): void {
-  bleState.connected = false;
   bleState.pad = null;
+  bleState.deviceName = '';
+  for (const k of BLE_BTN_KEYS) prevBleButtons[k] = false;
+  setBleConnected(false);
   setBleButton('連線搖桿', false);
 }
 
@@ -128,10 +172,12 @@ async function attachAndListen(dev: BleDevice): Promise<void> {
     const pad = decodeFrame(value);
     if (pad) {
       bleState.pad = pad;
-      bleState.connected = true;
+      syncBleButtonSample();
+      if (!bleState.connected) setBleConnected(true, dev.name ?? bleState.deviceName);
     }
   });
-  bleState.connected = true;
+  setBleConnected(true, dev.name ?? 'pyController');
+  bleState.deviceName = dev.name ?? 'pyController';
   setBleButton('已連線', true);
 }
 

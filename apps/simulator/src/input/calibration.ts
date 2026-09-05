@@ -22,7 +22,7 @@ export interface GamepadConfig {
 }
 
 export const gamepadConfig: GamepadConfig = {
-  deadzone: parseFloat(new URLSearchParams(location.search).get('dz') ?? '') || 0.1,
+  deadzone: 0.1,
   invertThrottle: false,
   invertPitch: false,
   axes: { throttle: 1, pitch: 3, yaw: 0, roll: 2 },
@@ -33,9 +33,55 @@ export const gamepadConfig: GamepadConfig = {
 
 export const CALIB_LS_KEY = 'creafly_gamepad_calib';
 const VERSION_LS_KEY = 'creafly_app_version';
-// 沿用 legacy 的版本碼機制與現值（v1.5.x 校正資料格式相容）——
-// 已在 legacy 校正過的裝置無痛沿用；未來校正資料格式改變時 bump 此值即自動清除舊資料。
+// 已在 legacy 校正過的裝置無痛沿用；格式改變時 bump 即自動清除舊資料。
 export const CALIB_VERSION = '1.5.1';
+
+const DEFAULT_CONFIG: GamepadConfig = {
+  deadzone: 0.1,
+  invertThrottle: false,
+  invertPitch: false,
+  axes: { throttle: 1, pitch: 3, yaw: 0, roll: 2 },
+  buttonMap: { takeoff: 0, land: 1, reset: 2 },
+  center: [0, 0, 0, 0],
+  range: [1, 1, 1, 1],
+};
+
+/** URL 快速 preset（教室常見手把；對齊 legacy ?map= / ?inv=） */
+export function applyUrlPresets(): void {
+  const q = new URLSearchParams(location.search);
+  const map = q.get('map');
+  if (map === 'switch') {
+    gamepadConfig.buttonMap = { takeoff: 1, land: 0, reset: 3 };
+  } else if (map === 'ipega') {
+    gamepadConfig.invertThrottle = true;
+    gamepadConfig.buttonMap = { takeoff: 9, land: 8, reset: 0 };
+  }
+  const inv = q.get('inv');
+  if (inv === 'y' || inv === '1') {
+    gamepadConfig.invertThrottle = true;
+    gamepadConfig.invertPitch = true;
+  }
+  const dz = parseFloat(q.get('dz') ?? '');
+  if (!Number.isNaN(dz) && dz > 0) gamepadConfig.deadzone = dz;
+}
+
+/** 重置為預設並清除 localStorage 校正資料 */
+export function resetGamepadConfig(): void {
+  Object.assign(gamepadConfig, {
+    ...DEFAULT_CONFIG,
+    center: [...DEFAULT_CONFIG.center],
+    range: [...DEFAULT_CONFIG.range],
+    axes: { ...DEFAULT_CONFIG.axes },
+    buttonMap: { ...DEFAULT_CONFIG.buttonMap },
+  });
+  applyUrlPresets();
+  try {
+    localStorage.removeItem(CALIB_LS_KEY);
+  } catch {
+    /* ignore */
+  }
+  saveGamepadConfig();
+}
 
 /** 載入上次校正（版本碼不符自動清除）。initGamepad 時呼叫一次。 */
 export function loadGamepadConfig(): void {
@@ -45,6 +91,7 @@ export function loadGamepadConfig(): void {
       localStorage.removeItem(CALIB_LS_KEY);
       localStorage.setItem(VERSION_LS_KEY, CALIB_VERSION);
       console.log(`[校正] 版本碼不符（stored: ${storedVer}）→ 已清掉舊校正資料`);
+      applyUrlPresets();
       return;
     }
     const saved = localStorage.getItem(CALIB_LS_KEY);
@@ -56,6 +103,7 @@ export function loadGamepadConfig(): void {
   } catch (e) {
     console.warn('[校正] 載入校正設定失敗', e);
   }
+  applyUrlPresets();
 }
 
 export function saveGamepadConfig(): void {

@@ -1,6 +1,6 @@
 // 輸入彙整：鍵盤 + 虛擬搖桿/BLE + 實體搖桿 疊加成一個 ControlFrame（語意軸），
-// 每個物理 tick 由主迴圈取用。優先級對齊 legacy applyManualControls：
-// 實體搖桿 > BLE（連線時覆寫虛擬搖桿四軸）> 鍵盤/虛擬搖桿（可疊加）。
+// 每個物理 tick 由主迴圈取用。搖桿優先序：實體 Gamepad > BLE > 虛擬搖桿（互斥，不疊加）。
+// 鍵盤可與搖桿並用（教室常見：鍵盤微調 + 手把主控）。
 import type { ControlFrame } from '../core/physics';
 import { autoLand } from '../core/physics';
 import { droneState, YAW_KEY_RATE, YAW_STICK_RATE } from '../core/droneState';
@@ -8,60 +8,97 @@ import { resetMission } from '../core/level';
 import { toast } from '../core/events';
 import { keys, initKeyboard } from './keyboard';
 import { virtualStick, initVirtualJoystick, isTouchDevice } from './joystick';
-import { initGamepad, pollGamepad, gamepadAxes, gamepadState, isButtonJustPressed } from './gamepad';
+import {
+  initGamepad,
+  pollGamepad,
+  gamepadAxes,
+  gamepadState,
+  isButtonJustPressed,
+} from './gamepad';
 import { gamepadConfig, initCalibration, tickCalibration, calibration } from './calibration';
-import { initBle, bleAxes, bleState } from './ble';
+import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
 
 export { isTouchDevice };
+
+type StickAxes = { throttle: number; yaw: number; pitch: number; roll: number };
 
 export function initInputs(opts: { toggleView: () => void }): void {
   initKeyboard(opts);
   initVirtualJoystick();
   initGamepad();
-  // 校正精靈：注入 gamepad 讀值來源（避免 calibration ↔ gamepad 循環依賴）+ 載入上次校正
   initCalibration(() => ({
     connected: gamepadState.connected,
     axes: gamepadState.axes,
     buttons: gamepadState.buttons,
   }));
-  initBle(); // pyController 藍牙搖桿（不支援的瀏覽器按鈕自動隱藏）
+  initBle();
+}
+
+function handlePadButtons(
+  takeoff: boolean,
+  land: boolean,
+  reset: boolean,
+  source: string,
+): void {
+  if (takeoff && droneState.isGrounded) {
+    droneState.isGrounded = false;
+    droneState.isFlying = true;
+    toast(`🛫 起飛（${source}）`, 'success');
+  }
+  if (land && droneState.isFlying) {
+    autoLand();
+    toast(`🛬 降落（${source}）`, 'success');
+  }
+  if (reset) {
+    resetMission();
+    toast(`已重置（${source}）`);
+  }
 }
 
 /** 每 tick：輪詢實體搖桿 + 校正精靈取樣 + 處理搖桿按鈕（起飛/降落/重置） */
 export function tickInputDevices(manualLocked: boolean): void {
   pollGamepad();
-  tickCalibration(); // 校正中：收集軸資料 / 偵測按鍵邊緣
-  if (!gamepadState.connected || manualLocked || calibration.active) return;
-  if (isButtonJustPressed(gamepadConfig.buttonMap.takeoff) && droneState.isGrounded) {
-    droneState.isGrounded = false;
-    droneState.isFlying = true;
-    toast('🛫 起飛（搖桿）', 'success');
+  tickCalibration();
+  if (manualLocked || calibration.active) return;
+
+  if (gamepadState.connected) {
+    handlePadButtons(
+      isButtonJustPressed(gamepadConfig.buttonMap.takeoff),
+      isButtonJustPressed(gamepadConfig.buttonMap.land),
+      isButtonJustPressed(gamepadConfig.buttonMap.reset),
+      '搖桿',
+    );
+    return;
   }
-  if (isButtonJustPressed(gamepadConfig.buttonMap.land) && droneState.isFlying) {
-    autoLand();
-    toast('🛬 降落（搖桿）', 'success');
+
+  if (bleState.connected) {
+    const edges = bleButtonEdges();
+    handlePadButtons(edges.takeoff, edges.land, edges.reset, 'BLE');
+    syncBleButtonSample();
   }
-  if (isButtonJustPressed(gamepadConfig.buttonMap.reset)) {
-    resetMission();
-    toast('已重置（搖桿）');
-  }
+}
+
+function activeStickAxes(): StickAxes {
+  if (!calibration.active && gamepadState.connected) return gamepadAxes();
+  const ble = bleAxes();
+  if (ble) return ble;
+  return virtualStick;
+}
+
+function stickHasInput(s: StickAxes): boolean {
+  return s.throttle !== 0 || s.yaw !== 0 || s.pitch !== 0 || s.roll !== 0;
 }
 
 /** 彙整本 tick 的手動控制輸入 */
 export function collectControlFrame(): ControlFrame {
-  // Space 按住 = 緊急停止最高優先權：壓制所有裝置的輸入（含 WASD / 虛擬搖桿 / 實體搖桿），
-  // anyInput 恆為 false → 凍結不會被其他按鍵解除；放開 Space 後推桿才恢復飛行。
-  // （凍結本身由 keyboard.ts 的 keydown 邊緣觸發 emergencyStop()）
   if (keys[' ']) {
     return { lift: 0, forward: 0, right: 0, yawDelta: 0, wantsTakeoff: false, anyInput: false };
   }
-  // 校正中：不吃搖桿輸入（overlay 蓋住畫面時亂推桿不該讓機子亂飛）
-  const gp = calibration.active
+
+  const stick = calibration.active
     ? { throttle: 0, yaw: 0, pitch: 0, roll: 0 }
-    : gamepadAxes();
-  // BLE 連線中：覆寫虛擬搖桿四軸（對齊 legacy applyBleControls 直接覆寫 joystick）
-  const ble = bleAxes();
-  const vs = ble ?? virtualStick;
+    : activeStickAxes();
+
   const frame: ControlFrame = {
     lift: 0,
     forward: 0,
@@ -71,7 +108,6 @@ export function collectControlFrame(): ControlFrame {
     anyInput: false,
   };
 
-  // --- 鍵盤 ---
   if (keys['arrowup']) {
     frame.lift += 1;
     frame.wantsTakeoff = true;
@@ -84,25 +120,14 @@ export function collectControlFrame(): ControlFrame {
   if (keys['arrowleft']) frame.yawDelta += YAW_KEY_RATE;
   if (keys['arrowright']) frame.yawDelta -= YAW_KEY_RATE;
 
-  // --- 虛擬搖桿 / BLE（推上 = 負 = 上升/前進） ---
-  if (vs.throttle !== 0) {
-    frame.lift += -vs.throttle;
-    if (vs.throttle < -0.3) frame.wantsTakeoff = true;
+  if (stick.throttle !== 0) {
+    frame.lift += -stick.throttle;
+    if (stick.throttle < -0.3) frame.wantsTakeoff = true;
   }
-  if (vs.pitch !== 0) frame.forward += -vs.pitch;
-  if (vs.roll !== 0) frame.right += vs.roll;
-  if (vs.yaw !== 0) frame.yawDelta += -vs.yaw * YAW_STICK_RATE;
+  if (stick.pitch !== 0) frame.forward += -stick.pitch;
+  if (stick.roll !== 0) frame.right += stick.roll;
+  if (stick.yaw !== 0) frame.yawDelta += -stick.yaw * YAW_STICK_RATE;
 
-  // --- 實體搖桿（校正 center/range + 死區） ---
-  if (gp.throttle !== 0) {
-    frame.lift += -gp.throttle;
-    if (gp.throttle < -0.5) frame.wantsTakeoff = true;
-  }
-  if (gp.pitch !== 0) frame.forward += -gp.pitch;
-  if (gp.roll !== 0) frame.right += gp.roll;
-  if (gp.yaw !== 0) frame.yawDelta += -gp.yaw * YAW_STICK_RATE;
-
-  // --- 有任何輸入？（解除緊急停止用；對齊 legacy isControlInputActive） ---
   frame.anyInput =
     !!(
       keys['w'] ||
@@ -114,14 +139,11 @@ export function collectControlFrame(): ControlFrame {
       keys['arrowleft'] ||
       keys['arrowright']
     ) ||
-    vs.throttle !== 0 ||
-    vs.yaw !== 0 ||
-    vs.pitch !== 0 ||
-    vs.roll !== 0 ||
-    (!calibration.active &&
-      gamepadState.connected &&
-      gamepadState.axes.some((v) => Math.abs(v) > 0.3)) ||
-    (bleState.connected && !!ble && (ble.throttle !== 0 || ble.yaw !== 0 || ble.pitch !== 0 || ble.roll !== 0));
+    (!calibration.active && stickHasInput(stick));
 
   return frame;
+}
+
+export function isPhysicalPadActive(): boolean {
+  return gamepadState.connected || bleState.connected;
 }

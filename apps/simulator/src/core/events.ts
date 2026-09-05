@@ -125,6 +125,8 @@ export interface CoreEventMap {
   'calib-live': { axes: number[]; buttons: boolean[] };
   /** 校正結束（saved = 是否儲存套用） */
   'calib-ended': { saved: boolean };
+  /** 實體搖桿 / BLE 連線狀態變化（設定面板、連線提示訂閱） */
+  'pad-connection': { kind: 'gamepad' | 'ble'; connected: boolean; label?: string };
 }
 
 type Handler<T> = (payload: T) => void;
