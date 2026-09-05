@@ -1,6 +1,6 @@
 // 關卡系統 — 載入 chapter JSON、rings/passZones/balloons 判定、returnHome、計時。
 // 行為對齊 legacy main.js §4 / §12（checkRingCollisions / checkPassZones / checkBalloons）。
-import type { LevelDef } from '@creafly/shared';
+import type { LevelDef, BalloonDef } from '@creafly/shared';
 import {
   isChapterDef,
   normalizeDeg,
@@ -11,6 +11,11 @@ import {
   detHypot2,
   detHypot3,
   ringPassRadius,
+  balloonPopRadius,
+  ringBobAmp,
+  ringSpin,
+  zoneTriggerRadius,
+  obstacleIsCollidable,
 } from '@creafly/shared';
 import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
@@ -25,6 +30,8 @@ export interface MissionRing {
   label?: string;
   diameter?: number;
   thickness?: number;
+  spin?: number;
+  bobAmp?: number;
   faceYaw?: number;
   faceTol?: number;
   passed: boolean;
@@ -58,7 +65,7 @@ export const levelState = {
   rings: [] as MissionRing[],
   ringsCollected: 0,
   zoneProgress: [] as boolean[],
-  balloons: [] as { x: number; y: number; z: number; popped: boolean }[],
+  balloons: [] as (BalloonDef & { popped: boolean })[],
   balloonsCollected: 0,
   balloonsDone: false,
   manualComplete: false,
@@ -97,8 +104,15 @@ export interface LoadLevelOptions {
 }
 
 /** ring 上下漂浮的即時世界 Y（core 判定與 render 視覺共用同一公式；nowMs = 模擬時間） */
-export function ringWorldY(index: number, baseY: number, nowMs: number): number {
-  return baseY + detSin(nowMs * 0.001 + index) * 0.2;
+export function ringWorldY(
+  index: number,
+  baseY: number,
+  nowMs: number,
+  bobAmp?: number,
+): number {
+  const amp = bobAmp ?? 0.2;
+  if (amp <= 0) return baseY;
+  return baseY + detSin(nowMs * 0.001 + index) * amp;
 }
 
 export function levelElapsedMs(): number {
@@ -181,7 +195,7 @@ export function applyLoadLevel(levelId: string): void {
   // 實心障礙 → 物理層碰撞資料
   setSolidObstacles(
     (level.obstacles ?? [])
-      .filter((o) => o.solid)
+      .filter((o) => obstacleIsCollidable(o))
       .map((o) => ({ x: o.x, y: o.y, z: o.z, half: o.size / 2 })),
   );
 
@@ -301,7 +315,7 @@ function checkRings(nowMs: number): void {
   const p = droneState.position;
   s.rings.forEach((ring, i) => {
     if (ring.passed) return;
-    const ry = ringWorldY(i, ring.y, nowMs);
+    const ry = ringWorldY(i, ring.y, nowMs, ringBobAmp(ring));
     const dist = detHypot3(p.x - ring.x, p.y - ry, p.z - ring.z);
     if (dist >= ringPassRadius(ring)) return;
     // 旋轉鑽圈關：faceYaw 圈必須機頭對準才算穿過
@@ -386,6 +400,9 @@ function checkZones(): void {
     // 必須照順序：前一步沒完成，這一步尚未啟用
     if (i > 0 && !s.zoneProgress[i - 1]) return;
     if (zone.type === 'altitude') {
+      const dx = p.x - zone.x;
+      const dz = p.z - zone.z;
+      if (detHypot2(dx, dz) > zoneTriggerRadius(zone)) return;
       if (zone.minY !== undefined && p.y < zone.minY) return;
       if (zone.maxY !== undefined && p.y > zone.maxY) return;
     } else if (zone.type === 'position') {
@@ -396,6 +413,9 @@ function checkZones(): void {
       if (zone.minY !== undefined && p.y < zone.minY) return;
       if (zone.maxY !== undefined && p.y > zone.maxY) return;
     } else if (zone.type === 'heading') {
+      const dx = p.x - zone.x;
+      const dz = p.z - zone.z;
+      if (detHypot2(dx, dz) > zoneTriggerRadius(zone)) return;
       const yawDeg = normalizeDeg(droneState.yaw * RAD2DEG);
       const target = normalizeDeg(zone.targetYaw);
       let diff = Math.abs(yawDeg - target);
@@ -426,7 +446,7 @@ function checkBalloons(): void {
   const p = droneState.position;
   s.balloons.forEach((b, i) => {
     if (b.popped) return;
-    if (detHypot3(p.x - b.x, p.y - b.y, p.z - b.z) < 1.4) {
+    if (detHypot3(p.x - b.x, p.y - b.y, p.z - b.z) < balloonPopRadius(b)) {
       b.popped = true;
       s.balloonsCollected++;
       bus.emit('balloon-popped', {

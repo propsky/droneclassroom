@@ -1,13 +1,7 @@
 // 自訂關卡編輯器 — 俯視 2D、格線吸附、物件選取與座標面板、素材庫。
-import type {
-  AltitudeZone,
-  HeadingZone,
-  LevelDef,
-  PassZoneDef,
-  PositionZone,
-  TeacherLevelKitBrief,
-} from '@creafly/shared';
+import type { LevelDef, TeacherLevelKitBrief } from '@creafly/shared';
 import {
+  balloonDiameter,
   EDITOR_HALF,
   EDITOR_MAX_Y,
   EDITOR_WORLD,
@@ -48,6 +42,19 @@ import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
 import { openLevelGoalWizard } from './levelGoalWizard';
+import {
+  createPropsController,
+  propsPanelHtml,
+  type EditorSelection,
+} from './levelEditorProps';
+import {
+  DEFAULT_BALLOON_COLORS,
+  DEFAULT_OBSTACLE_SOFT_COLOR,
+  DEFAULT_OBSTACLE_SOLID_COLOR,
+  DEFAULT_RING_COLOR,
+  obstacleDefaultColor,
+  parseLevelColor,
+} from '@creafly/shared';
 
 const HALF = EDITOR_HALF;
 const WORLD = EDITOR_WORLD;
@@ -57,13 +64,9 @@ export interface LevelEditorPanel {
   destroy(): void;
 }
 
-type ObjKind = 'ring' | 'obstacle' | 'balloon' | 'zone';
+type ObjKind = EditorSelection['kind'];
+type Selection = EditorSelection;
 type PlaceMode = 'select' | 'ring' | 'obstacle-solid' | 'obstacle-soft' | 'balloon' | 'zone';
-
-interface Selection {
-  kind: ObjKind;
-  index: number;
-}
 
 function errText(err: unknown, doing: string): string {
   if (err instanceof ApiError) {
@@ -107,13 +110,6 @@ function parseLevel(def: Record<string, unknown>, levelId: string, title: string
     balloons: Array.isArray(raw.balloons) ? [...raw.balloons] : [],
   };
 }
-
-const KIND_LABEL: Record<ObjKind, string> = {
-  ring: '穿圈',
-  obstacle: '障礙',
-  balloon: '氣球',
-  zone: '任務點',
-};
 
 export interface LevelEditorOptions {
   /** 開啟後自動顯示教學目標精靈 */
@@ -225,69 +221,7 @@ export function openLevelEditor(
               </dl>
               <p class="note">滾輪調整放置高度 · 側視可拖曳調 Y</p>
             </div>
-            <div class="lvl-props" id="le-props" hidden>
-              <h3 class="lvl-props-title" id="le-props-title">選取物件</h3>
-              <div class="lvl-props-grid">
-                <div class="field"><label class="field-label" for="le-px">X（左右）</label><input id="le-px" type="number" step="0.5" class="mono"></div>
-                <div class="field"><label class="field-label" for="le-pz">Z（前後）</label><input id="le-pz" type="number" step="0.5" class="mono"></div>
-                <div class="field" id="le-py-wrap">
-                  <label class="field-label" for="le-py">Y（高度）<span id="le-py-readout" class="mono le-py-readout"></span></label>
-                  <input id="le-py-range" type="range" min="0" max="8" step="0.5" class="le-height-range" aria-label="高度滑桿">
-                  <input id="le-py" type="number" step="0.5" min="0" max="8" class="mono">
-                  <div class="le-height-presets" id="le-height-presets">
-                    <button type="button" class="btn btn-ghost btn-xs" data-y="0.5">地面</button>
-                    <button type="button" class="btn btn-ghost btn-xs" data-y="1.5">低空</button>
-                    <button type="button" class="btn btn-ghost btn-xs" data-y="2">穿圈</button>
-                    <button type="button" class="btn btn-ghost btn-xs" data-y="3.5">中高</button>
-                    <button type="button" class="btn btn-ghost btn-xs" data-y="5">高空</button>
-                  </div>
-                  <p class="note">PgUp / PgDn 微調高度</p>
-                </div>
-                <div class="field" id="le-ring-diam-wrap" hidden>
-                  <label class="field-label" for="le-ring-diam">圈徑（m）<span id="le-ring-diam-readout" class="mono le-py-readout"></span></label>
-                  <input id="le-ring-diam" type="range" min="2" max="4" step="0.5" class="le-height-range" aria-label="圈徑">
-                  <div class="le-height-presets" id="le-ring-diam-presets">
-                    <button type="button" class="btn btn-ghost btn-xs" data-diam="2">小</button>
-                    <button type="button" class="btn btn-ghost btn-xs" data-diam="3">標準</button>
-                    <button type="button" class="btn btn-ghost btn-xs" data-diam="4">大</button>
-                  </div>
-                </div>
-                <div class="field" id="le-size-wrap" hidden><label class="field-label" for="le-size">邊長</label><input id="le-size" type="number" step="0.5" min="0.5" max="6" class="mono"></div>
-                <div class="field" id="le-label-wrap" hidden><label class="field-label" for="le-label">標籤</label><input id="le-label" type="text" maxlength="40"></div>
-                <div class="field" id="le-solid-wrap" hidden><label class="check-row"><input type="checkbox" id="le-solid">實心碰撞（會擋住）</label></div>
-                <div class="field" id="le-face-wrap" hidden>
-                  <label class="field-label" for="le-face-yaw">機頭朝向 yaw（度，空=不限）</label>
-                  <input id="le-face-yaw" type="number" step="15" min="-180" max="180" class="mono" placeholder="不限">
-                  <label class="field-label" for="le-face-tol">朝向容差（度）</label>
-                  <input id="le-face-tol" type="number" step="5" min="5" max="90" value="35" class="mono">
-                </div>
-                <div id="le-zone-wrap" hidden>
-                  <div class="field">
-                    <label class="field-label" for="le-zone-type">任務類型</label>
-                    <select id="le-zone-type" class="field-input">
-                      <option value="position">位置區域</option>
-                      <option value="altitude">高度</option>
-                      <option value="heading">朝向</option>
-                    </select>
-                  </div>
-                  <div class="lvl-props-grid" id="le-zone-position">
-                    <div class="field"><label class="field-label" for="le-zone-minx">minX</label><input id="le-zone-minx" type="number" step="0.5" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-maxx">maxX</label><input id="le-zone-maxx" type="number" step="0.5" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-minz">minZ</label><input id="le-zone-minz" type="number" step="0.5" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-maxz">maxZ</label><input id="le-zone-maxz" type="number" step="0.5" class="mono"></div>
-                  </div>
-                  <div class="lvl-props-grid" id="le-zone-altitude" hidden>
-                    <div class="field"><label class="field-label" for="le-zone-miny">minY</label><input id="le-zone-miny" type="number" step="0.5" min="0" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-maxy">maxY</label><input id="le-zone-maxy" type="number" step="0.5" min="0" class="mono"></div>
-                  </div>
-                  <div class="lvl-props-grid" id="le-zone-heading" hidden>
-                    <div class="field"><label class="field-label" for="le-zone-yaw">目標 yaw</label><input id="le-zone-yaw" type="number" step="15" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-tol">容差</label><input id="le-zone-tol" type="number" step="5" min="5" class="mono"></div>
-                  </div>
-                </div>
-              </div>
-              <button type="button" class="btn btn-ghost btn-sm" id="le-del-sel">刪除選取</button>
-            </div>
+            ${propsPanelHtml()}
           </aside>
         </div>
       </div>
@@ -302,8 +236,6 @@ export function openLevelEditor(
   const canvas = q<HTMLCanvasElement>('#le-canvas');
   const ctx = canvas.getContext('2d')!;
   const saveHint = q<HTMLElement>('#le-save-hint');
-  const propsPanel = q<HTMLElement>('#le-props');
-  const inspectorIdle = q<HTMLElement>('#le-inspector-idle');
   const cursorEl = q<HTMLElement>('#le-cursor');
 
   let levelPkLocal = levelPk;
@@ -357,12 +289,6 @@ export function openLevelEditor(
     q<HTMLElement>('#le-readout-x').textContent = String(x);
     q<HTMLElement>('#le-readout-z').textContent = String(z);
     cursorEl.textContent = viewMode === 'side' ? `側視 · X ${x}` : `X ${x} · Z ${z}`;
-  };
-
-  const syncInspectorVisibility = (): void => {
-    const hasSel = !!selection;
-    propsPanel.hidden = !hasSel;
-    inspectorIdle.hidden = hasSel;
   };
 
   const isSelected = (kind: ObjKind, index: number): boolean =>
@@ -524,7 +450,9 @@ export function openLevelEditor(
       const [ox, oz] = project(obs.x, obs.z, obs.y);
       const r = ((obs.size ?? 1) / WORLD) * w * 0.5;
       const sel = isSelected('obstacle', i);
-      ctx.fillStyle = heightHueColor(obs.y, obs.solid ? 0.75 : 0.5);
+      const fill = parseLevelColor(obs.color, obstacleDefaultColor(!!obs.solid));
+      ctx.globalAlpha = obs.solid ? 0.85 : 0.6;
+      ctx.fillStyle = fill;
       if (viewMode === 'iso') {
         ctx.beginPath();
         ctx.ellipse(ox, oz, r, r * 0.55, 0, 0, Math.PI * 2);
@@ -544,14 +472,19 @@ export function openLevelEditor(
           ctx.strokeRect(ox - r - 2, oz - r - 2, r * 2 + 4, r * 2 + 4);
         }
       }
+      ctx.globalAlpha = 1;
     });
 
     (level.balloons ?? []).forEach((b, i) => {
       const [bx, bz] = project(b.x, b.z, b.y);
-      ctx.fillStyle = heightHueColor(b.y, 0.8);
+      const bFill = parseLevelColor(b.color, DEFAULT_BALLOON_COLORS[i % DEFAULT_BALLOON_COLORS.length]!);
+      const bR = Math.max(8, ringPxRadius(balloonDiameter(b)) * 0.45);
+      ctx.fillStyle = bFill;
+      ctx.globalAlpha = 0.9;
       ctx.beginPath();
-      ctx.arc(bx, bz, viewMode === 'iso' ? 8 : 10, 0, Math.PI * 2);
+      ctx.arc(bx, bz, viewMode === 'iso' ? bR * 0.85 : bR, 0, Math.PI * 2);
       ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.fillStyle = '#cbd5e1';
       ctx.font = '8px monospace';
       ctx.fillText(`${b.y}m`, bx - 10, bz - 12);
@@ -598,7 +531,7 @@ export function openLevelEditor(
       const [rx, rz] = project(ring.x, ring.z, ring.y);
       const sel = isSelected('ring', i);
       const rPx = ringPxRadius(ringDiameter(ring));
-      ctx.strokeStyle = sel ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : heightHueColor(ring.y, 0.95);
+      ctx.strokeStyle = sel ? '#60a5fa' : ring.faceYaw != null ? '#f87171' : parseLevelColor(ring.color, DEFAULT_RING_COLOR);
       ctx.lineWidth = sel ? 3 : 2;
       ctx.beginPath();
       ctx.arc(rx, rz, rPx, 0, Math.PI * 2);
@@ -618,7 +551,6 @@ export function openLevelEditor(
     if (viewMode === 'side') drawSideView(w, h);
     else drawPlanView();
     updateEmptyBanner();
-    syncInspectorVisibility();
   };
 
   const syncFormFromLevel = (): void => {
@@ -669,193 +601,31 @@ export function openLevelEditor(
     }
   };
 
+  const propsCtrl = createPropsController({
+    root: backdrop,
+    getLevel: () => level,
+    setLevel: (next) => {
+      level = next;
+    },
+    getSelection: () => selection,
+    setSelection: (sel) => {
+      selection = sel;
+    },
+    getSnapStep,
+    syncPyControls,
+    redraw: () => draw(),
+    scheduleSave,
+    isSyncing: () => syncingProps,
+    setSyncing: (v) => {
+      syncingProps = v;
+    },
+  });
+  propsCtrl.bind();
+
   const setSelection = (sel: Selection | null): void => {
     selection = sel;
-    syncPropsPanel();
+    propsCtrl.sync();
     draw();
-  };
-
-  const syncPropsPanel = (): void => {
-    syncInspectorVisibility();
-    if (!selection) return;
-    const { kind, index } = selection;
-    q<HTMLElement>('#le-props-title').textContent = `${KIND_LABEL[kind]} #${index + 1}`;
-
-    const pyWrap = q<HTMLElement>('#le-py-wrap');
-    const sizeWrap = q<HTMLElement>('#le-size-wrap');
-    const labelWrap = q<HTMLElement>('#le-label-wrap');
-    const solidWrap = q<HTMLElement>('#le-solid-wrap');
-    const faceWrap = q<HTMLElement>('#le-face-wrap');
-    const zoneWrap = q<HTMLElement>('#le-zone-wrap');
-    const ringDiamWrap = q<HTMLElement>('#le-ring-diam-wrap');
-
-    syncingProps = true;
-    faceWrap.hidden = true;
-    zoneWrap.hidden = true;
-    ringDiamWrap.hidden = true;
-    if (kind === 'ring') {
-      const r = level.rings![index];
-      if (!r) return setSelection(null);
-      q<HTMLInputElement>('#le-px').value = String(r.x);
-      q<HTMLInputElement>('#le-pz').value = String(r.z);
-      syncPyControls(r.y);
-      const diam = ringDiameter(r);
-      q<HTMLInputElement>('#le-ring-diam').value = String(diam);
-      q<HTMLElement>('#le-ring-diam-readout').textContent = ` ${diam.toFixed(1)} m`;
-      pyWrap.hidden = false;
-      ringDiamWrap.hidden = false;
-      sizeWrap.hidden = true;
-      labelWrap.hidden = false;
-      solidWrap.hidden = true;
-      faceWrap.hidden = false;
-      q<HTMLInputElement>('#le-label').value = r.label ?? '';
-      q<HTMLInputElement>('#le-face-yaw').value = r.faceYaw != null ? String(r.faceYaw) : '';
-      q<HTMLInputElement>('#le-face-tol').value = String(r.faceTol ?? 35);
-    } else if (kind === 'obstacle') {
-      const o = level.obstacles![index];
-      if (!o) return setSelection(null);
-      q<HTMLInputElement>('#le-px').value = String(o.x);
-      q<HTMLInputElement>('#le-pz').value = String(o.z);
-      syncPyControls(o.y);
-      q<HTMLInputElement>('#le-size').value = String(o.size ?? 1);
-      q<HTMLInputElement>('#le-solid').checked = !!o.solid;
-      pyWrap.hidden = false;
-      sizeWrap.hidden = false;
-      labelWrap.hidden = true;
-      solidWrap.hidden = false;
-    } else if (kind === 'balloon') {
-      const b = level.balloons![index];
-      if (!b) return setSelection(null);
-      q<HTMLInputElement>('#le-px').value = String(b.x);
-      q<HTMLInputElement>('#le-pz').value = String(b.z);
-      syncPyControls(b.y);
-      pyWrap.hidden = false;
-      sizeWrap.hidden = true;
-      labelWrap.hidden = true;
-      solidWrap.hidden = true;
-    } else {
-      const z = level.passZones![index];
-      if (!z) return setSelection(null);
-      q<HTMLInputElement>('#le-px').value = String(z.x);
-      q<HTMLInputElement>('#le-pz').value = String(z.z);
-      q<HTMLInputElement>('#le-label').value = z.label;
-      pyWrap.hidden = true;
-      sizeWrap.hidden = true;
-      labelWrap.hidden = false;
-      solidWrap.hidden = true;
-      zoneWrap.hidden = false;
-      const ztype = z.type ?? 'position';
-      q<HTMLSelectElement>('#le-zone-type').value = ztype;
-      q<HTMLElement>('#le-zone-position').hidden = ztype !== 'position';
-      q<HTMLElement>('#le-zone-altitude').hidden = ztype !== 'altitude';
-      q<HTMLElement>('#le-zone-heading').hidden = ztype !== 'heading';
-      if (ztype === 'position') {
-        const pz = z as PositionZone;
-        q<HTMLInputElement>('#le-zone-minx').value = String(pz.minX ?? z.x - 1);
-        q<HTMLInputElement>('#le-zone-maxx').value = String(pz.maxX ?? z.x + 1);
-        q<HTMLInputElement>('#le-zone-minz').value = String(pz.minZ ?? z.z - 1);
-        q<HTMLInputElement>('#le-zone-maxz').value = String(pz.maxZ ?? z.z + 1);
-      } else if (ztype === 'altitude') {
-        const az = z as AltitudeZone;
-        q<HTMLInputElement>('#le-zone-miny').value = String(az.minY ?? 1);
-        q<HTMLInputElement>('#le-zone-maxy').value = String(az.maxY ?? 3);
-      } else if (ztype === 'heading') {
-        const hz = z as HeadingZone;
-        q<HTMLInputElement>('#le-zone-yaw').value = String(hz.targetYaw ?? 0);
-        q<HTMLInputElement>('#le-zone-tol').value = String(hz.tolerance ?? 30);
-      }
-    }
-    syncingProps = false;
-  };
-
-  const applyPropsToSelection = (): void => {
-    if (!selection || syncingProps) return;
-    const x = snapClampXZ(Number(q<HTMLInputElement>('#le-px').value) || 0, 0, snapStep).x;
-    const z = snapClampXZ(0, Number(q<HTMLInputElement>('#le-pz').value) || 0, snapStep).z;
-    const y = Number(q<HTMLInputElement>('#le-py').value) || 2;
-
-    if (selection.kind === 'ring') {
-      const rings = [...(level.rings ?? [])];
-      const r = rings[selection.index];
-      if (!r) return;
-      const faceRaw = q<HTMLInputElement>('#le-face-yaw').value.trim();
-      const faceYaw = faceRaw === '' ? undefined : Number(faceRaw);
-      const faceTol = Number(q<HTMLInputElement>('#le-face-tol').value) || 35;
-      const diam = Number(q<HTMLInputElement>('#le-ring-diam').value) || ringDiameter(r);
-      rings[selection.index] = {
-        ...r,
-        x,
-        z,
-        y,
-        diameter: diam === 3 ? undefined : diam,
-        label: q<HTMLInputElement>('#le-label').value.trim() || r.label,
-        faceYaw,
-        faceTol: faceYaw != null ? faceTol : undefined,
-      };
-      level.rings = rings;
-    } else if (selection.kind === 'obstacle') {
-      const obs = [...(level.obstacles ?? [])];
-      const o = obs[selection.index];
-      if (!o) return;
-      const solid = q<HTMLInputElement>('#le-solid').checked;
-      obs[selection.index] = {
-        ...o,
-        x,
-        z,
-        y,
-        size: Number(q<HTMLInputElement>('#le-size').value) || 1,
-        solid,
-        type: solid ? 'cube' : 'soft-cube',
-      };
-      level.obstacles = obs;
-    } else if (selection.kind === 'balloon') {
-      const balloons = [...(level.balloons ?? [])];
-      const b = balloons[selection.index];
-      if (!b) return;
-      balloons[selection.index] = { ...b, x, z, y };
-      level.balloons = balloons;
-    } else {
-      const zones = [...(level.passZones ?? [])];
-      const zn = zones[selection.index];
-      if (!zn) return;
-      const ztype = q<HTMLSelectElement>('#le-zone-type').value as PassZoneDef['type'];
-      const label = q<HTMLInputElement>('#le-label').value.trim() || zn.label;
-      let next: PassZoneDef;
-      if (ztype === 'altitude') {
-        next = {
-          type: 'altitude',
-          x,
-          z,
-          label,
-          minY: Number(q<HTMLInputElement>('#le-zone-miny').value) || 1,
-          maxY: Number(q<HTMLInputElement>('#le-zone-maxy').value) || 3,
-        };
-      } else if (ztype === 'heading') {
-        next = {
-          type: 'heading',
-          x,
-          z,
-          label,
-          targetYaw: Number(q<HTMLInputElement>('#le-zone-yaw').value) || 0,
-          tolerance: Number(q<HTMLInputElement>('#le-zone-tol').value) || 30,
-        };
-      } else {
-        next = {
-          type: 'position',
-          x,
-          z,
-          label,
-          minX: Number(q<HTMLInputElement>('#le-zone-minx').value),
-          maxX: Number(q<HTMLInputElement>('#le-zone-maxx').value),
-          minZ: Number(q<HTMLInputElement>('#le-zone-minz').value),
-          maxZ: Number(q<HTMLInputElement>('#le-zone-maxz').value),
-        };
-      }
-      zones[selection.index] = next;
-      level.passZones = zones;
-    }
-    draw();
-    scheduleSave();
   };
 
   const deleteSelection = (): void => {
@@ -892,7 +662,7 @@ export function openLevelEditor(
       balloons[selection.index] = { ...b, y: clampY(b.y) };
       level.balloons = balloons;
     }
-    syncPropsPanel();
+    propsCtrl.sync();
     draw();
     scheduleSave();
   };
@@ -928,7 +698,7 @@ export function openLevelEditor(
       zones[selection.index] = { ...z, x: p.x, z: p.z };
       level.passZones = zones;
     }
-    syncPropsPanel();
+    propsCtrl.sync();
     draw();
     scheduleSave();
   };
@@ -971,7 +741,9 @@ export function openLevelEditor(
             ? ringPxRadius(ringDiameter(it))
             : kind === 'obstacle'
               ? ((it.size ?? 1) / WORLD) * canvas.width * 0.5 + 4
-              : 14;
+              : kind === 'balloon'
+                ? Math.max(10, ringPxRadius(balloonDiameter(it)) * 0.45)
+                : 14;
         if (Math.hypot(px - cx, py - cz) <= hitR) return { kind, index: i };
       }
       return null;
@@ -988,23 +760,57 @@ export function openLevelEditor(
     if (placeMode === 'ring') {
       level.rings = [
         ...(level.rings ?? []),
-        { x: wx, y: placeHeightY, z: wz, label: String((level.rings?.length ?? 0) + 1) },
+        {
+          x: wx,
+          y: placeHeightY,
+          z: wz,
+          label: String((level.rings?.length ?? 0) + 1),
+          color: DEFAULT_RING_COLOR,
+        },
       ];
       setSelection({ kind: 'ring', index: level.rings.length - 1 });
     } else if (placeMode === 'obstacle-solid') {
       level.obstacles = [
         ...(level.obstacles ?? []),
-        { type: 'cube', solid: true, x: wx, y: 1.5, z: wz, size: 1, color: '#f87171' },
+        {
+          type: 'cube',
+          solid: true,
+          x: wx,
+          y: 1.5,
+          z: wz,
+          size: 1,
+          color: DEFAULT_OBSTACLE_SOLID_COLOR,
+          physics: { collidable: true, friction: 0.65, restitution: 0.08 },
+        },
       ];
       setSelection({ kind: 'obstacle', index: level.obstacles.length - 1 });
     } else if (placeMode === 'obstacle-soft') {
       level.obstacles = [
         ...(level.obstacles ?? []),
-        { type: 'soft-cube', solid: false, x: wx, y: 1.5, z: wz, size: 1, color: '#4ade80' },
+        {
+          type: 'soft-cube',
+          solid: false,
+          x: wx,
+          y: 1.5,
+          z: wz,
+          size: 1,
+          color: DEFAULT_OBSTACLE_SOFT_COLOR,
+          physics: { collidable: false },
+        },
       ];
       setSelection({ kind: 'obstacle', index: level.obstacles.length - 1 });
     } else if (placeMode === 'balloon') {
-      level.balloons = [...(level.balloons ?? []), { x: wx, y: placeHeightY, z: wz }];
+      const bi = level.balloons?.length ?? 0;
+      level.balloons = [
+        ...(level.balloons ?? []),
+        {
+          x: wx,
+          y: placeHeightY,
+          z: wz,
+          color: DEFAULT_BALLOON_COLORS[bi % DEFAULT_BALLOON_COLORS.length],
+          label: `球${bi + 1}`,
+        },
+      ];
       setSelection({ kind: 'balloon', index: level.balloons.length - 1 });
     } else if (placeMode === 'zone') {
       const n = (level.passZones?.length ?? 0) + 1;
@@ -1066,7 +872,7 @@ export function openLevelEditor(
       const p = snapClampXZ(x, z, snapStep);
       level.passZones = zones.map((item, i) => (i === drag.index ? { ...item, x: p.x, z: p.z } : item));
     }
-    syncPropsPanel();
+    propsCtrl.sync();
     draw();
   });
 
@@ -1141,43 +947,7 @@ export function openLevelEditor(
     });
   });
 
-  ['#le-px', '#le-pz', '#le-py', '#le-py-range', '#le-size', '#le-label', '#le-solid', '#le-face-yaw', '#le-face-tol',
-    '#le-ring-diam',
-    '#le-zone-minx', '#le-zone-maxx', '#le-zone-minz', '#le-zone-maxz',
-    '#le-zone-miny', '#le-zone-maxy', '#le-zone-yaw', '#le-zone-tol'].forEach((sel) => {
-    q<HTMLElement>(sel).addEventListener('input', () => applyPropsToSelection());
-    q<HTMLElement>(sel).addEventListener('change', () => applyPropsToSelection());
-  });
-
   q<HTMLButtonElement>('#le-del-sel').addEventListener('click', deleteSelection);
-
-  q<HTMLInputElement>('#le-py-range').addEventListener('input', () => {
-    q<HTMLInputElement>('#le-py').value = q<HTMLInputElement>('#le-py-range').value;
-    applyPropsToSelection();
-  });
-  q<HTMLInputElement>('#le-ring-diam').addEventListener('input', () => {
-    const diam = Number(q<HTMLInputElement>('#le-ring-diam').value);
-    q<HTMLElement>('#le-ring-diam-readout').textContent = ` ${diam.toFixed(1)} m`;
-    applyPropsToSelection();
-  });
-  q<HTMLElement>('#le-ring-diam-presets').querySelectorAll<HTMLButtonElement>('button[data-diam]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const diam = Number(btn.dataset['diam']);
-      if (!Number.isFinite(diam)) return;
-      q<HTMLInputElement>('#le-ring-diam').value = String(diam);
-      q<HTMLElement>('#le-ring-diam-readout').textContent = ` ${diam.toFixed(1)} m`;
-      applyPropsToSelection();
-    });
-  });
-
-  q<HTMLElement>('#le-height-presets').querySelectorAll<HTMLButtonElement>('button[data-y]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const y = Number(btn.dataset['y']);
-      if (!Number.isFinite(y)) return;
-      syncPyControls(y);
-      applyPropsToSelection();
-    });
-  });
 
   backdrop.addEventListener('keydown', (e) => {
     if (!(e.target instanceof HTMLElement)) return;
@@ -1207,14 +977,6 @@ export function openLevelEditor(
   q<HTMLInputElement>('#le-return').addEventListener('change', scheduleSave);
   q<HTMLInputElement>('#le-freeplay').addEventListener('change', scheduleSave);
   q<HTMLInputElement>('#le-draw').addEventListener('change', scheduleSave);
-
-  q<HTMLSelectElement>('#le-zone-type').addEventListener('change', () => {
-    const ztype = q<HTMLSelectElement>('#le-zone-type').value;
-    q<HTMLElement>('#le-zone-position').hidden = ztype !== 'position';
-    q<HTMLElement>('#le-zone-altitude').hidden = ztype !== 'altitude';
-    q<HTMLElement>('#le-zone-heading').hidden = ztype !== 'heading';
-    applyPropsToSelection();
-  });
 
   const applySnippet = (snippet: LevelKitSnippet): void => {
     const mode =

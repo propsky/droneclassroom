@@ -9,7 +9,14 @@ import {
   TransformNode,
 } from '@babylonjs/core';
 import type { LevelDef } from '@creafly/shared';
-import { ringDiameter, ringThickness } from '@creafly/shared';
+import {
+  balloonDiameter,
+  ringBobAmp,
+  ringDiameter,
+  ringSpin,
+  ringThickness,
+  zoneMarkerDiameter,
+} from '@creafly/shared';
 import { bus } from '../core/events';
 import { ringWorldY } from '../core/level';
 import { CREAFLY_COLOR, hex } from './scene';
@@ -39,6 +46,8 @@ interface RingVisual {
   mat: StandardMaterial;
   baseColor: number;
   baseY: number;
+  bobAmp: number;
+  spin: number;
   index: number;
 }
 
@@ -100,7 +109,16 @@ export class LevelVisuals {
       mat.emissiveColor = hex(color).scale(0.3);
       mat.specularColor = new Color3(0.5, 0.5, 0.5);
       mesh.material = mat;
-      this.rings.push({ node, mesh, mat, baseColor: color, baseY: r.y, index: i });
+      this.rings.push({
+        node,
+        mesh,
+        mat,
+        baseColor: color,
+        baseY: r.y,
+        bobAmp: ringBobAmp(r),
+        spin: ringSpin(r),
+        index: i,
+      });
     });
 
     // ---- 障礙方塊（soft-cube 半透明；solid 較不透明）----
@@ -118,9 +136,11 @@ export class LevelVisuals {
 
     // ---- 氣球（球體 + 細繩）----
     (level.balloons ?? []).forEach((b, i) => {
-      const color = BALLOON_COLORS[i % BALLOON_COLORS.length] as number;
+      const fallback = BALLOON_COLORS[i % BALLOON_COLORS.length] as number;
+      const color = parseColor(b.color, fallback);
+      const diam = balloonDiameter(b);
       const mesh = this.track(
-        MeshBuilder.CreateSphere(`balloon${i}`, { diameter: 1.4, segments: 20 }, scene),
+        MeshBuilder.CreateSphere(`balloon${i}`, { diameter: diam, segments: 20 }, scene),
       );
       mesh.position.set(b.x, b.y, b.z);
       const mat = this.track(new StandardMaterial(`balloonMat${i}`, scene));
@@ -150,7 +170,7 @@ export class LevelVisuals {
       const disc = this.track(
         MeshBuilder.CreateTorus(
           `zoneDisc${i}`,
-          { diameter: 1.8, thickness: 0.6, tessellation: 32 },
+          { diameter: zoneMarkerDiameter(zone), thickness: 0.6, tessellation: 32 },
           scene,
         ),
       );
@@ -186,12 +206,12 @@ export class LevelVisuals {
     mat.alpha = 0.8;
   }
 
-  /** 每 tick：圈自轉 0.015 + 上下漂浮（與 core 判定同一公式） */
+  /** 每 tick：圈自轉 + 上下漂浮（與 core 判定同一公式） */
   tick(nowMs: number): void {
     for (const r of this.rings) {
       if (!r.node.isEnabled()) continue;
-      r.node.rotation.y += 0.015;
-      r.node.position.y = ringWorldY(r.index, r.baseY, nowMs);
+      r.node.rotation.y += r.spin;
+      r.node.position.y = ringWorldY(r.index, r.baseY, nowMs, r.bobAmp);
     }
   }
 }
