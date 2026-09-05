@@ -1,5 +1,5 @@
 // 自訂關卡編輯器 — 俯視 2D、格線吸附、物件選取與座標面板、素材庫。
-import type { LevelDef, TeacherLevelKitBrief } from '@creafly/shared';
+import type { LevelDef, TeacherLevelKitBrief, TeacherLevelBrief } from '@creafly/shared';
 import {
   balloonDiameter,
   EDITOR_HALF,
@@ -41,6 +41,14 @@ import {
   patchTeacherLevel,
   patchTeacherLevelKit,
 } from '../api';
+import { publishAndAddToCatalog, ensureCatalogForBroadcast } from '../catalogFlow';
+import {
+  backupIsNewerThanServer,
+  clearDraftBackup,
+  loadDraftBackup,
+  saveDraftBackup,
+} from '../levelDraftBackup';
+import { downloadLevelJson, pickAndParseLevelJson } from '../levelIo';
 import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
@@ -114,9 +122,17 @@ function parseLevel(def: Record<string, unknown>, levelId: string, title: string
   };
 }
 
+/** 發布 / 廣播與班級目錄（由 dashboard 注入） */
+export interface LevelEditorContext {
+  getTeamId(): number | null;
+  broadcastLoadLevel(levelId: string): boolean;
+  onCatalogUpdated(): void;
+}
+
 export interface LevelEditorOptions {
   /** 開啟後自動顯示教學目標精靈 */
   showWizard?: boolean;
+  ctx?: LevelEditorContext;
 }
 
 export function openLevelEditor(
@@ -135,6 +151,11 @@ export function openLevelEditor(
         </div>
         <span class="lvl-save-hint" id="le-save-hint"></span>
         <button type="button" class="btn btn-ghost btn-sm" id="le-close">${ICONS.x}關閉</button>
+      </div>
+      <div id="le-backup-banner" class="lvl-backup-banner" hidden>
+        <span id="le-backup-msg">本機有較新的草稿備份</span>
+        <button type="button" class="btn btn-primary btn-sm" id="le-restore-backup">恢復本機草稿</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="le-discard-backup">忽略</button>
       </div>
       <div class="lvl-editor-body">
         <div id="le-empty-banner" class="lvl-empty-banner" hidden>
@@ -228,9 +249,17 @@ export function openLevelEditor(
           </aside>
         </div>
       </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" id="le-preview">${ICONS.play}預覽</button>
-        <button type="button" class="btn btn-primary" id="le-save-now">${ICONS.check}立即儲存</button>
+      <div class="modal-actions lvl-editor-actions">
+        <div class="lvl-editor-actions-left">
+          <button type="button" class="btn btn-ghost btn-sm" id="le-import">${ICONS.plus}匯入 JSON</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="le-export">匯出 JSON</button>
+        </div>
+        <div class="lvl-editor-actions-right">
+          <button type="button" class="btn btn-ghost" id="le-preview">${ICONS.play}試飛</button>
+          <button type="button" class="btn btn-ghost" id="le-publish" hidden>${ICONS.check}發布並加入本班</button>
+          <button type="button" class="btn btn-ghost" id="le-broadcast" hidden>廣播全班</button>
+          <button type="button" class="btn btn-primary" id="le-save-now">${ICONS.check}立即儲存</button>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(backdrop);
@@ -241,7 +270,11 @@ export function openLevelEditor(
   const saveHint = q<HTMLElement>('#le-save-hint');
   const cursorEl = q<HTMLElement>('#le-cursor');
 
+  const editorCtx = editorOpts?.ctx;
   let levelPkLocal = levelPk;
+  let levelIdStr = '';
+  let levelStatus: TeacherLevelBrief['status'] = 'draft';
+  let serverUpdatedAt = 0;
   let level: LevelDef = defaultLevel('', '');
   let selection: Selection | null = null;
   let dragSel: Selection | null = null;
@@ -698,21 +731,69 @@ export function openLevelEditor(
   const scheduleSave = (): void => {
     dirty = true;
     saveHint.textContent = '儲存中…';
+    saveDraftBackup(levelPkLocal, level, serverUpdatedAt);
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void flushSave(), 700);
+  };
+
+  const syncActionButtons = (): void => {
+    const teamId = editorCtx?.getTeamId() ?? null;
+    const publishBtn = q<HTMLButtonElement>('#le-publish');
+    const broadcastBtn = q<HTMLButtonElement>('#le-broadcast');
+    publishBtn.hidden = !teamId || levelStatus !== 'draft';
+    broadcastBtn.hidden = !teamId || levelStatus !== 'published';
+  };
+
+  const applyLoadedLevel = (detail: {
+    id: number;
+    levelId: string;
+    title: string;
+    status: TeacherLevelBrief['status'];
+    updatedAt: number;
+    definition: Record<string, unknown>;
+  }): void => {
+    levelPkLocal = detail.id;
+    levelIdStr = detail.levelId;
+    levelStatus = detail.status;
+    serverUpdatedAt = detail.updatedAt;
+    level = parseLevel(detail.definition, detail.levelId, detail.title);
+    q<HTMLElement>('#le-title').textContent = `編輯 ${detail.levelId}`;
+    q<HTMLElement>('#le-sub').textContent =
+      detail.status === 'draft' ? '草稿會自動儲存' : '已發布 — 修改後學生端即時生效';
+    snapStep = getSnapStep();
+    syncFormFromLevel();
+    syncPlaceHeightReadout();
+    syncViewHint();
+    syncActionButtons();
+    draw();
+    loadMyKits();
+    backdrop.focus();
+
+    const backup = loadDraftBackup(levelPkLocal);
+    const banner = q<HTMLElement>('#le-backup-banner');
+    if (backup && backupIsNewerThanServer(backup, serverUpdatedAt)) {
+      const when = new Date(backup.savedAt).toLocaleString('zh-TW', { hour12: false });
+      q<HTMLElement>('#le-backup-msg').textContent = `本機有較新的草稿備份（${when}）`;
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
   };
 
   const flushSave = async (): Promise<void> => {
     syncLevelFromForm();
     try {
-      await patchTeacherLevel(levelPkLocal, {
+      const updated = await patchTeacherLevel(levelPkLocal, {
         title: level.name,
         definition: level as unknown as Record<string, unknown>,
       });
       dirty = false;
+      serverUpdatedAt = updated.updatedAt;
+      clearDraftBackup(levelPkLocal);
       saveHint.textContent = '已儲存';
       onSaved?.();
     } catch (e) {
+      saveDraftBackup(levelPkLocal, level, serverUpdatedAt);
       saveHint.textContent = '儲存失敗';
       toast(errText(e, '儲存'), 'error');
     }
@@ -1362,8 +1443,84 @@ export function openLevelEditor(
     void flushSave().then(() => openPreviewModal(level));
   });
 
+  q<HTMLButtonElement>('#le-export').addEventListener('click', () => {
+    syncLevelFromForm();
+    downloadLevelJson(level, `${levelIdStr || level.id || 'level'}.json`);
+    toast('已匯出 JSON', 'success');
+  });
+
+  q<HTMLButtonElement>('#le-import').addEventListener('click', () => {
+    void pickAndParseLevelJson(levelIdStr || level.id, level.name).then((imported) => {
+      if (!imported) return;
+      if (!isLevelLayoutEmpty(level) && !confirm('匯入會覆寫目前圈點與障礙，確定繼續？')) return;
+      level = imported;
+      setSelection(null);
+      syncFormFromLevel();
+      draw();
+      scheduleSave();
+      toast('已匯入 JSON', 'success');
+    });
+  });
+
+  q<HTMLButtonElement>('#le-publish').addEventListener('click', () => {
+    const teamId = editorCtx?.getTeamId();
+    if (!teamId) {
+      toast('請先開啟班級房間', 'error');
+      return;
+    }
+    void flushSave()
+      .then(() => publishAndAddToCatalog(teamId, levelPkLocal))
+      .then((published) => {
+        levelStatus = published.status;
+        levelIdStr = published.levelId;
+        serverUpdatedAt = published.updatedAt;
+        clearDraftBackup(levelPkLocal);
+        q<HTMLElement>('#le-sub').textContent = '已發布 — 修改後學生端即時生效';
+        syncActionButtons();
+        editorCtx?.onCatalogUpdated();
+        onSaved?.();
+        toast(`已發布並加入本班：${published.levelId}`, 'success');
+      })
+      .catch((e) => toast(errText(e, '發布'), 'error'));
+  });
+
+  q<HTMLButtonElement>('#le-broadcast').addEventListener('click', () => {
+    const teamId = editorCtx?.getTeamId();
+    if (!teamId || !levelIdStr) {
+      toast('請先開啟班級房間', 'error');
+      return;
+    }
+    void flushSave()
+      .then(() => ensureCatalogForBroadcast(teamId, levelIdStr))
+      .then(() => {
+        editorCtx?.onCatalogUpdated();
+        const ok = editorCtx?.broadcastLoadLevel(levelIdStr);
+        if (!ok) toast('尚未連線到伺服器', 'error');
+      })
+      .catch((e) => toast(errText(e, '廣播'), 'error'));
+  });
+
+  q<HTMLButtonElement>('#le-restore-backup').addEventListener('click', () => {
+    const backup = loadDraftBackup(levelPkLocal);
+    if (!backup) return;
+    level = backup.level;
+    setSelection(null);
+    syncFormFromLevel();
+    draw();
+    scheduleSave();
+    q<HTMLElement>('#le-backup-banner').hidden = true;
+    toast('已恢復本機草稿', 'success');
+  });
+
+  q<HTMLButtonElement>('#le-discard-backup').addEventListener('click', () => {
+    clearDraftBackup(levelPkLocal);
+    q<HTMLElement>('#le-backup-banner').hidden = true;
+  });
+
   q<HTMLButtonElement>('#le-save-now').addEventListener('click', () => {
-    void flushSave().then(() => toast('已儲存', 'success'));
+    void flushSave().then(() => {
+      if (!dirty) toast('已儲存', 'success');
+    });
   });
 
   const close = (): void => {
@@ -1377,18 +1534,7 @@ export function openLevelEditor(
 
   void fetchTeacherLevel(levelPkLocal)
     .then((detail) => {
-      levelPkLocal = detail.id;
-      level = parseLevel(detail.definition, detail.levelId, detail.title);
-      q<HTMLElement>('#le-title').textContent = `編輯 ${detail.levelId}`;
-      q<HTMLElement>('#le-sub').textContent =
-        detail.status === 'draft' ? '草稿會自動儲存' : '已發布 — 修改後學生端即時生效';
-      snapStep = getSnapStep();
-      syncFormFromLevel();
-      syncPlaceHeightReadout();
-      syncViewHint();
-      draw();
-      loadMyKits();
-      backdrop.focus();
+      applyLoadedLevel(detail);
       if (editorOpts?.showWizard && isLevelLayoutEmpty(level)) {
         runGoalWizard();
       }

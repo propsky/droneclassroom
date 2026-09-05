@@ -12,10 +12,12 @@ import {
   patchTeacherLevel,
   publishTeacherLevel,
 } from '../api';
+import { publishAndAddToCatalog } from '../catalogFlow';
+import { downloadLevelJson, pickAndParseLevelJson } from '../levelIo';
 import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
-import { openLevelEditor } from './levelEditor';
+import { openLevelEditor, type LevelEditorContext } from './levelEditor';
 import { openLevelGoalWizard } from './levelGoalWizard';
 
 export interface LevelsManageOptions {
@@ -26,6 +28,8 @@ export interface LevelsManageOptions {
   levels: LevelsResponse | null;
   /** 目錄變更後刷新廣播下拉 */
   onCatalogUpdated(): void;
+  /** 編輯器發布 / 廣播（由 dashboard 注入） */
+  editorCtx: LevelEditorContext;
 }
 
 export interface LevelsManagePanel {
@@ -87,6 +91,7 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
       </div>
       <div class="card-actions lvl-create-actions">
         <button type="button" class="btn btn-primary" id="lvl-create">${ICONS.plus}建立草稿</button>
+        <button type="button" class="btn btn-ghost" id="lvl-import">${ICONS.plus}匯入 JSON</button>
         <button type="button" class="btn btn-ghost" id="lvl-wizard">${ICONS.pencil}快速起稿</button>
       </div>
       <div class="lvl-scroll">
@@ -145,10 +150,11 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
       .map((l) => {
         const publishBtn =
           l.status === 'draft'
-            ? `<button type="button" class="btn btn-ghost btn-sm" data-act="publish" data-id="${l.id}">${ICONS.check}發布</button>`
+            ? `<button type="button" class="btn btn-ghost btn-sm" data-act="publish" data-id="${l.id}">${ICONS.check}${teamId ? '發布並加入本班' : '發布'}</button>`
             : '';
         const editBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="edit" data-id="${l.id}">編輯</button>`;
-        const previewBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="preview" data-id="${l.id}">${ICONS.play}預覽</button>`;
+        const previewBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="preview" data-id="${l.id}">${ICONS.play}試飛</button>`;
+        const exportBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="export" data-id="${l.id}">匯出</button>`;
         const inCatalog = catalog.some((c) => c.levelId === l.levelId);
         const addBtn =
           l.status === 'published' && teamId && !inCatalog
@@ -157,7 +163,7 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
         return `<tr>
           <td><span class="mono">${esc(l.levelId)}</span> ${esc(l.title)}</td>
           <td>${statusTag(l.status)}</td>
-          <td class="right lvl-actions">${editBtn}${previewBtn}${publishBtn}${addBtn}</td>
+          <td class="right lvl-actions">${editBtn}${previewBtn}${exportBtn}${publishBtn}${addBtn}</td>
         </tr>`;
       })
       .join('');
@@ -272,6 +278,12 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
     void loadCatalog();
   };
 
+  const refreshLib = (): void => void loadLibrary();
+
+  const openEditor = (id: number, showWizard = false): void => {
+    openLevelEditor(id, refreshLib, { showWizard, ctx: opts.editorCtx });
+  };
+
   q<HTMLButtonElement>('#lvl-create').addEventListener('click', () => {
     const title = titleInput.value.trim();
     if (!title) {
@@ -286,10 +298,28 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
         templateSelect.value = '';
         void loadLibrary();
         if (!templateLevelId) {
-          openLevelEditor(l.id, () => void loadLibrary(), { showWizard: true });
+          openEditor(l.id, true);
         }
       })
       .catch((e) => toast(errText(e, '建立草稿'), 'error'));
+  });
+
+  q<HTMLButtonElement>('#lvl-import').addEventListener('click', () => {
+    void pickAndParseLevelJson('import', '匯入關卡').then((imported) => {
+      if (!imported) return;
+      const title = imported.name || '匯入關卡';
+      void createTeacherLevel({ title })
+        .then(async (l) => {
+          await patchTeacherLevel(l.id, {
+            title,
+            definition: { ...imported, id: l.levelId } as unknown as Record<string, unknown>,
+          });
+          toast(`已匯入草稿 ${l.levelId}`, 'success');
+          void loadLibrary();
+          openEditor(l.id);
+        })
+        .catch((e) => toast(errText(e, '匯入'), 'error'));
+    });
   });
 
   q<HTMLButtonElement>('#lvl-wizard').addEventListener('click', () => {
@@ -317,7 +347,7 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
             titleInput.value = '';
             toast(`已建立 ${l.levelId}：${preset?.name ?? ''}`, 'success');
             void loadLibrary();
-            openLevelEditor(l.id, () => void loadLibrary());
+            openEditor(l.id);
           })
           .catch((e) => toast(errText(e, '建立'), 'error'));
       },
@@ -331,15 +361,22 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
     const teamId = opts.getTeamId();
     if (act === 'publish') {
       const id = Number(btn.dataset['id']);
-      void publishTeacherLevel(id)
+      const publish = teamId
+        ? () => publishAndAddToCatalog(teamId, id)
+        : () => publishTeacherLevel(id);
+      void publish()
         .then(() => {
-          toast('已發布，可加入本班目錄', 'success');
+          toast(teamId ? '已發布並加入本班目錄' : '已發布，可加入本班目錄', 'success');
           void loadLibrary();
+          if (teamId) {
+            void loadCatalog();
+            opts.onCatalogUpdated();
+          }
         })
         .catch((e) => toast(errText(e, '發布'), 'error'));
     } else if (act === 'edit') {
       const id = Number(btn.dataset['id']);
-      openLevelEditor(id, () => void loadLibrary());
+      openEditor(id);
     } else if (act === 'preview') {
       const id = Number(btn.dataset['id']);
       void fetchTeacherLevel(id)
@@ -347,7 +384,16 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
           const def = detail.definition as unknown as LevelDef;
           openPreviewModal({ ...def, id: detail.levelId, name: detail.title });
         })
-        .catch((e) => toast(errText(e, '載入預覽'), 'error'));
+        .catch((e) => toast(errText(e, '載入試飛'), 'error'));
+    } else if (act === 'export') {
+      const id = Number(btn.dataset['id']);
+      void fetchTeacherLevel(id)
+        .then((detail) => {
+          const def = detail.definition as unknown as LevelDef;
+          downloadLevelJson({ ...def, id: detail.levelId, name: detail.title }, `${detail.levelId}.json`);
+          toast('已匯出 JSON', 'success');
+        })
+        .catch((e) => toast(errText(e, '匯出'), 'error'));
     } else if (act === 'add' && teamId) {
       const levelId = btn.dataset['lid']!;
       void assignToCatalog(teamId, {

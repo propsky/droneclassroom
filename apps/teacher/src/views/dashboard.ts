@@ -23,6 +23,7 @@ import type {
 } from '@creafly/shared';
 import type { TeacherArenaMsg, TeacherSoccerMsg } from '../ws';
 import { fetchTeamCurriculum } from '../api';
+import { clearEditorRoute, parseEditorRoute } from '../editorRoute';
 import { ICONS } from '../icons';
 import { toast } from '../toast';
 import { copyText } from '../clipboard';
@@ -30,6 +31,7 @@ import { saveResume, type ResumeState } from '../resume';
 import { renderAccountMenu } from './account';
 import { openStudentsPanel, type StudentsPanel } from './students';
 import { mountLevelsManage, type LevelsManagePanel } from './levelsManage';
+import { openLevelEditor, type LevelEditorContext } from './levelEditor';
 
 export interface DashboardView {
   setWsStatus(connected: boolean): void;
@@ -860,12 +862,33 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 剛送出 room_open_team 的班級 id（chip 顯示開啟中、防連點；伺服器 room_list 回來即清） */
   let pendingOpenTeam: number | null = null;
   const currentRoom = (): RoomInfo | null => rooms.find((r) => r.code === selectedRoom) ?? null;
+  const editorCtx: LevelEditorContext = {
+    getTeamId: () => currentRoom()?.teamId ?? null,
+    broadcastLoadLevel: (levelId) => {
+      const payload = { type: 'load_level' as const, levelId };
+      const ok =
+        allRoomsChk.checked && !allRoomsWrap.hidden
+          ? opts.sendGame({ type: 'broadcast', payload, allRooms: true })
+          : opts.send(payload);
+      if (ok) {
+        toast(
+          allRoomsChk.checked && !allRoomsWrap.hidden
+            ? `全班載入 ${levelId}（整班含分房）`
+            : `全班載入 ${levelId}`,
+          'success',
+        );
+      }
+      return ok;
+    },
+    onCatalogUpdated: () => loadCurriculumForRoom(currentRoom() ?? undefined),
+  };
   const levelsManageHost = root.querySelector<HTMLElement>('#panel-level-manage')!;
   let levelsManagePanel: LevelsManagePanel | null = mountLevelsManage(levelsManageHost, {
     getTeamId: () => currentRoom()?.teamId ?? null,
     getTeamName: () => currentRoom()?.name || currentRoom()?.code || '本班',
     levels,
     onCatalogUpdated: () => loadCurriculumForRoom(currentRoom() ?? undefined),
+    editorCtx,
   });
   /** 班級模式：伺服器有給非空 teams（有 DB） */
   const teamMode = (): boolean => !!teams && teams.length > 0;
@@ -1213,6 +1236,13 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   });
 
   drawRooms();
+
+  const editorPk = parseEditorRoute();
+  if (editorPk) {
+    switchTab('level-manage');
+    openLevelEditor(editorPk, () => levelsManagePanel?.refresh(), { ctx: editorCtx });
+    clearEditorRoute();
+  }
 
   // ---- 動態更新 ----
   const wsStatusEl = root.querySelector<HTMLElement>('#ws-status')!;

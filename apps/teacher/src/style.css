@@ -1191,6 +1191,33 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
   align-self: center;
   margin-right: var(--sp-2);
 }
+.lvl-backup-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, #fbbf24 12%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, #fbbf24 35%, transparent);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.lvl-editor-actions {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--line);
+  margin-top: 0;
+}
+.lvl-editor-actions-left,
+.lvl-editor-actions-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
 .lvl-editor-body {
   display: grid;
   grid-template-columns: minmax(280px, 340px) 1fr;
