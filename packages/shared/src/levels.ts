@@ -134,6 +134,8 @@ export interface LevelDef {
   orbit?: OrbitDef;
   /** 俯視相機覆寫（選配，向後相容：缺省時由 guide bounds 自動取景） */
   topdownCam?: TopdownCamDef;
+  /** 場景環境：展場模式用不同天空 / 霧效（F-02） */
+  sceneEnv?: 'default' | 'exhibition';
   /** 目標圖形參考線（俯視 [x,z] 折線） */
   guide?: [number, number][];
   penColors?: string[];

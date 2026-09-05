@@ -90,6 +90,9 @@ class CompleteLevelMsg(_StrictModel):
     clientTs: FiniteFloat | None = None
     # 離線補傳標記：true = 完成當下不在線（伺服器無法對時驗證，稽核留痕不硬標可疑）
     offline: bool = False
+    # J-01：輸入錄製 REST 上傳後的引用（WS 不帶完整 JSON）
+    replayLogRef: str | None = None
+    replayHash: str | None = None
 
 
 # ---------- 學生 → 伺服器：賽局（arena 大亂鬥 / soccer 足球）----------

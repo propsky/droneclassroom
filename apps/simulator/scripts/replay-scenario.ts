@@ -24,26 +24,13 @@ import {
   resolveObstacleCollisions,
   type ControlFrame,
 } from '../src/core/physics';
-import { levelState, loadLevel, tickLevel } from '../src/core/level';
+import { levelState, bootstrapLevelForReplay, tickLevel } from '../src/core/level';
 import { tickPen } from '../src/core/pen';
 import { runProgram, tickProgram } from '../src/core/program';
 import { seedRng } from '../src/core/rng';
 import { bus } from '../src/core/events';
 
-// ---- FNV-1a 64（BigInt 整數運算，跨引擎確定）----
-const FNV_PRIME = 0x100000001b3n;
-const FNV_OFFSET = 0xcbf29ce484222325n;
-const MASK64 = 0xffffffffffffffffn;
-const _hb = new ArrayBuffer(8);
-const _hdv = new DataView(_hb);
-
-function hashF64(h: bigint, x: number): bigint {
-  _hdv.setFloat64(0, x);
-  for (let i = 0; i < 8; i++) {
-    h = ((h ^ BigInt(_hdv.getUint8(i))) * FNV_PRIME) & MASK64;
-  }
-  return h;
-}
+import { FNV_OFFSET, hashDroneTick, hashToHex } from '../src/core/simHash';
 
 // ---- 場景關卡（inline，不經 fetch）----
 // 圈與障礙都放在腳本化飛行的實測路徑上（見 scriptedFrame）：
@@ -104,24 +91,12 @@ const MANUAL_TICKS = 1200; // 20 秒模擬
 const PROGRAM_MAX_TICKS = 6000; // 程式段上限 100 秒模擬
 const YIELDS_PER_TICK = 8; // 每 tick 固定讓出微任務次數（兩引擎相同策略 → 確定）
 
-function hashDroneTick(h: bigint): bigint {
-  h = hashF64(h, droneState.position.x);
-  h = hashF64(h, droneState.position.y);
-  h = hashF64(h, droneState.position.z);
-  h = hashF64(h, droneState.velocity.x);
-  h = hashF64(h, droneState.velocity.y);
-  h = hashF64(h, droneState.velocity.z);
-  h = hashF64(h, droneState.yaw);
-  return h;
-}
-
 export async function runScenario(): Promise<ScenarioResult> {
   // ---- 全域狀態歸零（確定性初始條件）----
   simTime.tick = 0;
   seedRng(42);
   levelState.levels = [SCENARIO_LEVEL];
-  loadLevel('R-1');
-  levelState.armed = true;
+  bootstrapLevelForReplay(SCENARIO_LEVEL);
   flags.countdownActive = false;
   flags.paused = false;
   flags.mode = 'manual';
@@ -138,7 +113,7 @@ export async function runScenario(): Promise<ScenarioResult> {
     tickPen(simNowMs());
     h = hashDroneTick(h);
   }
-  const manualHash = h.toString(16);
+  const manualHash = hashToHex(h);
   const ringsCollected = levelState.ringsCollected;
 
   // ---- 程式段（motion plan / async 鏈 / cf_random / cf_elapsed / 畫筆隨機色）----
@@ -179,7 +154,7 @@ export async function runScenario(): Promise<ScenarioResult> {
 
   return {
     manualHash,
-    programHash: h.toString(16),
+    programHash: hashToHex(h),
     ticks: MANUAL_TICKS + pt,
     ringsCollected,
     programFinished: finished,

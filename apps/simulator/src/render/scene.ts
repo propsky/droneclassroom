@@ -15,6 +15,7 @@ import {
   Mesh,
   LinesMesh,
 } from '@babylonjs/core';
+import type { SceneEnv } from '@creafly/shared';
 import { droneState, HOME_POSITION } from '../core/droneState';
 import { levelState } from '../core/level';
 import { bus } from '../core/events';
@@ -230,4 +231,17 @@ function buildGrid(scene: Scene): void {
   grid.color = hex(0x4dd0e1);
   grid.alpha = 0.6;
   grid.isPickable = false;
+}
+
+/** F-02：依關卡或 URL 切換展場 / 一般霧效與天空後備色 */
+export function applySceneEnv(scene: Scene, env: SceneEnv): void {
+  if (env === 'exhibition') {
+    scene.clearColor = Color4.FromInts(0x12, 0x1e, 0x38, 255);
+    scene.fogColor = hex(0x3a5080);
+    scene.fogDensity = 0.012;
+  } else {
+    scene.clearColor = Color4.FromInts(0x87, 0xce, 0xeb, 255);
+    scene.fogColor = hex(0xb0dfff);
+    scene.fogDensity = 0.008;
+  }
 }

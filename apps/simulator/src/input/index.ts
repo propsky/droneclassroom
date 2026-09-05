@@ -17,6 +17,7 @@ import {
 } from './gamepad';
 import { gamepadConfig, initCalibration, tickCalibration, calibration } from './calibration';
 import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
+import { registerBleConnectedChecker } from '../core/execution/mode';
 import { resolveStickSource, type StickAxes } from './padMath';
 
 export { isTouchDevice };
@@ -31,6 +32,7 @@ export function initInputs(opts: { toggleView: () => void }): void {
     buttons: gamepadState.buttons,
   }));
   initBle();
+  registerBleConnectedChecker(() => bleState.connected);
 }
 
 function handlePadButtons(

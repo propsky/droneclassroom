@@ -27,11 +27,13 @@ import {
   programState,
   setMode,
 } from './core/program';
-import { meetsMinimumPlayRequirements, probeBrowserCapabilities } from '@creafly/shared';
+import { meetsMinimumPlayRequirements, probeBrowserCapabilities, parseSceneEnv } from '@creafly/shared';
 import { tickPen } from './core/pen';
 import { bus, toast } from './core/events';
 import { initInputs, tickInputDevices, collectControlFrame, isTouchDevice } from './input';
-import { createSceneWorld } from './render/scene';
+import { initRecordingSession, recordInputTick, isRecording } from './core/recordingSession';
+import { getStudentToken } from './net/studentAuth';
+import { createSceneWorld, applySceneEnv } from './render/scene';
 import { DroneVisual } from './render/drone';
 import { LevelVisuals } from './render/levelMeshes';
 import { InkVisual } from './render/ink';
@@ -124,6 +126,11 @@ initSoccerHud(
 );
 initEndCountdown(); // 賽局結束倒數 chip（§5.3；arena / soccer 共用 endTime）
 initBroadcastBanner(); // 老師廣播大字橫幅（獨立於 toast）
+initRecordingSession(() => levelState.current, () => !!getStudentToken());
+bus.on('level-loaded', ({ level }) => {
+  const urlEnv = parseSceneEnv(new URLSearchParams(location.search).get('scene'));
+  applySceneEnv(world.scene, level.sceneEnv ?? urlEnv ?? 'default');
+});
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進；預覽模式在 initPlayer 內略過 WS
@@ -265,6 +272,9 @@ function fixedTick(nowMs: number): void {
   // 輸入裝置輪詢（gamepad + 搖桿按鈕）
   tickInputDevices(isManualLocked());
 
+  const controlFrame = collectControlFrame();
+  const inLevelPlay = !arenaState.active && !soccerState.active && !practiceState.active;
+
   if (programState.running) {
     // 程式模式：位置由 motion plan 推進，只做地板保護
     tickProgram(TICK_MS);
@@ -273,17 +283,13 @@ function fixedTick(nowMs: number): void {
     if (droneState.returning) {
       tickAutopilot(TICK_MS);
     } else if (!isManualLocked()) {
-      // 大亂鬥鬼抓人：我是鬼 → 推力 ×GHOST_SPEED（非大亂鬥時恆為 1）
-      applyManualControls(collectControlFrame(), arenaThrustScale());
+      applyManualControls(controlFrame, arenaThrustScale());
     }
     integrate();
   }
 
-  // 實心方塊 AABB 碰撞（兩種模式都要；大亂鬥掩體也走這裡）
   resolveObstacleCollisions();
 
-  // 模式分派：大亂鬥 / 足球 tick 接管 ↔ 一般關卡判定（不重演 legacy 的 if/else 上帝迴圈 —
-  // 各模式自己管邊界/判定/HUD，分身視覺在 arenaClones / soccerVisuals；一般關卡照舊）
   if (arenaState.active) {
     tickArena();
     arenaClones.tick();
@@ -296,10 +302,14 @@ function fixedTick(nowMs: number): void {
     tickSoccerPractice();
     soccerVisuals.tick();
   } else {
-    // 關卡判定（圈 / zone / 氣球 / faceYaw / duration）
     tickLevel(nowMs);
-    // 畫畫教室：墨水取樣（程式 tween 與手動飛行共用同一條路徑）
     tickPen(nowMs);
+    if (inLevelPlay && isRecording()) {
+      const recFrame = programState.running
+        ? { lift: 0, forward: 0, right: 0, yawDelta: 0, wantsTakeoff: false, anyInput: false }
+        : controlFrame;
+      recordInputTick(recFrame);
+    }
   }
 
   // 視覺 tick（螺旋槳、傾斜、圈動畫、雲、假陰影、軌跡）

@@ -93,7 +93,9 @@ export function initWs(): void {
   });
   // 過關 / 切關 → 上報老師後台（帳號模式帶冪等鍵、離線先入佇列；訪客照舊直送 — net/progressQueue.ts）
   initProgressQueue();
-  bus.on('level-complete', ({ levelId, timeMs }) => reportComplete(levelId, timeMs));
+  bus.on('level-complete', ({ levelId, timeMs, inputLog, replayHash }) =>
+    reportComplete(levelId, timeMs, { inputLog, replayHash }),
+  );
   bus.on('level-loaded', ({ level }) => send({ type: 'progress', levelId: level.id }));
   // 計時真正起算（按開始 / 倒數結束）→ 校正伺服器防作弊觀察起點，
   // 否則「看說明的時間」會被算進觀察時間、短關正常完成也被標可疑

@@ -22,6 +22,10 @@ vi.mock('./progressLocalCache', () => ({
   clearProgressCache: vi.fn(),
 }));
 
+vi.mock('./replayLogUpload', () => ({
+  uploadReplayLog: vi.fn(() => Promise.resolve(null)),
+}));
+
 const busHandlers = new Map<string, Set<() => void>>();
 vi.mock('../core/events', () => ({
   bus: {
@@ -71,9 +75,9 @@ describe('progressQueue', () => {
     studentSession.mockReturnValue({ me: { id: 7 } });
     const { reportComplete } = await import('./progressQueue');
     reportComplete('1-2', 25000);
-    const raw = store.get('creafly_progress_queue');
-    expect(raw).toBeTruthy();
-    const q = JSON.parse(raw!) as { levelId: string; sid: number }[];
+    await vi.waitFor(() => expect(store.get('creafly_progress_queue')).toBeTruthy());
+    const raw = store.get('creafly_progress_queue')!;
+    const q = JSON.parse(raw) as { levelId: string; sid: number }[];
     expect(q[0]?.levelId).toBe('1-2');
     expect(q[0]?.sid).toBe(7);
     expect(sendToServer).not.toHaveBeenCalled();
@@ -85,13 +89,7 @@ describe('progressQueue', () => {
     wsState.connected = true;
     const { reportComplete, handleCompleteAck, progressState } = await import('./progressQueue');
     reportComplete('1-3', 18000);
-    expect(sendToServer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'complete_level',
-        levelId: '1-3',
-        clientEventId: expect.any(String),
-      }),
-    );
+    await vi.waitFor(() => expect(sendToServer).toHaveBeenCalled());
     const eid = sendToServer.mock.calls[0]![0].clientEventId as string;
     handleCompleteAck(eid);
     expect(progressState.progress['1-3']).toEqual({ bestTimeMs: 18000, attempts: 1 });

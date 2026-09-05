@@ -66,6 +66,8 @@ async def save_completion(
                     "offline": msg.offline,
                     "suspect": suspect,
                     "suspect_reasons": suspect_reasons,
+                    "replay_log_ref": msg.replayLogRef,
+                    "replay_hash": msg.replayHash,
                 },
             )
             if event_id is not None:

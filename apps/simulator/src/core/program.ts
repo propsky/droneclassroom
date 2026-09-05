@@ -17,6 +17,8 @@ import { easeInOut } from './physics';
 import { resetMission, checkProgramCompletion, levelState } from './level';
 import { inkPenDown, inkPenUp, inkSetColor, inkRandomColor } from './pen';
 import { bus, toast, sound, stateHud } from './events';
+import { buildCreaflyMotionApi, registerSimMotionRuntime } from './execution/mode';
+import { captureProgramCode } from './recordingSession';
 
 export const programState = {
   running: false,
@@ -279,6 +281,7 @@ export function runProgram(code: string): void {
   programState.running = true;
   programState.abort = false;
   programState.startTime = simNowMs();
+  captureProgramCode(code);
   // 程式模式可能沒按過關卡的「開始」（intro 直接切程式模式）→ 補上關卡計時基準，
   // 否則 checkProgramCompletion 用 levelElapsedMs() 會回 0 秒成績；armed 一併補
   // （tickLevel 的圈圈判定在未 armed 時不跑）
@@ -287,6 +290,9 @@ export function runProgram(code: string): void {
   flags.programRunning = true;
   bus.emit('program-running', { running: true });
 
+  const motionApi = buildCreaflyMotionApi();
+  const injectedApi = { ...CREAFLY_API, ...motionApi };
+
   let promise: Promise<void>;
   try {
     // 生成碼只看得到顯式注入的 CREAFLY API，包成 async IIFE 執行
@@ -294,7 +300,7 @@ export function runProgram(code: string): void {
       'CREAFLY',
       `"use strict";\nreturn (async () => {\n${code}\n})();`,
     ) as (api: typeof CREAFLY_API) => Promise<void>;
-    promise = fn(CREAFLY_API);
+    promise = fn(injectedApi);
   } catch (e) {
     toast(`編譯失敗：${e instanceof Error ? e.message : String(e)}`, 'error');
     finishProgram();
@@ -353,3 +359,19 @@ export function setMode(mode: 'manual' | 'program'): void {
   flags.mode = mode;
   bus.emit('mode-changed', { mode });
 }
+
+registerSimMotionRuntime({
+  isConnected: () => true,
+  takeoff: cf_takeoff,
+  land: cf_land,
+  hover: cf_hover,
+  wait: cf_wait,
+  forward: cf_forward,
+  backward: cf_backward,
+  left: cf_left,
+  right: cf_right,
+  up: cf_up,
+  down: cf_down,
+  rotateClockwise: cf_rotateClockwise,
+  rotateCounterClockwise: cf_rotateCounterClockwise,
+});

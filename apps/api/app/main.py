@@ -22,6 +22,7 @@ from .db.session import create_engine, create_sessionmaker
 from .levels_api import router as levels_router
 from .levels_catalog import ensure_all_teams_catalog, ensure_system_levels, fetch_known_level_ids
 from .mailer import Mailer
+from .replay_logs import router as replay_logs_router
 from .rest import known_level_ids, load_levels
 from .rest import router as rest_router
 from .rooms import RoomManager
@@ -168,6 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rest_router)
     app.include_router(levels_router)
     app.include_router(students_router)
+    app.include_router(replay_logs_router)
     register_static_routes(app, cfg)
     return app
 

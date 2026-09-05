@@ -90,6 +90,8 @@ from .protocol import (
     TeacherBroadcastMsg,
     TeacherBroadcastPayload,
 )
+from .replay_logs import load_replay_recording
+from .replay_verify import verify_input_log
 from .rest import known_level_ids
 from .rooms import Room, RoomLimitError, RoomManager
 from .roster import StudentRecord, send_safe
@@ -397,12 +399,32 @@ async def _student_endpoint(ws: WebSocket) -> None:
                             LevelLoadOkMsg(levelId=valid.levelId).model_dump_json(),
                         )
                 case CompleteLevelMsg():
+                    replay_reason: str | None = None
+                    maker = ws.app.state.db_sessionmaker
+                    if (
+                        valid.replayLogRef
+                        and valid.replayHash
+                        and record.student_id is not None
+                        and maker is not None
+                    ):
+                        async with maker() as session:
+                            rec = await load_replay_recording(
+                                session, valid.replayLogRef, record.student_id
+                            )
+                        if rec is None:
+                            replay_reason = "找不到輸入錄製"
+                        else:
+                            replay_reason = verify_input_log(rec, valid.replayHash)
                     reasons = await roster.complete_level(
                         record, valid.levelId, valid.timeMs, offline=valid.offline
                     )
+                    if replay_reason:
+                        reasons = [*reasons, replay_reason]
+                        record.suspect = True
+                        if replay_reason not in record.suspect_reasons:
+                            record.suspect_reasons.append(replay_reason)
                     # 帳號學生且有 DB → 入庫（progress + 稽核）；落地才回 complete_ack。
                     # 訪客 / 無 DB：行為與從前完全相同（不入庫、不回 ack）
-                    maker = ws.app.state.db_sessionmaker
                     if record.student_id is not None and maker is not None:
                         if (
                             record.allowed_level_ids is not None

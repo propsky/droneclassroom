@@ -1,35 +1,23 @@
-// 離線成績佇列 + 學生歷史進度（帳號模式）。
-// 職責：
-//   - reportComplete()：過關上報唯一入口（net/ws.ts 的 level-complete 轉呼叫）
-//       訪客        → 照舊直接送 complete_level（不帶新欄位；斷線時 sendToServer 靜默丟棄）
-//       帳號・連線中 → 帶 clientEventId/clientTs 直接送；3 秒沒收到 complete_ack → 進佇列備援
-//       帳號・斷線   → 直接進佇列，重連後補傳（flush 帶原 clientTs + offline:true，稽核留痕）
-//   - 佇列存 localStorage `creafly_progress_queue`（上限 200 筆防爆，滿了丟最舊）
-//   - ws-connected（register 已在 onopen 先送出，同一條 WS 訊息有序）→ flush 逐筆補傳；
-//     收到 complete_ack 才移除該筆（伺服器靠 clientEventId 冪等去重，重送無害）
-//   - progress_sync / complete_ack → progressState 更新 + 發 progress-updated（關卡選單勾勾）
-// 與 net/ws.ts 互相 import（皆為函式內延遲取用，無模組初始化循環問題）。
-import type { ProgressSyncMsg } from '@creafly/shared';
+import type { InputRecordingV1 } from '@creafly/shared';
 import { mergeLevelProgress, replaceProgressMap } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { clearProgressCache, loadProgressCache, saveProgressCache } from './progressLocalCache';
+import { uploadReplayLog } from './replayLogUpload';
 import { getStudentToken, loadStudentSession } from './studentAuth';
 import { sendToServer, wsState } from './ws';
 
 const LS_QUEUE = 'creafly_progress_queue';
-/** 佇列上限：離線一整學期也塞不滿；防 localStorage 爆量 */
 const MAX_QUEUE = 200;
-/** 連線中直送後等 ack 的備援時限：逾時視同沒送到，進佇列等重連補傳 */
 const ACK_TIMEOUT_MS = 3000;
 
 interface QueuedComplete {
   clientEventId: string;
-  /** 真實完成時刻（ms epoch）：補傳時原樣帶上，伺服器稽核雙時間戳用 */
   clientTs: number;
   levelId: string;
   timeMs: number;
-  /** 完成者（students.id）：共用裝置換帳號時只補傳本人的，避免成績掛錯人 */
   sid: number;
+  replayLogRef?: string;
+  replayHash?: string;
 }
 
 export interface LevelProgress {
@@ -37,19 +25,14 @@ export interface LevelProgress {
   attempts: number;
 }
 
-/** 學生歷史進度（progress_sync 下發 + 本地 ack 即時併入）；訪客恆為空 */
 export const progressState = {
   progress: {} as Record<string, LevelProgress>,
 };
 
-/** 同場只提示一次「已離線紀錄成績」；成功清空佇列後重置（下次再離線會再提示） */
 let offlineToastShown = false;
-/** 本次連線有補傳過 → 佇列清空時 toast「離線成績已上傳 ✓」 */
 let flushed = false;
-/** 連線中直送、尚未收到 ack 的事件（逾時進佇列備援） */
 const pendingAcks = new Map<string, { entry: QueuedComplete; timer: ReturnType<typeof setTimeout> }>();
 
-/** 冪等鍵：優先 crypto.randomUUID（http LAN 非安全上下文沒有 → getRandomValues 手組 UUID v4） */
 function genEventId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   const b = crypto.getRandomValues(new Uint8Array(16));
@@ -78,7 +61,7 @@ function saveQueue(q: QueuedComplete[]): void {
   try {
     localStorage.setItem(LS_QUEUE, JSON.stringify(q));
   } catch {
-    /* 隱私模式等寫不進去：本場仍靠記憶體內 pendingAcks 盡力送，重整後遺失 */
+    /* 隱私模式 */
   }
 }
 
@@ -88,23 +71,45 @@ function enqueue(entry: QueuedComplete): void {
   q.push(entry);
   while (q.length > MAX_QUEUE) {
     const dropped = q.shift();
-    console.warn(
-      `[progressQueue] 佇列已滿（${MAX_QUEUE} 筆），丟棄最舊一筆：`,
-      dropped?.levelId,
-      dropped?.clientEventId,
-    );
+    console.warn(`[progressQueue] 佇列已滿，丟棄：`, dropped?.levelId);
   }
   saveQueue(q);
 }
 
+async function resolveReplayRefs(
+  clientEventId: string,
+  inputLog?: InputRecordingV1,
+  replayHash?: string,
+): Promise<{ replayLogRef?: string; replayHash?: string }> {
+  if (!inputLog || !replayHash) return { replayHash };
+  const logRef = await uploadReplayLog(clientEventId, inputLog);
+  if (!logRef) return { replayHash };
+  return { replayLogRef: logRef, replayHash };
+}
+
+function sendCompletePayload(entry: QueuedComplete, offline = false): void {
+  sendToServer({
+    type: 'complete_level',
+    levelId: entry.levelId,
+    timeMs: entry.timeMs,
+    clientEventId: entry.clientEventId,
+    clientTs: entry.clientTs,
+    offline,
+    replayLogRef: entry.replayLogRef,
+    replayHash: entry.replayHash,
+  });
+}
+
 /**
- * 過關上報唯一入口。訪客路徑行為與過去完全相同（不帶新欄位）；
- * 帳號模式一律帶 clientEventId/clientTs，離線先入佇列、重連自動補傳。
+ * 過關上報唯一入口。帳號模式附帶 replayLogRef + replayHash（錄製先 REST 上傳）。
  */
-export function reportComplete(levelId: string, timeMs: number): void {
+export function reportComplete(
+  levelId: string,
+  timeMs: number,
+  extras?: { inputLog?: InputRecordingV1; replayHash?: string },
+): void {
   const token = getStudentToken();
   if (!token) {
-    // 訪客：照舊直接送（斷線時 sendToServer 靜默丟棄 — 訪客本來就不記錄成績）
     sendToServer({ type: 'complete_level', levelId, timeMs });
     return;
   }
@@ -114,50 +119,40 @@ export function reportComplete(levelId: string, timeMs: number): void {
     levelId,
     timeMs,
     sid: loadStudentSession()?.me.id ?? 0,
+    replayHash: extras?.replayHash ?? extras?.inputLog?.replayHash,
   };
-  if (wsState.connected) {
-    sendToServer({
-      type: 'complete_level',
-      levelId,
-      timeMs,
-      clientEventId: entry.clientEventId,
-      clientTs: entry.clientTs,
-    });
-    // 直送不進佇列 — 等 ack；3 秒沒回應（伺服器忙 / 恰好斷線）才進佇列備援
-    const timer = setTimeout(() => {
-      pendingAcks.delete(entry.clientEventId);
+
+  void (async () => {
+    const refs = await resolveReplayRefs(entry.clientEventId, extras?.inputLog, entry.replayHash);
+    entry.replayLogRef = refs.replayLogRef;
+    entry.replayHash = refs.replayHash;
+
+    if (wsState.connected) {
+      sendCompletePayload(entry);
+      const timer = setTimeout(() => {
+        pendingAcks.delete(entry.clientEventId);
+        enqueue(entry);
+      }, ACK_TIMEOUT_MS);
+      pendingAcks.set(entry.clientEventId, { entry, timer });
+    } else {
       enqueue(entry);
-    }, ACK_TIMEOUT_MS);
-    pendingAcks.set(entry.clientEventId, { entry, timer });
-  } else {
-    enqueue(entry);
-    if (!offlineToastShown) {
-      offlineToastShown = true;
-      toast('📴 已離線紀錄成績，連線後自動上傳', 'warning');
+      if (!offlineToastShown) {
+        offlineToastShown = true;
+        toast('📴 已離線紀錄成績，連線後自動上傳', 'warning');
+      }
     }
-  }
+  })();
 }
 
-/** 重連後補傳：只送本人的（共用裝置別人的留在佇列等本人登入）；ack 到才移除 */
 function flushQueue(): void {
   if (!getStudentToken() || !wsState.connected) return;
   const sid = loadStudentSession()?.me.id ?? 0;
   const mine = loadQueue().filter((e) => e.sid === sid);
   if (mine.length === 0) return;
   flushed = true;
-  for (const e of mine) {
-    sendToServer({
-      type: 'complete_level',
-      levelId: e.levelId,
-      timeMs: e.timeMs,
-      clientEventId: e.clientEventId,
-      clientTs: e.clientTs, // 原完成時刻，不是補傳時刻
-      offline: true,
-    });
-  }
+  for (const e of mine) sendCompletePayload(e, true);
 }
 
-/** net/ws.ts 收到 complete_ack：清備援計時器、移出佇列、本地標記進度（不等下次 sync） */
 export function handleCompleteAck(clientEventId: string): void {
   const pending = pendingAcks.get(clientEventId);
   if (pending) {
@@ -179,8 +174,7 @@ export function handleCompleteAck(clientEventId: string): void {
   }
 }
 
-/** net/ws.ts 收到 progress_sync：伺服器為準整份覆蓋（跨裝置同步） */
-export function handleProgressSync(progress: ProgressSyncMsg['progress']): void {
+export function handleProgressSync(progress: import('@creafly/shared').ProgressSyncMsg['progress']): void {
   progressState.progress = replaceProgressMap(progress);
   const sid = loadStudentSession()?.me.id;
   if (sid != null) saveProgressCache(sid, progressState.progress);
@@ -203,17 +197,13 @@ function hydrateProgressFromCache(): void {
   bus.emit('progress-updated', {});
 }
 
-/** 帳號登入成功後呼叫（init 時可能尚未登入） */
 export function refreshProgressFromCache(): void {
   hydrateProgressFromCache();
 }
 
-/** net/ws.ts initWs() 呼叫一次：接上重連 flush 與登出清空 */
 export function initProgressQueue(): void {
   hydrateProgressFromCache();
-  // register 在 ws.onopen 同步先送、ws-connected 後發 — 同一條 WS 訊息有序，補傳一定排在 register 之後
   bus.on('ws-connected', () => flushQueue());
-  // 登出：勾勾是帳號的資料 → 清畫面狀態；佇列保留（按 sid 隔離，本人再登入才補傳）
   bus.on('student-logout', () => {
     progressState.progress = {};
     clearProgressCache();

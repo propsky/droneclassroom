@@ -21,6 +21,7 @@ import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
 import { setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
+import { finalizeRecording } from './recordingSession';
 
 export interface MissionRing {
   x: number;
@@ -163,6 +164,38 @@ export async function loadChapters(): Promise<void> {
   const requested = /^[123]-[0-6]$/.test(lp ?? '') ? (lp as string) : '1-0';
   const id = initialLevelResolver?.(levelState.levels, requested) ?? requested;
   void import('../net/levelLoad').then((m) => m.loadLevel(id));
+}
+
+/**
+ * 重播 / 伺服器驗證用：直接套用 LevelDef，略過 intro 與授權 gate。
+ * 計時基準設為現在（僅供程式模式 checkProgramCompletion；hash 驗證不依賴用時）。
+ */
+export function bootstrapLevelForReplay(level: LevelDef): void {
+  const s = levelState;
+  s.current = level;
+  s.rings = (level.rings ?? []).map((r) => ({ ...r, passed: false }));
+  s.ringsCollected = 0;
+  s.zoneProgress = new Array(level.passZones?.length ?? 0).fill(false);
+  s.balloons = (level.balloons ?? []).map((b) => ({ ...b, popped: false }));
+  s.balloonsCollected = 0;
+  s.balloonsDone = false;
+  s.manualComplete = false;
+  s.awaitingReturn = false;
+  s.returnPhase = null;
+  s.durationDone = false;
+  s.startTime = Date.now();
+  s.pausedAt = 0;
+  s.armed = true;
+  flags.countdownActive = false;
+  flags.paused = false;
+  lastFaceAligned = null;
+  lastFaceRing = -1;
+  setSolidObstacles(
+    (level.obstacles ?? [])
+      .filter((o) => obstacleIsCollidable(o))
+      .map((o) => ({ x: o.x, y: o.y, z: o.z, half: o.size / 2 })),
+  );
+  resetDroneState();
 }
 
 /** 實際套用關卡資料（授權通過後；老師廣播 bypass 亦走此） */
@@ -378,6 +411,18 @@ function checkRings(nowMs: number): void {
   }
 }
 
+function emitLevelComplete(timeMs: number): void {
+  const s = levelState;
+  if (!s.current) return;
+  const inputLog = finalizeRecording();
+  bus.emit('level-complete', {
+    levelId: s.current.id,
+    timeMs,
+    inputLog,
+    replayHash: inputLog?.replayHash,
+  });
+}
+
 function manualLevelComplete(): void {
   const s = levelState;
   s.manualComplete = true;
@@ -387,7 +432,7 @@ function manualLevelComplete(): void {
   const elapsed = levelElapsedMs();
   toast(`🎉 過關！用時 ${(elapsed / 1000).toFixed(1)}s`, 'success');
   sound('complete');
-  if (s.current) bus.emit('level-complete', { levelId: s.current.id, timeMs: elapsed });
+  emitLevelComplete(elapsed);
 }
 
 function checkZones(): void {
@@ -434,7 +479,7 @@ function checkZones(): void {
       sound('complete');
       s.manualComplete = true;
       if (s.current) {
-        bus.emit('level-complete', { levelId: s.current.id, timeMs: levelElapsedMs() });
+        emitLevelComplete(levelElapsedMs());
       }
     }
   });
@@ -462,7 +507,7 @@ function checkBalloons(): void {
     s.balloonsDone = true;
     toast(`🎉 ${s.balloons.length} 顆氣球全部戳破！太厲害了！`, 'success');
     sound('complete');
-    if (s.current) bus.emit('level-complete', { levelId: s.current.id, timeMs: levelElapsedMs() });
+    if (s.current) emitLevelComplete(levelElapsedMs());
   }
 }
 
@@ -533,7 +578,7 @@ export function checkProgramCompletion(): ProgramResult {
   const passed = allRings || allZones;
   const elapsedMs = levelElapsedMs();
   if (passed && s.current) {
-    bus.emit('level-complete', { levelId: s.current.id, timeMs: elapsedMs });
+    emitLevelComplete(elapsedMs);
   }
   return {
     passed,

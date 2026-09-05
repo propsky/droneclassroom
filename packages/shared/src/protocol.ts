@@ -46,6 +46,10 @@ export interface CompleteLevelMsg {
   clientTs?: number;
   /** 離線補傳標記：true = 完成當下不在線（伺服器無法對時驗證，稽核留痕不硬標可疑） */
   offline?: boolean;
+  /** J-01：REST 上傳後的 logRef；與 replayHash 成對 */
+  replayLogRef?: string;
+  /** 客戶端宣告的 replay hash（hex）；伺服器重播後比對 */
+  replayHash?: string;
 }
 export interface ArenaJoinMsg { type: 'arena_join' }
 export interface ArenaLeaveMsg { type: 'arena_leave' }

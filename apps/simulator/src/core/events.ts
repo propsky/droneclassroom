@@ -43,11 +43,18 @@ export interface CoreEventMap {
   /** returnHome 關卡的引導階段 */
   'return-home': { phase: 'pending' | 'return' | 'land' | 'done' };
   /** 過關（手動或程式模式皆會發；net 層據此上報老師） */
-  'level-complete': { levelId: string; timeMs: number };
+  'level-complete': {
+    levelId: string;
+    timeMs: number;
+    inputLog?: import('@creafly/shared').InputRecordingV1;
+    replayHash?: string;
+  };
   /** 計時真正起算（按開始 / 倒數結束）— net 層據此送 level_start 校正伺服器防作弊觀察起點 */
   'level-timing-started': { levelId: string };
   /** 手動 ↔ 程式模式切換 */
   'mode-changed': { mode: 'manual' | 'program' };
+  /** SIM / REAL 執行模式切換（M-01） */
+  'execution-mode-changed': { mode: import('@creafly/shared').ExecutionMode; status: import('@creafly/shared').ExecutionRuntimeStatus };
   /** 程式開始 / 結束執行 */
   'program-running': { running: boolean };
   /** 清除飛行軌跡線 */
