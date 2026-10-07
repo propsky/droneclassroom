@@ -57,7 +57,7 @@ export interface BalloonDef {
   z: number;
   color?: number | string;
   label?: string;
-  /** 球徑 m；戳破判定半徑 = diameter/2（預設 1.4） */
+  /** 球徑 m（預設 1.4）；戳破判定中心距 = diameter/2 + 機身觸及 0.7 */
   diameter?: number;
   physics?: SimPhysicsDef;
 }
@@ -68,7 +68,7 @@ interface PassZoneBase {
   label: string;
   /** 地面標記圈直徑（position 型，預設 1.8） */
   markerDiameter?: number;
-  /** 觸發體半徑（heading/altitude 中心點判定，預設 1.5） */
+  /** 觸發體水平半徑（heading/altitude）；未設定 = 不限水平位置 */
   triggerRadius?: number;
 }
 

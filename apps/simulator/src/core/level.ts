@@ -445,9 +445,7 @@ function checkZones(): void {
     // 必須照順序：前一步沒完成，這一步尚未啟用
     if (i > 0 && !s.zoneProgress[i - 1]) return;
     if (zone.type === 'altitude') {
-      const dx = p.x - zone.x;
-      const dz = p.z - zone.z;
-      if (detHypot2(dx, dz) > zoneTriggerRadius(zone)) return;
+      if (outsideZoneTrigger(zone, p)) return;
       if (zone.minY !== undefined && p.y < zone.minY) return;
       if (zone.maxY !== undefined && p.y > zone.maxY) return;
     } else if (zone.type === 'position') {
@@ -458,9 +456,7 @@ function checkZones(): void {
       if (zone.minY !== undefined && p.y < zone.minY) return;
       if (zone.maxY !== undefined && p.y > zone.maxY) return;
     } else if (zone.type === 'heading') {
-      const dx = p.x - zone.x;
-      const dz = p.z - zone.z;
-      if (detHypot2(dx, dz) > zoneTriggerRadius(zone)) return;
+      if (outsideZoneTrigger(zone, p)) return;
       const yawDeg = normalizeDeg(droneState.yaw * RAD2DEG);
       const target = normalizeDeg(zone.targetYaw);
       let diff = Math.abs(yawDeg - target);
@@ -483,6 +479,14 @@ function checkZones(): void {
       }
     }
   });
+}
+
+function outsideZoneTrigger(
+  zone: { x: number; z: number; triggerRadius?: number },
+  p: { x: number; z: number },
+): boolean {
+  const r = zoneTriggerRadius(zone);
+  return r !== null && detHypot2(p.x - zone.x, p.z - zone.z) > r;
 }
 
 function checkBalloons(): void {

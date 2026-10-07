@@ -5,7 +5,8 @@ export const DEFAULT_RING_SPIN = 0.015;
 export const DEFAULT_RING_BOB_AMP = 0.2;
 export const DEFAULT_BALLOON_DIAMETER = 1.4;
 export const DEFAULT_ZONE_MARKER_DIAMETER = 1.8;
-export const DEFAULT_ZONE_TRIGGER_RADIUS = 1.5;
+/** 戳破判定 = 氣球半徑 + 機身觸及距離；預設直徑 1.4 → 1.4m，對齊 legacy 中心距判定 */
+export const BALLOON_POP_REACH = 0.7;
 
 export const DEFAULT_RING_COLOR = '#38bdf8';
 export const DEFAULT_OBSTACLE_SOLID_COLOR = '#f87171';
@@ -45,7 +46,7 @@ export function balloonDiameter(balloon: { diameter?: number } | undefined): num
 
 /** 戳破判定半徑（模擬器 core/level 用） */
 export function balloonPopRadius(balloon: { diameter?: number } | undefined): number {
-  return balloonDiameter(balloon) / 2;
+  return balloonDiameter(balloon) / 2 + BALLOON_POP_REACH;
 }
 
 export function zoneMarkerDiameter(zone: { markerDiameter?: number } | undefined): number {
@@ -53,9 +54,13 @@ export function zoneMarkerDiameter(zone: { markerDiameter?: number } | undefined
   return d != null && d > 0 ? d : DEFAULT_ZONE_MARKER_DIAMETER;
 }
 
-export function zoneTriggerRadius(zone: { triggerRadius?: number } | undefined): number {
+/**
+ * heading / altitude 的水平觸發半徑；null = 不限水平位置（legacy 語意：只看高度 / 朝向）。
+ * 官方關卡的 zone x/z 只是標記位置，學生在起飛台原地起飛 / 轉向即應觸發。
+ */
+export function zoneTriggerRadius(zone: { triggerRadius?: number } | undefined): number | null {
   const r = zone?.triggerRadius;
-  return r != null && r > 0 ? r : DEFAULT_ZONE_TRIGGER_RADIUS;
+  return r != null && r > 0 ? r : null;
 }
 
 /** 將關卡顏色統一為 #rrggbb（編輯器 / 預覽用） */

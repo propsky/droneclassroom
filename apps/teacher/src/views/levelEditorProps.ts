@@ -16,7 +16,6 @@ import {
   DEFAULT_RING_COLOR,
   DEFAULT_RING_SPIN,
   DEFAULT_ZONE_MARKER_DIAMETER,
-  DEFAULT_ZONE_TRIGGER_RADIUS,
   OBSTACLE_PHYSICS_SOLID,
   PHYSICS_DEFAULTS,
   balloonDiameter,
@@ -183,8 +182,8 @@ export function propsPanelHtml(): string {
                   <input id="le-zone-marker" type="number" step="0.2" min="0.8" max="4" class="mono">
                 </div>
                 <div class="field" id="le-zone-trigger-wrap" hidden>
-                  <label class="field-label" for="le-zone-trigger">觸發半徑（m）</label>
-                  <input id="le-zone-trigger" type="number" step="0.2" min="0.5" max="4" class="mono">
+                  <label class="field-label" for="le-zone-trigger">觸發半徑（m，空白＝不限位置）</label>
+                  <input id="le-zone-trigger" type="number" step="0.2" min="0.5" max="4" class="mono" placeholder="不限">
                 </div>
               </section>
 
@@ -356,7 +355,7 @@ export function createPropsController(host: PropsHost): PropsController {
       q<HTMLInputElement>(root, '#le-pz').value = String(z.z);
       q<HTMLInputElement>(root, '#le-label').value = z.label;
       q<HTMLInputElement>(root, '#le-zone-marker').value = String(zoneMarkerDiameter(z));
-      q<HTMLInputElement>(root, '#le-zone-trigger').value = String(zoneTriggerRadius(z));
+      q<HTMLInputElement>(root, '#le-zone-trigger').value = String(zoneTriggerRadius(z) ?? '');
       const ztype = z.type ?? 'position';
       q<HTMLSelectElement>(root, '#le-zone-type').value = ztype;
       q<HTMLElement>(root, '#le-zone-position').hidden = ztype !== 'position';
@@ -468,11 +467,11 @@ export function createPropsController(host: PropsHost): PropsController {
       const ztype = q<HTMLSelectElement>(root, '#le-zone-type').value as PassZoneDef['type'];
       const label = q<HTMLInputElement>(root, '#le-label').value.trim() || zn.label;
       const markerD = Number(q<HTMLInputElement>(root, '#le-zone-marker').value);
-      const triggerR = Number(q<HTMLInputElement>(root, '#le-zone-trigger').value);
+      const triggerRaw = q<HTMLInputElement>(root, '#le-zone-trigger').value.trim();
       const markerDiameter =
         markerD === DEFAULT_ZONE_MARKER_DIAMETER ? undefined : markerD;
       const triggerRadius =
-        triggerR === DEFAULT_ZONE_TRIGGER_RADIUS ? undefined : triggerR;
+        triggerRaw === '' || !(Number(triggerRaw) > 0) ? undefined : Number(triggerRaw);
       let next: PassZoneDef;
       if (ztype === 'altitude') {
         const minYRaw = q<HTMLInputElement>(root, '#le-zone-miny').value.trim();

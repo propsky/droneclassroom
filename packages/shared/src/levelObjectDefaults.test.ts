@@ -8,6 +8,7 @@ import {
   parseLevelColor,
   ringBobAmp,
   ringSpin,
+  zoneTriggerRadius,
 } from './levelObjectDefaults';
 
 describe('levelObjectDefaults', () => {
@@ -23,9 +24,15 @@ describe('levelObjectDefaults', () => {
     expect(ringBobAmp({})).toBe(0.2);
   });
 
-  it('balloonPopRadius 依直徑', () => {
-    expect(balloonPopRadius({})).toBeCloseTo(0.7);
-    expect(balloonPopRadius({ diameter: 2 })).toBe(1);
+  it('balloonPopRadius = 半徑 + 機身觸及（預設對齊 legacy 1.4）', () => {
+    expect(balloonPopRadius({})).toBeCloseTo(1.4);
+    expect(balloonPopRadius({ diameter: 2 })).toBeCloseTo(1.7);
+  });
+
+  it('zoneTriggerRadius 未設定 = 不限水平位置', () => {
+    expect(zoneTriggerRadius({})).toBeNull();
+    expect(zoneTriggerRadius({ triggerRadius: 0 })).toBeNull();
+    expect(zoneTriggerRadius({ triggerRadius: 2 })).toBe(2);
   });
 
   it('obstacleIsCollidable 尊重 physics', () => {
