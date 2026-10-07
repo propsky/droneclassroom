@@ -1,6 +1,6 @@
 """老師帳號系統測試 — 註冊 / 登入 / DB session 滑動續期 / 登出 / 換密碼 / WS ticket。
 
-需要真實 PostgreSQL（DATABASE_URL，環境變數或 apps/api/.env），沒設就 skip（無 DB 的 503
+需要真實 PostgreSQL（環境變數 TEST_DATABASE_URL，見 tests/db_env.py），沒設就 skip（無 DB 的 503
 行為例外，用既有 client fixture）。端點會 commit，無法用 rollback 隔離 → 每個測試用唯一
 email 前綴，結束時把建出的老師 / session / 稽核事件刪乾淨，不在 RDS 留垃圾。
 """
@@ -25,9 +25,12 @@ from app.main import create_app
 from app.rest import DEV_TEACHER_EMAIL
 from tests.conftest import teacher_connect
 from tests.db_cleanup import cleanup_test_teachers
+from tests.db_env import TEST_DATABASE_URL
 
-DATABASE_URL = Settings().database_url
-needs_db = pytest.mark.skipif(not DATABASE_URL, reason="未設定 DATABASE_URL，略過真實資料庫測試")
+DATABASE_URL = TEST_DATABASE_URL
+needs_db = pytest.mark.skipif(
+    not DATABASE_URL, reason="未設定 TEST_DATABASE_URL，略過真實資料庫測試"
+)
 
 EMAIL_DOMAIN = "accounts-test.invalid"
 PASSWORD = "correct horse battery"

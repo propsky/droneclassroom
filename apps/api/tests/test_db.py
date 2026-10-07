@@ -1,6 +1,6 @@
 """資料庫層測試 — /api/health 的 db 欄位、record_event 寫入與 dedupe。
 
-需要真實 PostgreSQL 的測試以 DATABASE_URL（環境變數或 apps/api/.env）為準，
+需要真實 PostgreSQL 的測試以環境變數 TEST_DATABASE_URL 為準（見 tests/db_env.py），
 沒設就 skip；既有測試（conftest 的 client fixture）一律無資料庫模式。
 """
 
@@ -18,9 +18,12 @@ from app.db.audit import record_event
 from app.db.models import AuditEvent
 from app.db.session import create_engine, create_sessionmaker
 from app.main import create_app
+from tests.db_env import TEST_DATABASE_URL
 
-DATABASE_URL = Settings().database_url
-needs_db = pytest.mark.skipif(not DATABASE_URL, reason="未設定 DATABASE_URL，略過真實資料庫測試")
+DATABASE_URL = TEST_DATABASE_URL
+needs_db = pytest.mark.skipif(
+    not DATABASE_URL, reason="未設定 TEST_DATABASE_URL，略過真實資料庫測試"
+)
 
 
 def test_health_db_disabled(client: TestClient) -> None:
