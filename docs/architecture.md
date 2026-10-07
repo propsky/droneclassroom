@@ -8,8 +8,10 @@
 
 ```bash
 pnpm install        # JS workspace 依賴
-pnpm dev            # 前端 :5173（Vite）+ 後端 :3000（WS）
-pnpm typecheck      # 全 workspace 型別檢查
+pnpm dev            # 學生端 :5173 + 老師後台 :5174（Vite）+ 後端 :3000（REST + WS）
+pnpm typecheck      # 全 workspace 型別檢查（TS + ruff）
+pnpm test           # Vitest（shared / simulator / teacher）+ pytest（api）
+pnpm test:e2e       # Playwright 跨瀏覽器 smoke
 pnpm build          # 產出 apps/simulator/dist（零 CDN 依賴，可離線）
 pnpm legacy         # 跑舊版（node legacy/server.js，:3000）
 ```
@@ -36,9 +38,11 @@ droneclassroom/
 │   │       ├── render/   # Babylon 渲染層（訂閱 core）
 │   │       ├── input/    # 鍵盤 / nipplejs / Gamepad 三路疊加
 │   │       ├── blockly/  # 積木定義 + toolbox（v11 npm 包、media 本地化）
-│   │       ├── net/      # WS client（協定相容 legacy、退避重連）
+│   │       ├── net/      # WS client（協定相容 legacy、退避重連）、帳號 / 進度 / 錄製上傳
+│   │       ├── multiplayer/ soccer/  # 大亂鬥 / 足球（多人 + 單人練習）
 │   │       └── ui/       # HUD / overlay（純 TS + DOM，UI 框架刻意延後定案）
-│   └── api/              # @creafly/api — FastAPI 後端（Python + uv）
+│   ├── teacher/          # @creafly/teacher — 老師後台 + 關卡編輯器（Vite + TS，無框架）
+│   └── api/              # @creafly/api — FastAPI 後端（Python + uv；PostgreSQL 選配）
 ├── packages/
 │   └── shared/           # @creafly/shared — 關卡 schema / WS 協定型別 / 純函數（零依賴）
 ├── legacy/               # 舊版 Three.js 單檔版，完整可跑，效果對齊基準
@@ -59,7 +63,7 @@ droneclassroom/
 
 ## 後端
 
-- **`apps/api`（FastAPI）是唯一後端**：Pydantic 驗證進站訊息、in-memory 名冊（**目前無資料庫，刻意的**——帳號/成績持久化需求出現時才引入 PostgreSQL，見 rewrite-plan Phase 4）。多人賽局（大亂鬥/足球）Phase 2 直接在此實作。
+- **`apps/api`（FastAPI）是唯一後端**：Pydantic 驗證進站訊息；名冊 / 房間 / 賽局在記憶體。**PostgreSQL（SQLAlchemy 2 + Alembic）為選配**：設 `DATABASE_URL` 才啟用老師 / 班級 / 學生帳號、進度、關卡目錄與稽核（表結構見 [db-schema.md](db-schema.md)，migration 以 `uv run creafly-migrate` 另行執行）；未設定時以無資料庫模式運作（訪客 / 教室 LAN 照常上課）。多人賽局（大亂鬥/足球）在 `app/games/`。
 - :3000 同 port 供 HTTP 靜態 + WS。過渡期的 Node 版後端（`apps/server`）已於 2026-07-15 移除（歷史見 git log），legacy 版行為參照 `legacy/server.js`。
 
 ### 安全與防作弊（2026-07-15 起）
@@ -68,6 +72,13 @@ droneclassroom/
 - **Origin 白名單**：WS 升級與登入端點檢查 Origin（無 Origin 的非瀏覽器工具放行；同 host / localhost / 私有網段預設放行——教室 LAN 場景刻意的；`ALLOWED_ORIGINS` 可加白），拒絕 close 4403 / HTTP 403。
 - **防作弊＝標記不阻擋**：`complete_level` 對照伺服器觀察的關卡經過時間，離譜（宣稱用時 < 觀察一半、<1s、沒 progress 就交、未知關卡）→ 該生標 `suspect`，老師端顯示 ⚠️；標記跟著名字走，重整頁面/同名重連不洗白。位置級驗證（限速/邊界）留給 Phase 2c 多人在 `games/` 做。
 - 學生端刻意不設帳密（國小教室場景）；正式競賽的帳號/RBAC 見 rewrite-plan Phase 4。
+
+### 過關輸入錄製與伺服器重播驗證（J-01 / J-02）
+
+- **錄製**（帳號學生，`core/inputRecorder.ts`，格式 `@creafly/shared` `inputRecording.ts` v2）：從計時開始到過關，記錄每 tick 的 `ControlFrame`、所有不經 `ControlFrame` 直接改狀態的操作（起降鍵 / 重置 / 急停 / 回家 / 模式切換 / 執行與停止程式，於 `physics.ts` / `level.ts` / `program.ts` 的 `recordAction`）、同一畫面連跑多 tick 的區段（程式模式 async 指令鏈的微任務排空時點），並逐 tick 累積狀態 hash。過關時經 REST `POST /auth/student/replay-log` 上傳，`complete_level` 只帶參照與 hash（WS 4KB 上限）。
+- **重播**：伺服器以 Node 執行打包的 `core/`（Docker 映像內建 `/app/replay/verify-recording.mjs`），**用伺服器資料庫的關卡定義**重跑，判定集中在 `core/replayVerify.ts`：hash 相符、確實過關、宣告用時不短於模擬時間、錄製關卡與過關關卡一致。結果三態：可疑（標 suspect）/ 無法驗證（舊版前端、前後端 `simVersion` 不同、老師剛改過關卡）/ 通過。驗證器自身失敗一律不算學生的錯。
+- **線上與重播共用 `core/simTick.ts`**；`core/replayParity.test.ts` 以真實操作情境守住兩邊一致。新增任何直接改無人機狀態的操作都必須呼叫 `recordAction` 並在 `replayRunner.ts` 對應重演。
+- **`REPLAY_ENFORCE`**（預設關）：開啟後「未附錄製（非離線補傳）」與「無法驗證」也標可疑；PWA 新版於下次開啟才生效，確認錄製上傳穩定後再開。
 
 ### 多房間（`app/rooms.py`）
 
@@ -84,5 +95,5 @@ Vite + TS（無框架，同 simulator 慣例），dev :5174、生產由 api 以 
 ## 工作慣例
 
 - 所有 UI 文字、註解、commit 訊息用繁體中文（zh-Hant）。
-- 無單元測試框架的部分以 headless Chrome 截圖驗證（macOS 需 `--use-angle=swiftshader --enable-unsafe-swiftshader`）；`core/` 為純 TS 可直接 Node 跑行為測試；`apps/api` 用 pytest。
+- 測試：Vitest（`packages/shared`、`apps/simulator` 的 `src/**/*.test.ts`、`apps/teacher`）、pytest（`apps/api`；真實 PostgreSQL 測試只在設了 `TEST_DATABASE_URL` 時執行，不讀 `.env` 的 `DATABASE_URL`）、Playwright（`apps/simulator/e2e`）。視覺以 headless Chrome 截圖驗證（macOS 需 `--use-angle=swiftshader --enable-unsafe-swiftshader`）。
 - 實作「缺少的功能」前先查 rewrite-plan §4 的 Phase 清單——很多是刻意延後，不是遺漏。
