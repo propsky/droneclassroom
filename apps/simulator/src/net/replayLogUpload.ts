@@ -1,5 +1,5 @@
 // 輸入錄製 REST 上傳（J-01）：WS 4KB 限制下，完整 JSON 走 POST /auth/student/replay-log。
-import type { InputRecordingV1 } from '@creafly/shared';
+import type { InputRecordingV2 } from '@creafly/shared';
 import { getStudentToken } from './studentAuth';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
@@ -7,7 +7,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 /** 上傳錄製；回傳 logRef（冪等鍵 = clientLogId）。失敗回 null（不阻擋過關上報）。 */
 export async function uploadReplayLog(
   clientLogId: string,
-  recording: InputRecordingV1,
+  recording: InputRecordingV2,
 ): Promise<string | null> {
   const token = getStudentToken();
   if (!token) return null;

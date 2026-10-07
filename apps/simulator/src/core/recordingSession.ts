@@ -1,13 +1,7 @@
-// 輸入錄製生命週期：接 event bus；主迴圈每 tick 呼叫 recordInputTick。
-import type { InputRecordingV1, LevelDef } from '@creafly/shared';
+// 輸入錄製生命週期：接 event bus；主迴圈每 tick 呼叫 begin/endRecordedTick（見 simTick.ts）。
+import type { InputRecordingV2, LevelDef } from '@creafly/shared';
 import { bus } from './events';
-import {
-  startInputRecording,
-  finishInputRecording,
-  cancelInputRecording,
-  attachProgramCode,
-  recordInputTick,
-} from './inputRecorder';
+import { startInputRecording, finishInputRecording, cancelInputRecording } from './inputRecorder';
 
 export function initRecordingSession(
   resolveLevel: () => LevelDef | null,
@@ -22,12 +16,16 @@ export function initRecordingSession(
   bus.on('level-loaded', () => cancelInputRecording());
 }
 
-export function captureProgramCode(code: string): void {
-  attachProgramCode(code);
-}
-
-export function finalizeRecording(): InputRecordingV1 | undefined {
+export function finalizeRecording(): InputRecordingV2 | undefined {
   return finishInputRecording() ?? undefined;
 }
 
-export { recordInputTick, isRecording } from './inputRecorder';
+export {
+  recordAction,
+  beginRecordedTick,
+  endRecordedTick,
+  beginFrame,
+  endFrame,
+  setInFixedTick,
+  isRecording,
+} from './inputRecorder';

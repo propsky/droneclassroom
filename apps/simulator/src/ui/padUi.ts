@@ -14,6 +14,7 @@ import {
   type DigitalDir,
 } from '../input/padUiIntent';
 import { playUiNavSound } from './audio';
+import { registerPadUi } from '../input';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -448,4 +449,5 @@ export function initPadUi(): void {
   bus.on('pad-connection', () => {
     if (!padConnected()) resetPadUi();
   });
+  registerPadUi({ tick: tickPadUi, isCapturing: isPadUiCapturing });
 }

@@ -21,7 +21,7 @@ import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
 import { setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
-import { finalizeRecording } from './recordingSession';
+import { finalizeRecording, recordAction } from './recordingSession';
 
 export interface MissionRing {
   x: number;
@@ -318,6 +318,7 @@ export function runCountdown(onGo?: () => void): void {
 
 /** 重置無人機 + 圈圈狀態（對齊 legacy resetDrone：不清 passZones/氣球進度） */
 export function resetMission(): void {
+  recordAction({ a: 'reset' });
   resetDroneState();
   levelState.rings.forEach((r) => (r.passed = false));
   levelState.ringsCollected = 0;
@@ -581,7 +582,10 @@ export function checkProgramCompletion(): ProgramResult {
     s.zoneProgress.every(Boolean);
   const passed = allRings || allZones;
   const elapsedMs = levelElapsedMs();
-  if (passed && s.current) {
+  // 每次嘗試只上報一次：zone 關在 tick 內已由 checkZones 上報；圈圈關這裡上報後標記完成，
+  // 否則程式結束後下一 tick checkRings（programRunning 已 false）會再上報一次
+  if (passed && s.current && !s.manualComplete) {
+    s.manualComplete = true;
     emitLevelComplete(elapsedMs);
   }
   return {

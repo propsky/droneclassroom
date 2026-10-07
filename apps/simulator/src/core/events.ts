@@ -46,7 +46,7 @@ export interface CoreEventMap {
   'level-complete': {
     levelId: string;
     timeMs: number;
-    inputLog?: import('@creafly/shared').InputRecordingV1;
+    inputLog?: import('@creafly/shared').InputRecordingV2;
     replayHash?: string;
   };
   /** 計時真正起算（按開始 / 倒數結束）— net 層據此送 level_start 校正伺服器防作弊觀察起點 */

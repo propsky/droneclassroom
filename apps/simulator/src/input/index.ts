@@ -2,7 +2,7 @@
 // 每個物理 tick 由主迴圈取用。搖桿優先序：實體 Gamepad > BLE > 虛擬搖桿（互斥，不疊加）。
 // 鍵盤可與搖桿並用（教室常見：鍵盤微調 + 手把主控）。
 import type { ControlFrame } from '../core/physics';
-import { autoLand } from '../core/physics';
+import { autoLand, padTakeoff } from '../core/physics';
 import { droneState, YAW_KEY_RATE, YAW_STICK_RATE } from '../core/droneState';
 import { resetMission } from '../core/level';
 import { toast } from '../core/events';
@@ -19,9 +19,21 @@ import { gamepadConfig, initCalibration, tickCalibration, calibration } from './
 import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
 import { registerBleConnectedChecker } from '../core/execution/mode';
 import { resolveStickSource, type StickAxes } from './padMath';
-import { isPadUiCapturing, tickPadUi } from '../ui/padUi';
 
 export { isTouchDevice };
+
+/** 搖桿選單導覽（ui/padUi 於 init 時註冊；input 層不反向依賴 ui） */
+export interface PadUiHooks {
+  tick(): void;
+  /** overlay 開啟時接管搖桿：飛行按鍵與推桿輸入暫停 */
+  isCapturing(): boolean;
+}
+
+let padUi: PadUiHooks = { tick: () => undefined, isCapturing: () => false };
+
+export function registerPadUi(hooks: PadUiHooks): void {
+  padUi = hooks;
+}
 
 export function initInputs(opts: { toggleView: () => void }): void {
   initKeyboard(opts);
@@ -42,9 +54,7 @@ function handlePadButtons(
   reset: boolean,
   source: string,
 ): void {
-  if (takeoff && droneState.isGrounded) {
-    droneState.isGrounded = false;
-    droneState.isFlying = true;
+  if (takeoff && padTakeoff()) {
     toast(`🛫 起飛（${source}）`, 'success');
   }
   if (land && droneState.isFlying) {
@@ -63,8 +73,8 @@ export function tickInputDevices(manualLocked: boolean): void {
   tickCalibration();
   if (calibration.active) return;
 
-  tickPadUi();
-  const uiCapturing = isPadUiCapturing();
+  padUi.tick();
+  const uiCapturing = padUi.isCapturing();
 
   if (!uiCapturing && !manualLocked) {
     if (gamepadState.connected) {
@@ -106,7 +116,7 @@ export function collectControlFrame(): ControlFrame {
     wantsTakeoff: false,
     anyInput: false,
   };
-  if (isPadUiCapturing()) return idle;
+  if (padUi.isCapturing()) return idle;
   if (keys[' ']) return idle;
 
   const stick = activeStickAxes();

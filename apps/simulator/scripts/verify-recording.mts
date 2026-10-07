@@ -1,39 +1,13 @@
-// J-02 伺服器重播驗證進入點：stdin JSON { recording, claimedHash } → stdout RESULT { ok, replayHash }。
-import { replayRecording } from '../src/core/replayRunner';
-import type { InputRecordingV1 } from '@creafly/shared';
-import { isInputRecordingV1, validateRecording } from '@creafly/shared';
-
-interface VerifyInput {
-  recording: InputRecordingV1;
-  claimedHash: string;
-}
+// J-02 伺服器重播驗證進入點：stdin JSON（VerifyInput）→ stdout `RESULT {...}`（VerifyResult）。
+// 判定邏輯見 src/core/replayVerify.ts。
+import { verifyRecording, type VerifyInput } from '../src/core/replayVerify';
+import { SIM_VERSION } from '../src/core/simVersion';
 
 async function main(): Promise<void> {
-  const raw = await readStdin();
-  const body = JSON.parse(raw) as VerifyInput;
-  if (!isInputRecordingV1(body.recording)) {
-    console.log(`RESULT ${JSON.stringify({ ok: false, reason: '錄製格式錯誤' })}`);
-    process.exit(1);
-    return;
-  }
-  const err = validateRecording(body.recording);
-  if (err) {
-    console.log(`RESULT ${JSON.stringify({ ok: false, reason: err })}`);
-    process.exit(1);
-    return;
-  }
-  const result = await replayRecording(body.recording);
-  const ok = result.replayHash === body.claimedHash;
-  console.log(
-    `RESULT ${JSON.stringify({
-      ok,
-      replayHash: result.replayHash,
-      claimedHash: body.claimedHash,
-      ticks: result.ticks,
-      reason: ok ? undefined : `重播 hash ${result.replayHash} ≠ 宣告 ${body.claimedHash}`,
-    })}`,
-  );
-  process.exit(ok ? 0 : 1);
+  const body = JSON.parse(await readStdin()) as VerifyInput;
+  const result = await verifyRecording(body);
+  console.log(`RESULT ${JSON.stringify(result)}`);
+  process.exit(result.status === 'mismatch' ? 1 : 0);
 }
 
 function readStdin(): Promise<string> {
@@ -46,6 +20,8 @@ function readStdin(): Promise<string> {
 }
 
 void main().catch((e) => {
-  console.log(`RESULT ${JSON.stringify({ ok: false, reason: String(e) })}`);
-  process.exit(1);
+  console.log(
+    `RESULT ${JSON.stringify({ status: 'unverifiable', reason: `驗證器錯誤：${String(e)}`, simVersion: SIM_VERSION })}`,
+  );
+  process.exit(2);
 });

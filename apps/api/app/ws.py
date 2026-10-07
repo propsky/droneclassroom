@@ -90,7 +90,7 @@ from .protocol import (
     TeacherBroadcastMsg,
     TeacherBroadcastPayload,
 )
-from .replay_logs import load_replay_recording
+from .replay_logs import load_level_for_replay, load_replay_recording
 from .replay_verify import ReplayVerifier
 from .rest import known_level_ids
 from .rooms import Room, RoomLimitError, RoomManager
@@ -255,6 +255,47 @@ async def _notify_not_in_game(room: Room, player_ids: set[str], text: str) -> No
             await send_safe(s.ws, data)
 
 
+async def _replay_suspect_reason(
+    ws: WebSocket, record: StudentRecord, msg: CompleteLevelMsg
+) -> str | None:
+    """帳號學生過關的輸入錄製重播驗證 → 可疑原因（None = 乾淨 / 不適用）。
+
+    以伺服器資料庫的關卡定義重播（學生端快照只拿來比對）；驗證器自身失敗不算學生的錯。
+    REPLAY_ENFORCE 開啟時，未附錄製（非離線補傳）與「無法驗證」也標可疑。
+    """
+    maker = ws.app.state.db_sessionmaker
+    if record.student_id is None or maker is None:
+        return None
+    settings: Settings = ws.app.state.settings
+    if not (msg.replayLogRef and msg.replayHash):
+        if settings.replay_enforce and not msg.offline:
+            return "未附輸入錄製"
+        return None
+    async with maker() as session:
+        rec = await load_replay_recording(session, msg.replayLogRef, record.student_id)
+        level = await load_level_for_replay(
+            session, msg.levelId, edit_grace_sec=settings.replay_level_edit_grace_sec
+        )
+    if rec is None:
+        return "找不到輸入錄製"
+    verifier: ReplayVerifier = ws.app.state.replay_verifier
+    outcome = await verifier.verify(
+        rec,
+        msg.replayHash,
+        level_id=msg.levelId,
+        time_ms=msg.timeMs,
+        server_level=level[0] if level else None,
+        level_recently_edited=level[1] if level else False,
+    )
+    if outcome.status == "mismatch":
+        return outcome.reason
+    if outcome.status == "unverifiable":
+        logger.info("[Replay] %s 關卡 %s 無法驗證：%s", record.id, msg.levelId, outcome.reason)
+        if settings.replay_enforce:
+            return f"無法驗證：{outcome.reason}"
+    return None
+
+
 async def _student_endpoint(ws: WebSocket) -> None:
     """學生 WS：welcome →（進房）→ register / progress / complete_level / 賽局訊息迴圈。
 
@@ -399,23 +440,8 @@ async def _student_endpoint(ws: WebSocket) -> None:
                             LevelLoadOkMsg(levelId=valid.levelId).model_dump_json(),
                         )
                 case CompleteLevelMsg():
-                    replay_reason: str | None = None
                     maker = ws.app.state.db_sessionmaker
-                    if (
-                        valid.replayLogRef
-                        and valid.replayHash
-                        and record.student_id is not None
-                        and maker is not None
-                    ):
-                        async with maker() as session:
-                            rec = await load_replay_recording(
-                                session, valid.replayLogRef, record.student_id
-                            )
-                        if rec is None:
-                            replay_reason = "找不到輸入錄製"
-                        else:
-                            verifier: ReplayVerifier = ws.app.state.replay_verifier
-                            replay_reason = await verifier.verify(rec, valid.replayHash)
+                    replay_reason = await _replay_suspect_reason(ws, record, valid)
                     reasons = await roster.complete_level(
                         record, valid.levelId, valid.timeMs, offline=valid.offline
                     )

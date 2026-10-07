@@ -12,6 +12,8 @@ COPY packages/shared/src ./packages/shared/src
 COPY apps/simulator/tsconfig.json ./apps/simulator/tsconfig.json
 COPY apps/simulator/src ./apps/simulator/src
 COPY apps/simulator/scripts ./apps/simulator/scripts
+# 官方關卡內容納入 simVersion 雜湊（與前端 vite 建置同一算法）
+COPY apps/simulator/public/levels ./apps/simulator/public/levels
 RUN node apps/simulator/scripts/build-replay-verifier.mjs /build/out/verify-recording.mjs
 
 # ---- 執行期 ----

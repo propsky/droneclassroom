@@ -17,6 +17,7 @@ import {
 } from './droneState';
 import { toast, sound, stateHud } from './events';
 import { SimpleBackend, type PhysicsBackend } from './physicsBackend';
+import { recordAction } from './inputRecorder';
 
 /** 一個 tick 的手動控制輸入（鍵盤 / 虛擬搖桿 / 實體搖桿 疊加後的語意軸） */
 export interface ControlFrame {
@@ -76,6 +77,7 @@ export function setSolidObstacles(list: SolidObstacle[]): void {
 
 /** 緊急停止（空中按 Space）：凍結、速度歸零；任何輸入解凍 */
 export function emergencyStop(): void {
+  recordAction({ a: 'estop' });
   if (droneState.isGrounded || droneState.returning || !droneState.isFlying) return;
   droneState.frozen = true;
   droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
@@ -210,8 +212,18 @@ export const easeInOut = (t: number): number => {
   return 1 - (u * u) / 2; // 乘法取代 Math.pow(u,2)：pow 未被規格保證正確捨入
 };
 
+/** 搖桿起飛鍵：地面上直接切成飛行狀態（回傳是否有起飛，供 UI 提示） */
+export function padTakeoff(): boolean {
+  recordAction({ a: 'takeoff' });
+  if (!droneState.isGrounded) return false;
+  droneState.isGrounded = false;
+  droneState.isFlying = true;
+  return true;
+}
+
 /** 一鍵飛回起飛墊（機頭轉回 0） */
 export function goHome(): void {
+  recordAction({ a: 'home' });
   if (droneState.returning) return;
   const d = distVec3(droneState.position, HOME_POSITION);
   if (droneState.isGrounded && d < 0.5) {
@@ -240,6 +252,7 @@ export function goHome(): void {
 
 /** 搖桿降落鍵：原地垂直降落（1.5 秒） */
 export function autoLand(): void {
+  recordAction({ a: 'land' });
   if (droneState.returning || !droneState.isFlying) return;
   droneState.returning = true;
   droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;

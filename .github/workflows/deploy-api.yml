@@ -10,6 +10,8 @@ on:
       # 重播驗證器打包自 simulator core：物理改了不重部署 → 前後端 hash 不一致 → 誠實學生被標可疑
       - 'apps/simulator/src/core/**'
       - 'apps/simulator/scripts/**'
+      # 官方關卡：伺服器 /api/levels 與重播的權威定義都來自映像內這份 JSON
+      - 'apps/simulator/public/levels/**'
       - '.github/workflows/deploy-api.yml'
 
 # ======= 改這裡（非機密值直接寫死）=======

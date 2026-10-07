@@ -18,7 +18,7 @@ import { resetMission, checkProgramCompletion, levelState } from './level';
 import { inkPenDown, inkPenUp, inkSetColor, inkRandomColor } from './pen';
 import { bus, toast, sound, stateHud } from './events';
 import { buildCreaflyMotionApi, registerSimMotionRuntime } from './execution/mode';
-import { captureProgramCode } from './recordingSession';
+import { recordAction } from './recordingSession';
 
 export const programState = {
   running: false,
@@ -278,15 +278,19 @@ export function runProgram(code: string): void {
   if (programState.running) return;
 
   resetMission();
+  // 程式模式可能沒按過關卡的「開始」（intro 直接切程式模式）→ 補上關卡計時基準，
+  // 否則 checkProgramCompletion 用 levelElapsedMs() 會回 0 秒成績；armed 一併補
+  // （tickLevel 的圈圈判定在未 armed 時不跑）。同時發 level-timing-started：
+  // 伺服器防作弊觀察起點校正 + 輸入錄製開始（否則這條路徑完全沒有錄製）
+  levelState.armed = true;
+  if (levelState.startTime === 0) {
+    levelState.startTime = Date.now();
+    if (levelState.current) bus.emit('level-timing-started', { levelId: levelState.current.id });
+  }
+  recordAction({ a: 'run', code });
   programState.running = true;
   programState.abort = false;
   programState.startTime = simNowMs();
-  captureProgramCode(code);
-  // 程式模式可能沒按過關卡的「開始」（intro 直接切程式模式）→ 補上關卡計時基準，
-  // 否則 checkProgramCompletion 用 levelElapsedMs() 會回 0 秒成績；armed 一併補
-  // （tickLevel 的圈圈判定在未 armed 時不跑）
-  if (levelState.startTime === 0) levelState.startTime = Date.now();
-  levelState.armed = true;
   flags.programRunning = true;
   bus.emit('program-running', { running: true });
 
@@ -337,6 +341,7 @@ export function runProgram(code: string): void {
 
 export function stopProgram(): void {
   if (!programState.running) return;
+  recordAction({ a: 'stop' });
   programState.abort = true;
 }
 
@@ -352,6 +357,7 @@ function finishProgram(): void {
 // =============================================================================
 export function setMode(mode: 'manual' | 'program'): void {
   if (flags.mode === mode) return;
+  recordAction({ a: 'mode', mode });
   if (programState.running) {
     toast('⏳ 程式執行中，無法切換模式', 'error');
     return;

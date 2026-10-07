@@ -8,6 +8,7 @@ WS 訊息上限 4KB，完整 InputRecording 走 REST：
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .accounts import CurrentStudentSession, DbSession
 from .db.audit import record_event
-from .db.models import AuditEvent, Student, Team
+from .db.models import AuditEvent, Level, Student, Team
 
 logger = logging.getLogger("creafly.api.replay_logs")
 
@@ -73,6 +74,24 @@ async def upload_replay_log(
         return ReplayLogResponse(logRef=body.clientLogId)
     await db.commit()
     return ReplayLogResponse(logRef=body.clientLogId)
+
+
+async def load_level_for_replay(
+    session: AsyncSession, level_id: str, *, edit_grace_sec: int
+) -> tuple[dict[str, Any], bool] | None:
+    """伺服器權威關卡定義 + 是否為「剛被老師修改的自訂關」。
+
+    官方關卡每次啟動都由 JSON upsert（updated_at = 啟動時刻），不算「修改」。
+    """
+    row = (
+        await session.execute(select(Level).where(Level.level_id == level_id))
+    ).scalar_one_or_none()
+    if row is None or not isinstance(row.definition, dict):
+        return None
+    recently_edited = row.scope == "teacher" and row.updated_at is not None and (
+        datetime.now(UTC) - row.updated_at
+    ) < timedelta(seconds=edit_grace_sec)
+    return row.definition, recently_edited
 
 
 async def load_replay_recording(

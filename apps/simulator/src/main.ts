@@ -10,28 +10,24 @@ import {
   isManualLocked,
   simNowMs,
 } from './core/droneState';
-import {
-  applyManualControls,
-  integrate,
-  floorProtect,
-  resolveObstacleCollisions,
-  tickAutopilot,
-} from './core/physics';
-import { loadChapters, tickLevel, resetMission, levelState, setLevelLoadGuard, setInitialLevelResolver } from './core/level';
+import { loadChapters, resetMission, levelState, setLevelLoadGuard, setInitialLevelResolver } from './core/level';
 import { loadLevel } from './net/levelLoad';
 import {
   CREAFLY_API,
   runProgram,
   stopProgram,
-  tickProgram,
-  programState,
   setMode,
 } from './core/program';
 import { meetsMinimumPlayRequirements, probeBrowserCapabilities, parseSceneEnv } from '@creafly/shared';
-import { tickPen } from './core/pen';
 import { bus, toast } from './core/events';
 import { initInputs, tickInputDevices, collectControlFrame, isTouchDevice } from './input';
-import { initRecordingSession, recordInputTick, isRecording } from './core/recordingSession';
+import {
+  initRecordingSession,
+  beginFrame,
+  endFrame,
+  setInFixedTick,
+} from './core/recordingSession';
+import { tickFlightPhysics, tickRecordedLevel } from './core/simTick';
 import { getStudentToken } from './net/studentAuth';
 import { createSceneWorld, applySceneEnv } from './render/scene';
 import { DroneVisual } from './render/drone';
@@ -276,43 +272,26 @@ function fixedTick(nowMs: number): void {
   tickInputDevices(isManualLocked());
 
   const controlFrame = collectControlFrame();
-  const inLevelPlay = !arenaState.active && !soccerState.active && !practiceState.active;
 
-  if (programState.running) {
-    // 程式模式：位置由 motion plan 推進，只做地板保護
-    tickProgram(TICK_MS);
-    floorProtect();
-  } else {
-    if (droneState.returning) {
-      tickAutopilot(TICK_MS);
-    } else if (!isManualLocked()) {
-      applyManualControls(controlFrame, arenaThrustScale());
-    }
-    integrate();
-  }
-
-  resolveObstacleCollisions();
-
+  // 模式分派：大亂鬥 / 足球 tick 接管 ↔ 一般關卡（與伺服器重播共用 core/simTick）。
+  // 各模式自己管邊界/判定/HUD，分身視覺在 arenaClones / soccerVisuals
   if (arenaState.active) {
+    // 大亂鬥鬼抓人：我是鬼 → 推力 ×GHOST_SPEED（非鬼時恆為 1）
+    tickFlightPhysics(controlFrame, arenaThrustScale());
     tickArena();
     arenaClones.tick();
   } else if (soccerState.active) {
     // ⚽ 多人足球：邊界 / 分身內插 / 機對機碰撞 / 進球偵測 / 計分 HUD
+    tickFlightPhysics(controlFrame, arenaThrustScale());
     tickSoccerMatch();
     soccerVisuals.tick();
   } else if (practiceState.active) {
     // ⚽ 單人練習：邊界 / 穿門判定 / drill 進度
+    tickFlightPhysics(controlFrame, arenaThrustScale());
     tickSoccerPractice();
     soccerVisuals.tick();
   } else {
-    tickLevel(nowMs);
-    tickPen(nowMs);
-    if (inLevelPlay && isRecording()) {
-      const recFrame = programState.running
-        ? { lift: 0, forward: 0, right: 0, yawDelta: 0, wantsTakeoff: false, anyInput: false }
-        : controlFrame;
-      recordInputTick(recFrame);
-    }
+    tickRecordedLevel(nowMs, controlFrame);
   }
 
   // 視覺 tick（螺旋槳、傾斜、圈動畫、雲、假陰影、軌跡）
@@ -341,14 +320,22 @@ world.engine.runRenderLoop(() => {
   }
 
   let ticks = 0;
+  // 同一畫面內連跑的 tick 之間不會排空微任務（程式 async 指令鏈的推進時點）→ 錄製下來供重播對齊
+  const frameMark = beginFrame();
   while (accumulator >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {
     snapshot(prevSnap);
     advanceSimTick();
-    fixedTick(simNowMs());
+    setInFixedTick(true);
+    try {
+      fixedTick(simNowMs());
+    } finally {
+      setInFixedTick(false);
+    }
     snapshot(currSnap);
     accumulator -= TICK_MS;
     ticks++;
   }
+  endFrame(frameMark);
   if (ticks === MAX_TICKS_PER_FRAME) accumulator = 0; // spiral of death 保護
 
   // 渲染插值：prev/current lerp by alpha

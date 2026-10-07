@@ -1,5 +1,9 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { computeSimVersion } from './scripts/simVersion.mjs';
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
 // 開發時 WS 走 /ws 代理到本機後端（apps/api，:3000）
 export default defineConfig(({ mode }) => {
@@ -11,6 +15,8 @@ export default defineConfig(({ mode }) => {
     : null;
 
   return {
+    // 與伺服器重播驗證器同一算法（見 src/core/simVersion.ts）
+    define: { __CREAFLY_SIM_VERSION__: JSON.stringify(computeSimVersion(repoRoot)) },
     server: {
       // F5 / launch.json 假設固定 5173：被占用時直接報錯，不要默默換 port
       strictPort: true,

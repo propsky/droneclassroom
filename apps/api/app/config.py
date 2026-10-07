@@ -110,8 +110,14 @@ class Settings(BaseSettings):
     )
     replay_node_bin: str = "node"
     replay_verify_timeout_sec: float = 30.0
-    # 同時跑的驗證子進程上限（錄製上限 36000 tick 時單一 Node 進程峰值約 80MB）
+    # 同時跑的驗證子進程上限（錄製上限 36000 tick 時單一 Node 進程峰值約 65MB、0.6 秒）
     replay_verify_concurrency: int = 2
+    # 嚴格模式：帳號學生過關「未附錄製」或「無法驗證」也標 suspect。
+    # 預設關（只記 log）—— 舊版前端（PWA 下次開啟才更新）與上傳失敗都會缺錄製，
+    # 確認正式環境錄製上傳穩定後再開（REPLAY_ENFORCE=1）
+    replay_enforce: bool = False
+    # 老師自訂關卡在此秒數內修改過：學生端快照與伺服器定義不同 → 判無法驗證（而非可疑）
+    replay_level_edit_grace_sec: int = 24 * 3600
 
     @property
     def allowed_origins_set(self) -> frozenset[str]:
