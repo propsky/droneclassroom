@@ -2069,6 +2069,116 @@ body.touch-device:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
 }
 
 /* =============================================================================
+ * 搖桿選單導覽（遊戲式焦點 + 底部按鍵提示）
+ * ========================================================================== */
+#pad-ui-hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(var(--sp-5), env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%) translateY(var(--sp-2));
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: var(--sp-2);
+  max-width: calc(100vw - var(--sp-6));
+  padding: var(--sp-2) var(--sp-4);
+  background: color-mix(in srgb, var(--bg-0) 82%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-2);
+  z-index: var(--z-pad-ui);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  backdrop-filter: blur(8px);
+}
+#pad-ui-hint.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+#pad-ui-hint.hud {
+  padding: var(--sp-1) var(--sp-3);
+  background: color-mix(in srgb, var(--bg-0) 58%, transparent);
+  box-shadow: none;
+}
+#pad-ui-hint.hud.show {
+  opacity: 0.88;
+}
+.pad-ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pad-ui-chip kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 var(--sp-1);
+  border-radius: var(--r-sm);
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  color: var(--brand);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+}
+.pad-focus {
+  position: relative;
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  box-shadow:
+    0 0 0 var(--sp-1) color-mix(in srgb, var(--brand) 40%, transparent),
+    0 0 var(--sp-4) color-mix(in srgb, var(--brand) 45%, transparent);
+  z-index: 1;
+}
+.emoji-btn.pad-focus,
+.level-btn.pad-focus,
+.login-tab.pad-focus {
+  background: var(--bg-3);
+  border-color: var(--brand);
+}
+.level-btn.active.pad-focus {
+  outline-color: #fff;
+  box-shadow:
+    0 0 0 var(--sp-1) color-mix(in srgb, #fff 45%, transparent),
+    0 0 var(--sp-4) color-mix(in srgb, var(--brand) 50%, transparent);
+}
+.modal-btn.pad-focus {
+  box-shadow:
+    0 0 0 var(--sp-1) color-mix(in srgb, #fff 35%, transparent),
+    0 0 var(--sp-5) color-mix(in srgb, var(--brand) 55%, transparent);
+}
+.pad-focus-pulse {
+  animation: pad-focus-in 0.16s ease-out;
+}
+.pad-confirm {
+  animation: pad-confirm-flash 0.16s ease-out;
+}
+@keyframes pad-focus-in {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 0%, transparent);
+  }
+  to {
+    box-shadow:
+      0 0 0 var(--sp-1) color-mix(in srgb, var(--brand) 40%, transparent),
+      0 0 var(--sp-4) color-mix(in srgb, var(--brand) 45%, transparent);
+  }
+}
+@keyframes pad-confirm-flash {
+  0% { filter: brightness(1.4); }
+  100% { filter: brightness(1); }
+}
+body:has(#pad-ui-hint.show) #toast.show {
+  bottom: calc(var(--sp-6) + var(--sp-6) + var(--sp-5));
+}
+
+/* =============================================================================
  * 動效：reduced motion 全部關閉（§5）
  * ========================================================================== */
 @media (prefers-reduced-motion: reduce) {

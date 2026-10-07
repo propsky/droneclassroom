@@ -87,6 +87,35 @@ export function bleButtonEdges(): { takeoff: boolean; land: boolean; reset: bool
   };
 }
 
+/** 選單層：方向（持續）+ 確認/返回/暫停/選單（邊緣） */
+export function bleUiButtons(): {
+  dpad: { up: boolean; down: boolean; left: boolean; right: boolean };
+  stickX: number;
+  stickY: number;
+  lookX: number;
+  lookY: number;
+  confirm: boolean;
+  cancel: boolean;
+  pause: boolean;
+  menu: boolean;
+} | null {
+  const pad = bleState.pad;
+  if (!bleState.connected || !pad) return null;
+  const b = pad.buttons;
+  const edge = (k: BleBtnKey): boolean => detectButtonEdge(!!b[k], prevBleButtons[k]);
+  return {
+    dpad: pad.dpad,
+    stickX: pad.yaw,
+    stickY: pad.throttle,
+    lookX: pad.roll,
+    lookY: pad.pitch,
+    confirm: edge('A'),
+    cancel: edge('B'),
+    pause: edge('Start'),
+    menu: edge('Y') || edge('Back'),
+  };
+}
+
 export function syncBleButtonSample(): void {
   const b = bleState.pad?.buttons;
   if (!b) return;

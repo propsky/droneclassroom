@@ -46,6 +46,7 @@ import { initHeaderOverflow } from './ui/headerOverflow';
 import { initLevelComplete } from './ui/levelComplete';
 import { initCalibrationOverlay } from './ui/calibrationOverlay';
 import { initPadSettings, initPadHint } from './ui/padSettings';
+import { initPadUi } from './ui/padUi';
 import {
   calibration,
   gamepadConfig,
@@ -158,6 +159,7 @@ initInputs({ toggleView: doToggleView });
 initCalibrationOverlay(); // 搖桿校正精靈 overlay（在 initInputs 之後：狀態機已就緒）
 initPadSettings();
 initPadHint();
+initPadUi();
 
 // ---- Blockly 積木編輯器（生成碼經 window.__creaflyGetCode → runProgram 注入 CREAFLY 執行）----
 initBlockly();
@@ -254,6 +256,7 @@ bus.on('program-running', ({ running }) => {
 // =============================================================================
 const MAX_TICKS_PER_FRAME = 5;
 let accumulator = 0;
+let padUiPausedAcc = 0;
 let lastTime = performance.now();
 const prevSnap = { x: 0, y: 0.4, z: 0, yaw: 0 };
 const currSnap = { x: 0, y: 0.4, z: 0, yaw: 0 };
@@ -321,10 +324,18 @@ function fixedTick(nowMs: number): void {
 world.engine.runRenderLoop(() => {
   const now = performance.now();
   if (flags.paused) {
-    // 暫停中：不累積時間、不 tick（物理 / motion plan / 判定全部凍結），畫面照常渲染
+    // 暫停中：不累積時間、不 tick（物理 / motion plan / 判定全部凍結），畫面照常渲染。
+    // 仍以 60Hz 讀搖桿，否則暫停 overlay 無法用 A / START 繼續、也無法移動焦點。
+    padUiPausedAcc += now - lastTime;
     lastTime = now;
     accumulator = 0;
+    if (padUiPausedAcc > TICK_MS * 5) padUiPausedAcc = TICK_MS;
+    while (padUiPausedAcc >= TICK_MS) {
+      tickInputDevices(true);
+      padUiPausedAcc -= TICK_MS;
+    }
   } else {
+    padUiPausedAcc = 0;
     accumulator += now - lastTime;
     lastTime = now;
   }

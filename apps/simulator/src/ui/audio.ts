@@ -140,6 +140,23 @@ export function playTickSound(): void {
   o.stop(t + 0.1);
 }
 
+/** 選單焦點移動：短促、小聲，不搶過關 / 倒數音 */
+export function playUiNavSound(): void {
+  const ctx = ensureAudio();
+  if (!ctx || audioState.muted) return;
+  const t = ctx.currentTime;
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = 'sine';
+  o.frequency.value = 980;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.05, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.045);
+  o.connect(g).connect(ctx.destination);
+  o.start(t);
+  o.stop(t + 0.055);
+}
+
 const SOUND_FNS: Record<SoundName, () => void> = {
   ring: playRingSound,
   pop: playRingSound, // 氣球沿用過圈音（legacy 同）
@@ -156,6 +173,7 @@ export function initAudio(): void {
   // 第一次互動後解鎖 Web Audio（瀏覽器 autoplay 政策）
   window.addEventListener('pointerdown', () => ensureAudio());
   window.addEventListener('keydown', () => ensureAudio());
+  window.addEventListener('gamepadconnected', () => ensureAudio());
 
   // ---- 音效開關 ----
   const muteBtn = document.getElementById('mute-btn');

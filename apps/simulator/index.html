@@ -184,9 +184,11 @@
                             </div>
                             <div class="help-group-title">其他</div>
                             <div class="help-grid">
-                                <span class="help-keys"><kbd>A</kbd></span><span class="help-desc">起飛</span>
-                                <span class="help-keys"><kbd>B</kbd></span><span class="help-desc">降落</span>
+                                <span class="help-keys"><kbd>A</kbd></span><span class="help-desc">起飛（選單＝確認）</span>
+                                <span class="help-keys"><kbd>B</kbd></span><span class="help-desc">降落（選單＝返回）</span>
                                 <span class="help-keys"><kbd>X</kbd></span><span class="help-desc">重置</span>
+                                <span class="help-keys"><kbd>START</kbd></span><span class="help-desc">暫停 / 繼續</span>
+                                <span class="help-keys"><kbd>Y</kbd></span><span class="help-desc">開關卡選單</span>
                             </div>
                         </div>
                     </div>
@@ -210,7 +212,7 @@
 <div id="pause-overlay" class="modal-overlay">
     <div class="modal-card">
         <div class="level-intro-title">已暫停</div>
-        <div class="level-intro-body">計時已凍結，按「繼續」回到飛行。</div>
+        <div class="level-intro-body">計時已凍結。按「繼續」，或搖桿 A / START 回到飛行。</div>
         <button id="pause-resume" class="modal-btn">▶ 繼續</button>
         <button id="pause-restart" class="modal-btn modal-btn-ghost">↻ 重新本關</button>
     </div>
@@ -388,7 +390,7 @@
                 <button type="button" id="pad-inv-throttle" class="pad-toggle">升降反轉：關</button>
             </div>
         </div>
-        <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。A=起飛、B=降落、X=重置。</p>
+        <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。飛行：A=起飛、B=降落、X=重置。選單：A=確認、B=返回、Y / Back=關卡、START=暫停。</p>
         <div id="pad-settings-gamepad-only" class="pad-section">
             <button type="button" id="pad-start-calib" class="pad-btn-primary">開始校正精靈</button>
             <p class="pad-note">約 30 秒：量測置中與行程、對映起飛／降落／重置按鍵。非標準手把建議跑一次。</p>

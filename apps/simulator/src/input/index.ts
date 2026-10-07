@@ -19,6 +19,7 @@ import { gamepadConfig, initCalibration, tickCalibration, calibration } from './
 import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
 import { registerBleConnectedChecker } from '../core/execution/mode';
 import { resolveStickSource, type StickAxes } from './padMath';
+import { isPadUiCapturing, tickPadUi } from '../ui/padUi';
 
 export { isTouchDevice };
 
@@ -56,27 +57,29 @@ function handlePadButtons(
   }
 }
 
-/** 每 tick：輪詢實體搖桿 + 校正精靈取樣 + 處理搖桿按鈕（起飛/降落/重置） */
+/** 每 tick：輪詢實體搖桿 + 校正精靈取樣 + 選單導覽 / 飛行按鍵 */
 export function tickInputDevices(manualLocked: boolean): void {
   pollGamepad();
   tickCalibration();
-  if (manualLocked || calibration.active) return;
+  if (calibration.active) return;
 
-  if (gamepadState.connected) {
-    handlePadButtons(
-      isButtonJustPressed(gamepadConfig.buttonMap.takeoff),
-      isButtonJustPressed(gamepadConfig.buttonMap.land),
-      isButtonJustPressed(gamepadConfig.buttonMap.reset),
-      '搖桿',
-    );
-    return;
-  }
+  tickPadUi();
+  const uiCapturing = isPadUiCapturing();
 
-  if (bleState.connected) {
-    const edges = bleButtonEdges();
-    handlePadButtons(edges.takeoff, edges.land, edges.reset, 'BLE');
-    syncBleButtonSample();
+  if (!uiCapturing && !manualLocked) {
+    if (gamepadState.connected) {
+      handlePadButtons(
+        isButtonJustPressed(gamepadConfig.buttonMap.takeoff),
+        isButtonJustPressed(gamepadConfig.buttonMap.land),
+        isButtonJustPressed(gamepadConfig.buttonMap.reset),
+        '搖桿',
+      );
+    } else if (bleState.connected) {
+      const edges = bleButtonEdges();
+      handlePadButtons(edges.takeoff, edges.land, edges.reset, 'BLE');
+    }
   }
+  if (bleState.connected) syncBleButtonSample();
 }
 
 function activeStickAxes(): StickAxes {
@@ -95,9 +98,16 @@ function stickHasInput(s: StickAxes): boolean {
 
 /** 彙整本 tick 的手動控制輸入 */
 export function collectControlFrame(): ControlFrame {
-  if (keys[' ']) {
-    return { lift: 0, forward: 0, right: 0, yawDelta: 0, wantsTakeoff: false, anyInput: false };
-  }
+  const idle: ControlFrame = {
+    lift: 0,
+    forward: 0,
+    right: 0,
+    yawDelta: 0,
+    wantsTakeoff: false,
+    anyInput: false,
+  };
+  if (isPadUiCapturing()) return idle;
+  if (keys[' ']) return idle;
 
   const stick = activeStickAxes();
 

@@ -43,7 +43,7 @@ function buildSteps(): Step[] {
     {
       target: 'pause-btn',
       title: '需要暫停？',
-      body: '按這裡（或鍵盤 P）隨時暫停，計時也會停下來。',
+      body: '按這裡（鍵盤 P，或搖桿 START）隨時暫停，計時也會停下來。選單裡用方向鍵移動、A 確認、B 返回。',
     },
     {
       target: null,

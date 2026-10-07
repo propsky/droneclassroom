@@ -60,5 +60,6 @@
   --z-hud: 10;
   --z-overlay-btn: 20;
   --z-modal: 100;
+  --z-pad-ui: 110;
   --z-toast: 200;
 }
