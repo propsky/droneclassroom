@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -41,6 +42,13 @@ class VerifyOutcome:
 
 _SKIPPED = VerifyOutcome("skipped")
 
+# 子進程只拿到執行必需的環境變數：DATABASE_URL / 寄信 / AWS 等機密絕不外流給驗證器
+_ENV_PASSTHROUGH = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
+
+
+def _subprocess_env() -> dict[str, str]:
+    return {k: v for k in _ENV_PASSTHROUGH if (v := os.environ.get(k)) is not None}
+
 
 @dataclass
 class ReplayVerifier:
@@ -56,7 +64,13 @@ class ReplayVerifier:
     def from_settings(cls, cfg: Settings) -> ReplayVerifier:
         bundle = cfg.replay_verifier_bundle
         if bundle.is_file():
-            cmd: list[str] | None = [cfg.replay_node_bin, str(bundle)]
+            # 錄製內容來自學生端（不可信）：禁止 eval / new Function，
+            # 就算判定邏輯有漏洞也無法執行注入的程式碼
+            cmd: list[str] | None = [
+                cfg.replay_node_bin,
+                "--disallow-code-generation-from-strings",
+                str(bundle),
+            ]
             cwd = None
         elif _DEV_SCRIPT.is_file():
             cmd = ["pnpm", "exec", "tsx", str(_DEV_SCRIPT)]
@@ -112,6 +126,7 @@ class ReplayVerifier:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=str(self.cwd) if self.cwd else None,
+                    env=_subprocess_env(),
                 )
             except OSError:
                 logger.exception("[Replay] 無法啟動驗證器 %s", self.command)

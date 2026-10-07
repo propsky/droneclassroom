@@ -5,12 +5,14 @@ import json
 import shutil
 import sys
 import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from app import ws as ws_mod
 from app.config import Settings
@@ -122,12 +124,24 @@ async def test_concurrency_limited() -> None:
     assert time.monotonic() - t0 >= 0.55
 
 
-def test_from_settings_prefers_bundle(tmp_path: Path) -> None:
+def test_from_settings_prefers_bundle_and_disallows_eval(tmp_path: Path) -> None:
     bundle = tmp_path / "verify.mjs"
     bundle.write_text("")
     cfg = Settings(replay_verifier_bundle=bundle, replay_node_bin="nodex")
     v = ReplayVerifier.from_settings(cfg)
-    assert v.command == ["nodex", str(bundle)]
+    assert v.command == ["nodex", "--disallow-code-generation-from-strings", str(bundle)]
+
+
+async def test_subprocess_env_has_no_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://secret")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    code = (
+        "import os,sys,json;sys.stdin.read();"
+        "bad=[k for k in os.environ if k in ('DATABASE_URL','AWS_SECRET_ACCESS_KEY')];"
+        "print('RESULT '+json.dumps({'status':'mismatch' if bad else 'ok','reason':str(bad)}))"
+    )
+    out = await _stub(code).verify(REC, "abc")
+    assert out.status == "ok", out.reason
 
 
 # ---------- 真實 bundle（需先 pnpm --filter @creafly/simulator build:replay-verifier）----------
@@ -201,6 +215,19 @@ async def test_real_bundle_legacy_v1_unverifiable() -> None:
 
 
 @needs_bundle
+async def test_real_bundle_never_executes_program_code(tmp_path: Path) -> None:
+    """安全：錄製裡的程式碼是學生端任意字串，伺服器端絕不執行。"""
+    proof = tmp_path / "pwned"
+    level = _chapter1_level("1-1")
+    code = f"process.getBuiltinModule('fs').writeFileSync({str(proof)!r}, 'x')"
+    rec = _v2(level, actions=[{"t": 0, "a": "run", "inTick": False, "code": code}])
+    v = ReplayVerifier.from_settings(Settings())
+    out = await v.verify(rec, "x", level_id="1-1", server_level=level)
+    assert out.status == "unverifiable"
+    assert not proof.exists()
+
+
+@needs_bundle
 async def test_real_bundle_bad_structure_is_suspect() -> None:
     level = _chapter1_level("1-1")
     v = ReplayVerifier.from_settings(Settings())
@@ -230,6 +257,7 @@ def _fake_ws(verifier: _FakeVerifier, *, enforce: bool = False) -> SimpleNamespa
         db_sessionmaker=maker,
         settings=Settings(replay_enforce=enforce),
         replay_verifier=verifier,
+        replay_cache=OrderedDict(),
     )
     return SimpleNamespace(app=SimpleNamespace(state=state))
 
@@ -298,6 +326,69 @@ async def test_reason_no_log_only_flags_when_enforced_and_online(student, patche
     enforced = _fake_ws(fv, enforce=True)
     assert await ws_mod._replay_suspect_reason(enforced, student, _msg()) == "未附輸入錄製"
     assert await ws_mod._replay_suspect_reason(enforced, student, _msg(offline=True)) is None
+
+
+async def test_reason_cached_per_recording(student, patched_db) -> None:  # noqa: ANN001
+    fv = _FakeVerifier(VerifyOutcome("mismatch", "重播 hash 不符"))
+    ws = _fake_ws(fv)
+    msg = _msg(replayLogRef="ref-1", replayHash="h")
+    for _ in range(5):
+        assert await ws_mod._replay_suspect_reason(ws, student, msg) == "重播 hash 不符"
+    assert len(fv.calls) == 1
+
+
+async def test_reason_skips_unauthorized_level(student, patched_db) -> None:  # noqa: ANN001
+    fv = _FakeVerifier(VerifyOutcome("mismatch", "x"))
+    student.allowed_level_ids = frozenset({"1-0"})
+    msg = _msg(replayLogRef="ref-1", replayHash="h")
+    assert await ws_mod._replay_suspect_reason(_fake_ws(fv), student, msg) is None
+    assert fv.calls == []
+
+
+async def test_upload_body_limit_stops_reading() -> None:
+    from starlette.requests import Request
+
+    from app.replay_logs import _read_body_limited
+
+    sent = 0
+
+    async def receive() -> dict:
+        nonlocal sent
+        sent += 1
+        return {"type": "http.request", "body": b"x" * 1024, "more_body": sent < 10_000}
+
+    req = Request({"type": "http", "method": "POST", "headers": []}, receive)
+    with pytest.raises(HTTPException) as exc:
+        await _read_body_limited(req, 64 * 1024)
+    assert exc.value.status_code == 413
+    assert sent < 100
+
+    declared = Request(
+        {"type": "http", "method": "POST", "headers": [(b"content-length", b"99999999")]}, receive
+    )
+    with pytest.raises(HTTPException):
+        await _read_body_limited(declared, 64 * 1024)
+
+
+def test_upload_requires_auth_before_reading_body(client) -> None:  # noqa: ANN001
+    """未登入的大請求：先被身分驗證擋下，不會先把 body 解析進記憶體（舊版會回 422）。"""
+    big = b'{"clientLogId":"x","recording":{"x":"' + b"a" * (3 * 1024 * 1024) + b'"}}'
+    r = client.post(
+        "/auth/student/replay-log", content=big, headers={"content-type": "application/json"}
+    )
+    assert r.status_code in (401, 503)
+
+
+def test_upload_rate_limited_per_student() -> None:
+    from app.replay_logs import UPLOAD_RATE_LIMIT, _check_upload_rate
+
+    req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(replay_upload_times={})))
+    for _ in range(UPLOAD_RATE_LIMIT):
+        _check_upload_rate(req, 1)  # type: ignore[arg-type]
+    with pytest.raises(HTTPException) as exc:
+        _check_upload_rate(req, 1)  # type: ignore[arg-type]
+    assert exc.value.status_code == 429
+    _check_upload_rate(req, 2)  # type: ignore[arg-type]  # 其他學生不受影響
 
 
 async def test_reason_guest_or_no_db_skips(patched_db) -> None:  # noqa: ANN001

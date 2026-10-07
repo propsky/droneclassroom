@@ -8,11 +8,13 @@ WS 訊息上限 4KB，完整 InputRecording 走 REST：
 from __future__ import annotations
 
 import logging
+import time
+from collections import deque
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +26,8 @@ logger = logging.getLogger("creafly.api.replay_logs")
 
 router = APIRouter()
 
-MAX_REPLAY_LOG_BYTES = 4 * 1024 * 1024
+# v2 錄製 10 分鐘上限約 0.8MB；留餘裕但不讓單次請求吃掉大量記憶體
+MAX_REPLAY_LOG_BYTES = 2 * 1024 * 1024
 
 
 class ReplayLogUpload(BaseModel):
@@ -36,15 +39,51 @@ class ReplayLogResponse(BaseModel):
     logRef: str
 
 
+# 每次上傳最多寫入 2MB 到稽核表：限制單一學生的上傳頻率（正常 = 每次過關一筆）
+UPLOAD_RATE_LIMIT = 20
+UPLOAD_RATE_WINDOW_SEC = 60.0
+
+
+def _check_upload_rate(request: Request, student_id: int) -> None:
+    buckets: dict[int, deque[float]] = request.app.state.replay_upload_times
+    now = time.monotonic()
+    q = buckets.setdefault(student_id, deque())
+    while q and now - q[0] > UPLOAD_RATE_WINDOW_SEC:
+        q.popleft()
+    if len(q) >= UPLOAD_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="上傳太頻繁")
+    q.append(now)
+
+
+async def _read_body_limited(request: Request, limit: int) -> bytes:
+    """邊讀邊計量：超過上限立即 413，不先把整包讀進記憶體。"""
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="錄製過大")
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(status_code=413, detail="錄製過大")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.post("/auth/student/replay-log", response_model=ReplayLogResponse)
 async def upload_replay_log(
-    body: ReplayLogUpload,
+    request: Request,
     current: CurrentStudentSession,
     db: DbSession,
 ) -> ReplayLogResponse:
-    raw_size = len(str(body.recording).encode("utf-8"))
-    if raw_size > MAX_REPLAY_LOG_BYTES:
-        raise HTTPException(status_code=413, detail="錄製過大")
+    # body 不宣告成參數：FastAPI 會在驗證身分前就整包解析，未登入者也能用大請求耗記憶體。
+    # 先過 CurrentStudentSession，再限量讀取
+    _check_upload_rate(request, current.principal_id)
+    raw = await _read_body_limited(request, MAX_REPLAY_LOG_BYTES)
+    try:
+        body = ReplayLogUpload.model_validate_json(raw)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="錄製格式錯誤") from exc
     rec = body.recording
     if rec.get("levelId") is None or rec.get("replayHash") is None:
         raise HTTPException(status_code=400, detail="錄製格式不完整")

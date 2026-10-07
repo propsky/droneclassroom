@@ -42,6 +42,9 @@ COPY apps/simulator/public/levels ./levels
 RUN uv sync --frozen --no-dev
 
 ENV PORT=3000
+# 執行期不再同步依賴：否則 `uv run` 每次啟動都會從 PyPI 下載 dev 依賴（ruff / pytest…），
+# 啟動變慢且依賴外網；建置時 `uv sync --no-dev` 裝好的環境就是正式環境
+ENV UV_NO_SYNC=1
 # 關卡資料位置（/api/levels 與防作弊「已知關卡」皆讀此處）
 ENV LEVELS_DIR=/app/levels
 EXPOSE 3000

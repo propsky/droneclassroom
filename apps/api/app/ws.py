@@ -28,6 +28,7 @@
 import json
 import logging
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -91,7 +92,7 @@ from .protocol import (
     TeacherBroadcastPayload,
 )
 from .replay_logs import load_level_for_replay, load_replay_recording
-from .replay_verify import ReplayVerifier
+from .replay_verify import ReplayVerifier, VerifyOutcome
 from .rest import known_level_ids
 from .rooms import Room, RoomLimitError, RoomManager
 from .roster import StudentRecord, send_safe
@@ -255,6 +256,9 @@ async def _notify_not_in_game(room: Room, player_ids: set[str], text: str) -> No
             await send_safe(s.ws, data)
 
 
+_REPLAY_CACHE_MAX = 2000
+
+
 async def _replay_suspect_reason(
     ws: WebSocket, record: StudentRecord, msg: CompleteLevelMsg
 ) -> str | None:
@@ -265,6 +269,9 @@ async def _replay_suspect_reason(
     """
     maker = ws.app.state.db_sessionmaker
     if record.student_id is None or maker is None:
+        return None
+    # 未授權關卡的過關不入庫（見呼叫端），不必花驗證成本
+    if record.allowed_level_ids is not None and msg.levelId not in record.allowed_level_ids:
         return None
     settings: Settings = ws.app.state.settings
     if not (msg.replayLogRef and msg.replayHash):
@@ -278,15 +285,24 @@ async def _replay_suspect_reason(
         )
     if rec is None:
         return "找不到輸入錄製"
-    verifier: ReplayVerifier = ws.app.state.replay_verifier
-    outcome = await verifier.verify(
-        rec,
-        msg.replayHash,
-        level_id=msg.levelId,
-        time_ms=msg.timeMs,
-        server_level=level[0] if level else None,
-        level_recently_edited=level[1] if level else False,
-    )
+    # 同一筆錄製（ack 逾時重送 / 離線補傳）只驗一次：防重複送訊息不斷拉起驗證子進程
+    cache: OrderedDict[tuple, VerifyOutcome] = ws.app.state.replay_cache
+    key = (record.student_id, msg.replayLogRef, msg.replayHash, msg.levelId, msg.timeMs)
+    outcome = cache.get(key)
+    if outcome is None:
+        verifier: ReplayVerifier = ws.app.state.replay_verifier
+        outcome = await verifier.verify(
+            rec,
+            msg.replayHash,
+            level_id=msg.levelId,
+            time_ms=msg.timeMs,
+            server_level=level[0] if level else None,
+            level_recently_edited=level[1] if level else False,
+        )
+        if outcome.status != "skipped":
+            cache[key] = outcome
+            while len(cache) > _REPLAY_CACHE_MAX:
+                cache.popitem(last=False)
     if outcome.status == "mismatch":
         return outcome.reason
     if outcome.status == "unverifiable":

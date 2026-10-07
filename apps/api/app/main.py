@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import logging
 import re
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -140,6 +141,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = cfg
     app.state.mailer = Mailer(cfg)
     app.state.replay_verifier = ReplayVerifier.from_settings(cfg)
+    app.state.replay_cache = OrderedDict()
+    app.state.replay_upload_times = {}
     app.state.auth = auth
     app.state.levels = levels
     app.state.known_levels = json_known

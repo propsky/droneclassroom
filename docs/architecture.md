@@ -76,7 +76,8 @@ droneclassroom/
 ### 過關輸入錄製與伺服器重播驗證（J-01 / J-02）
 
 - **錄製**（帳號學生，`core/inputRecorder.ts`，格式 `@creafly/shared` `inputRecording.ts` v2）：從計時開始到過關，記錄每 tick 的 `ControlFrame`、所有不經 `ControlFrame` 直接改狀態的操作（起降鍵 / 重置 / 急停 / 回家 / 模式切換 / 執行與停止程式，於 `physics.ts` / `level.ts` / `program.ts` 的 `recordAction`）、同一畫面連跑多 tick 的區段（程式模式 async 指令鏈的微任務排空時點），並逐 tick 累積狀態 hash。過關時經 REST `POST /auth/student/replay-log` 上傳，`complete_level` 只帶參照與 hash（WS 4KB 上限）。
-- **重播**：伺服器以 Node 執行打包的 `core/`（Docker 映像內建 `/app/replay/verify-recording.mjs`），**用伺服器資料庫的關卡定義**重跑，判定集中在 `core/replayVerify.ts`：hash 相符、確實過關、宣告用時不短於模擬時間、錄製關卡與過關關卡一致。結果三態：可疑（標 suspect）/ 無法驗證（舊版前端、前後端 `simVersion` 不同、老師剛改過關卡）/ 通過。驗證器自身失敗一律不算學生的錯。
+- **重播**：伺服器以 Node 執行打包的 `core/`（Docker 映像內建 `/app/replay/verify-recording.mjs`），**用伺服器資料庫的關卡定義**重跑，判定集中在 `core/replayVerify.ts`：hash 相符、確實過關、宣告用時不短於模擬時間、錄製關卡與過關關卡一致。結果三態：可疑（標 suspect）/ 無法驗證（舊版前端、前後端 `simVersion` 不同、老師剛改過關卡、程式模式）/ 通過。驗證器自身失敗一律不算學生的錯。
+- **安全：伺服器絕不執行學生端送來的程式碼**。程式模式錄製裡的 code 是任意字串，`new Function` 等同遠端執行任意程式 → 含 `run` 操作的錄製一律判「無法驗證」；驗證器另以 `node --disallow-code-generation-from-strings` 啟動、只傳 PATH 等必要環境變數（不含資料庫 / AWS 機密）作為縱深防禦。上傳端點先驗身分、限量串流讀取（2MB）並限制每生每分鐘 20 筆。要驗證程式模式需改為伺服器端從 Blockly 工作區重新產生程式碼或使用沙箱直譯器，屬後續工作。
 - **線上與重播共用 `core/simTick.ts`**；`core/replayParity.test.ts` 以真實操作情境守住兩邊一致。新增任何直接改無人機狀態的操作都必須呼叫 `recordAction` 並在 `replayRunner.ts` 對應重演。
 - **`REPLAY_ENFORCE`**（預設關）：開啟後「未附錄製（非離線補傳）」與「無法驗證」也標可疑；PWA 新版於下次開啟才生效，確認錄製上傳穩定後再開。
 

@@ -73,6 +73,11 @@ export async function verifyRecording(input: VerifyInput): Promise<VerifyResult>
   if (rec.unverifiable) return { ...base, status: 'unverifiable', reason: rec.unverifiable };
   const err = validateRecording(rec);
   if (err) return { ...base, status: 'mismatch', reason: err };
+  // 安全：程式模式的 code 是學生端送來的任意字串，伺服器端絕不執行（new Function = 遠端執行任意程式）。
+  // 驗證器另以 --disallow-code-generation-from-strings 啟動作為第二道防線（見 apps/api replay_verify.py）
+  if (rec.actions.some((a) => a.a === 'run')) {
+    return { ...base, status: 'unverifiable', reason: '程式模式錄製不於伺服器執行' };
+  }
 
   if (input.serverLevel) {
     if (canonical(rec.level) !== canonical(input.serverLevel)) {

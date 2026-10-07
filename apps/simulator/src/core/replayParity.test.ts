@@ -322,6 +322,17 @@ describe('伺服器判定（verifyRecording）', () => {
     expect(r.reason).toMatch(/hash/);
   });
 
+  it('程式模式錄製 → 伺服器不執行學生程式碼（無法驗證）', async () => {
+    const { rec } = await honest();
+    const injected = structuredClone(rec);
+    let executed = false;
+    (globalThis as Record<string, unknown>).__creaflyInjected = () => (executed = true);
+    injected.actions = [{ t: 0, a: 'run', inTick: false, code: 'globalThis.__creaflyInjected();' }];
+    const r = await verifyRecording({ recording: injected, claimedHash: rec.replayHash, levelId: '1-0' });
+    expect(r.status).toBe('unverifiable');
+    expect(executed).toBe(false);
+  });
+
   it('舊版 v1 錄製 → 無法驗證（不標可疑）', async () => {
     const r = await verifyRecording({ recording: { v: 1, levelId: '1-0' }, claimedHash: 'x' });
     expect(r.status).toBe('unverifiable');
