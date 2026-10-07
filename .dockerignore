@@ -1,6 +1,7 @@
-# 後端 image 的 build context 白名單：只放 apps/api 與關卡資料，其餘全排除
+# 後端 image 的 build context 白名單：只放 apps/api、關卡資料與重播驗證器原始碼，其餘全排除
 # （context 在 repo 根目錄，見 .github/workflows/deploy-api.yml 的 context: .）
 *
+!tsconfig.base.json
 !apps
 apps/*
 !apps/api
@@ -11,3 +12,14 @@ apps/simulator/*
 !apps/simulator/public
 apps/simulator/public/*
 !apps/simulator/public/levels
+# 重播驗證器（J-02）：Dockerfile 的 replay-verifier 階段以 esbuild 打包
+!apps/simulator/tsconfig.json
+!apps/simulator/src
+!apps/simulator/scripts
+apps/simulator/scripts/.cache
+!packages
+packages/*
+!packages/shared
+packages/shared/*
+!packages/shared/src
+.dockerignore

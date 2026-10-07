@@ -100,6 +100,18 @@ class Settings(BaseSettings):
     public_student_url: str = "https://droneclassroom.pages.dev"
     entitlement_mode: Literal["open", "enforce", "demo_only"] = "open"
     demo_level_ids: str = "1-0,1-1,1-2"
+    # 重播驗證器（J-02）：simulator `pnpm build:replay-verifier` 產出的單檔 bundle；
+    # Docker 映像內建於 /app/replay/verify-recording.mjs（REPLAY_VERIFIER_BUNDLE 覆寫）。
+    # 檔案不存在 → 開發 fallback tsx → 都沒有則跳過驗證
+    replay_verifier_bundle: Path = Field(
+        default_factory=lambda: (
+            _APPS_DIR / "simulator" / "scripts" / ".cache" / "verify-recording.mjs"
+        )
+    )
+    replay_node_bin: str = "node"
+    replay_verify_timeout_sec: float = 30.0
+    # 同時跑的驗證子進程上限（錄製上限 36000 tick 時單一 Node 進程峰值約 80MB）
+    replay_verify_concurrency: int = 2
 
     @property
     def allowed_origins_set(self) -> frozenset[str]:

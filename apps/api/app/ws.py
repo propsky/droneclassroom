@@ -91,7 +91,7 @@ from .protocol import (
     TeacherBroadcastPayload,
 )
 from .replay_logs import load_replay_recording
-from .replay_verify import verify_input_log
+from .replay_verify import ReplayVerifier
 from .rest import known_level_ids
 from .rooms import Room, RoomLimitError, RoomManager
 from .roster import StudentRecord, send_safe
@@ -414,7 +414,8 @@ async def _student_endpoint(ws: WebSocket) -> None:
                         if rec is None:
                             replay_reason = "找不到輸入錄製"
                         else:
-                            replay_reason = verify_input_log(rec, valid.replayHash)
+                            verifier: ReplayVerifier = ws.app.state.replay_verifier
+                            replay_reason = await verifier.verify(rec, valid.replayHash)
                     reasons = await roster.complete_level(
                         record, valid.levelId, valid.timeMs, offline=valid.offline
                     )

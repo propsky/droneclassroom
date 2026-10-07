@@ -23,6 +23,7 @@ from .levels_api import router as levels_router
 from .levels_catalog import ensure_all_teams_catalog, ensure_system_levels, fetch_known_level_ids
 from .mailer import Mailer
 from .replay_logs import router as replay_logs_router
+from .replay_verify import ReplayVerifier
 from .rest import known_level_ids, load_levels
 from .rest import router as rest_router
 from .rooms import RoomManager
@@ -112,6 +113,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info(
             "WebSocket 與 HTTP 共用 port %d（path: / 或 /ws 學生、/teacher 老師）", cfg.port
         )
+        verifier: ReplayVerifier = app.state.replay_verifier
+        if verifier.available:
+            logger.info("重播驗證器：%s", " ".join(verifier.command or []))
+        else:
+            logger.warning("⚠️ 找不到重播驗證器（%s），過關重播驗證停用", cfg.replay_verifier_bundle)
         if cfg.teacher_auth_disabled:
             logger.warning(
                 "⚠️ 教師後台免登入模式（TEACHER_AUTH_DISABLED=1）— 僅供測試，正式環境請關閉"
@@ -133,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="CREAFLY Classroom API", lifespan=lifespan, openapi_url=None)
     app.state.settings = cfg
     app.state.mailer = Mailer(cfg)
+    app.state.replay_verifier = ReplayVerifier.from_settings(cfg)
     app.state.auth = auth
     app.state.levels = levels
     app.state.known_levels = json_known

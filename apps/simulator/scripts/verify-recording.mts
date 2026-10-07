@@ -12,13 +12,13 @@ async function main(): Promise<void> {
   const raw = await readStdin();
   const body = JSON.parse(raw) as VerifyInput;
   if (!isInputRecordingV1(body.recording)) {
-    console.log(JSON.stringify({ ok: false, reason: '錄製格式錯誤' }));
+    console.log(`RESULT ${JSON.stringify({ ok: false, reason: '錄製格式錯誤' })}`);
     process.exit(1);
     return;
   }
   const err = validateRecording(body.recording);
   if (err) {
-    console.log(JSON.stringify({ ok: false, reason: err }));
+    console.log(`RESULT ${JSON.stringify({ ok: false, reason: err })}`);
     process.exit(1);
     return;
   }
