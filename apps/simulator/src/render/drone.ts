@@ -214,9 +214,17 @@ export class DroneVisual {
     const fSpeed = dx * f.x + dz * f.z; // +前進 / -後退
     const rSpeed = dx * r.x + dz * r.z; // +右飛 / -左飛
     const clamp = (v: number): number => Math.max(-1, Math.min(1, v));
-    // 前進 → 機頭下壓（負 pitch）；右飛 → 右側下沉（負 roll）
-    const targetPitch = -clamp(fSpeed / TILT_REFSPD) * TILT_MAX;
-    const targetRoll = -clamp(rSpeed / TILT_REFSPD) * TILT_MAX;
+    // 足球手感有姿態時直接用那個傾角（可到 42°，不受下面速度推算的 26° 上限）。
+    // 前進 → 機頭下壓（負 pitch）；右飛 → 右側下沉（負 roll）。
+    let targetPitch: number;
+    let targetRoll: number;
+    if (droneState.attitudePitch != null && droneState.attitudeRoll != null) {
+      targetPitch = -droneState.attitudePitch;
+      targetRoll = -droneState.attitudeRoll;
+    } else {
+      targetPitch = -clamp(fSpeed / TILT_REFSPD) * TILT_MAX;
+      targetRoll = -clamp(rSpeed / TILT_REFSPD) * TILT_MAX;
+    }
     this.tiltPitch += (targetPitch - this.tiltPitch) * TILT_SMOOTH;
     this.tiltRoll += (targetRoll - this.tiltRoll) * TILT_SMOOTH;
   }

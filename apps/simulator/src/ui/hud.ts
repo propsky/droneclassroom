@@ -6,6 +6,7 @@ import { bus } from '../core/events';
 import { droneState, lenVec3, TICK_HZ } from '../core/droneState';
 import { levelState, levelElapsedMs, getFaceGuidance } from '../core/level';
 import { inkSetColor } from '../core/pen';
+import { matchClockOwned } from './soccerHud';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -78,7 +79,8 @@ export function initHud(): void {
     }
     // 計時顯示（freeplay 不計時）
     const lt = $('level-timer');
-    if (lt) lt.textContent = level.freeplay ? '自由活動' : '0.0s';
+    // 足球對戰進行中時，這格是比分列，不讓關卡計時蓋掉
+    if (lt && !matchClockOwned()) lt.textContent = level.freeplay ? '自由活動' : '0.0s';
     // 畫畫教室：俯視 + 程式驅動，鍵盤操作說明 HUD 反而擋住畫面 → 該關隱藏
     const help = $('help-hud');
     if (help) help.style.display = level.draw ? 'none' : '';
@@ -241,7 +243,7 @@ export function updateHudFrame(): void {
     headEl.textContent = head;
     cache.head = head;
   }
-  if (timerEl && levelState.current && !levelState.current.freeplay) {
+  if (timerEl && !matchClockOwned() && levelState.current && !levelState.current.freeplay) {
     const t = `${(levelElapsedMs() / 1000).toFixed(1)}s`;
     if (t !== cache.timer) {
       timerEl.textContent = t;

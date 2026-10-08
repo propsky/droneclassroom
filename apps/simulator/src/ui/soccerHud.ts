@@ -2,6 +2,12 @@
 // 練習模式右上 HUD（drill 清單 + 狀態列）＋多人比分寫在左下 #level-timer（對齊 legacy）。
 // 純 DOM；名字 / 狀態一律 textContent 寫入（不吃使用者輸入的 HTML）。
 import type { SoccerDrill } from '../soccer/practice';
+import {
+  getSoccerFeel,
+  setSoccerFeel,
+  SOCCER_FEELS,
+  type SoccerFeelId,
+} from '../soccer/flightFeel';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -63,6 +69,12 @@ export function setPracticeStatus(text: string): void {
 // 多人對戰（比分 / 倒數 / 我的隊伍角色 → 左下 #level-timer，對齊 legacy）
 // =============================================================================
 let matchTimerCache = '';
+let matchClock = false;
+
+/** 對戰比分占用左下計時格時，關卡計時不要蓋掉 */
+export function matchClockOwned(): boolean {
+  return matchClock;
+}
 
 export function setSoccerMatchTimer(text: string): void {
   if (text === matchTimerCache) return;
@@ -72,6 +84,7 @@ export function setSoccerMatchTimer(text: string): void {
 }
 
 export function showSoccerMatchHud(on: boolean): void {
+  matchClock = on;
   $('soccer-mp-btn')?.classList.toggle('active', on);
   matchTimerCache = '';
   setSoccerMatchTimer(on ? '三局兩勝｜等待開始' : '--');
@@ -95,6 +108,10 @@ export interface SoccerHudInput {
   pkTurn: 'blue' | 'red' | null;
   pkRound: number;
   foul: boolean;
+  foulReason?: 'own_ring' | 'false_start' | 'no_return' | null;
+  card?: 'yellow' | 'red' | null;
+  disabled?: boolean;
+  feelLabel?: string;
 }
 
 function fmtClock(endTime: number, now: number): string {
@@ -114,7 +131,15 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
     (s.status === 'running' || s.status === 'golden')
       ? '｜先退回半場'
       : '';
-  const foul = s.foul ? '｜犯規：進了自家圓環' : '';
+  const foul = s.foul
+    ? s.foulReason === 'false_start'
+      ? '｜犯規：搶跑'
+      : s.foulReason === 'no_return'
+        ? '｜犯規：未回半場'
+        : '｜犯規：進了自家圓環'
+    : '';
+  const card = s.disabled ? '｜本局排除' : s.card === 'red' ? '｜紅牌' : s.card === 'yellow' ? '｜黃牌' : '';
+  const feel = s.feelLabel ? `｜手感${s.feelLabel}` : '';
 
   if (s.mode === 'ball') {
     let t = '等待開始';
@@ -125,7 +150,7 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   }
 
   const sets = `局數 ${s.sets.blue}:${s.sets.red}`;
-  if (s.status === 'countdown') return `三局兩勝｜第${s.period || 1}局｜3-2-1…｜${who}`;
+  if (s.status === 'countdown') return `三局兩勝｜第${s.period || 1}局｜起槳｜3-2-1…｜${who}${feel}`;
   if (s.status === 'done') return `結束｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${who}`;
   if (s.status === 'break') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
@@ -133,7 +158,13 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   }
   if (s.status === 'golden') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `黃金進球｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${foul}`;
+    return `黃金進球｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${foul}${card}${feel}`;
+  }
+  if (s.status === 'penalty') {
+    const t = s.endTime ? fmtClock(s.endTime, s.now) : '0:10';
+    const why =
+      s.foulReason === 'false_start' ? '搶跑' : s.foulReason === 'no_return' ? '未返場' : '自家圓環';
+    return `罰球 10 秒｜${why}｜${t}｜${who}${card}`;
   }
   if (s.status === 'pk') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
@@ -143,7 +174,39 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   }
   if (s.status === 'running') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `${sets}｜第${s.period || 1}局 藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${foul}`;
+    return `${sets}｜第${s.period || 1}局 藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${foul}${card}${feel}`;
   }
-  return `三局兩勝｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜等待開始｜${who}`;
+  return `三局兩勝｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜等待開始｜${who}${feel}`;
+}
+
+let feelWired = false;
+
+/** 飛行手感三檔。練習與對戰都顯示；沒有這列時不改 DOM。 */
+export function showSoccerFeel(on: boolean): void {
+  const bar = $('soccer-feel');
+  if (!bar) return;
+  bar.style.display = on ? 'block' : 'none';
+  if (!feelWired) {
+    feelWired = true;
+    bar.querySelectorAll<HTMLButtonElement>('[data-feel]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset['feel'];
+        if (id === 'beginner' || id === 'sim' || id === 'pro') setSoccerFeel(id);
+        paintFeel();
+      });
+    });
+  }
+  paintFeel();
+}
+
+function paintFeel(): void {
+  const current = getSoccerFeel();
+  document.querySelectorAll<HTMLButtonElement>('#soccer-feel [data-feel]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset['feel'] === current);
+  });
+}
+
+export function soccerFeelButtonLabel(id: SoccerFeelId): string {
+  const p = SOCCER_FEELS[id];
+  return `${p.label} ${p.maxTiltDeg}°`;
 }

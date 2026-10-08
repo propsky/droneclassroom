@@ -139,6 +139,10 @@ class Room:
         return self.arena.status in ("countdown", "running") or self.soccer.status in (
             "countdown",
             "running",
+            "break",
+            "golden",
+            "pk",
+            "penalty",
         )
 
     def reject_reason(

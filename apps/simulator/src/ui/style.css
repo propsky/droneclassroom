@@ -1594,6 +1594,32 @@ body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   min-width: 220px;
   max-width: 260px;
 }
+#soccer-feel.soccer-feel {
+  top: auto;
+  bottom: 168px;
+  min-width: 220px;
+  z-index: 4;
+}
+.soccer-feel-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.soccer-feel-row button {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border-radius: var(--r-sm);
+  padding: 4px 2px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.soccer-feel-row button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 700;
+}
 .hud-fixed .hud-title .mono {
   color: var(--warn);
 }

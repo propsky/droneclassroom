@@ -78,6 +78,7 @@ from .protocol import (
     RoomSelectMsg,
     RoomUpdateMsg,
     ShowMessagePayload,
+    SoccerCrashMsg,
     SoccerGoalMsg,
     SoccerJoinMsg,
     SoccerLeaveMsg,
@@ -526,6 +527,8 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     await soccer.pos(record, valid)
                 case SoccerGoalMsg():
                     await soccer.goal(record)
+                case SoccerCrashMsg():
+                    await soccer.crash(record)
     except WebSocketDisconnect:
         pass
     finally:

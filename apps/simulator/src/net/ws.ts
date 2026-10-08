@@ -380,12 +380,15 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       break;
     case 'soccer_state':
     case 'soccer_countdown':
+    case 'soccer_arm':
     case 'soccer_go':
     case 'soccer_players':
     case 'soccer_ball': // 推球模式：共用球位置廣播（~12.5Hz）
     case 'soccer_goal_ok':
     case 'soccer_scores':
     case 'soccer_foul':
+    case 'soccer_penalty':
+    case 'soccer_card':
     case 'soccer_end':
     case 'soccer_resume':
       bus.emit('soccer-message', { msg });

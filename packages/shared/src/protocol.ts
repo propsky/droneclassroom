@@ -65,11 +65,13 @@ export interface SoccerPosMsg {
   x: number; y: number; z: number; yaw: number;
 }
 export interface SoccerGoalMsg { type: 'soccer_goal' }
+/** 墜機：學生端自報（伺服器只排除報到的那一台，不能替別人宣告） */
+export interface SoccerCrashMsg { type: 'soccer_crash' }
 
 export type StudentToServer =
   | RegisterMsg | ProgressMsg | LevelStartMsg | LevelLoadReqMsg | PingMsg | CompleteLevelMsg
   | ArenaJoinMsg | ArenaLeaveMsg | ArenaPosMsg | ArenaPopMsg
-  | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg;
+  | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg | SoccerCrashMsg;
 
 // ---------- Teacher → Server ----------
 
@@ -340,6 +342,10 @@ export interface SoccerPlayerState {
   team: SoccerTeam | null; striker: boolean;
   /** 位置只在 soccer_players（~12Hz tick 廣播）帶；soccer_state / soccer_go 的 players 僅隊伍與前鋒 */
   x?: number; y?: number; z?: number; yaw?: number;
+  /** 黃牌或紅牌；沒有牌為 null／缺省 */
+  card?: 'yellow' | 'red' | null;
+  /** 紅牌或墜機：本局排除 */
+  disabled?: boolean;
 }
 /** 出生點（soccer_state / soccer_go 的 spawns 列） */
 export interface SoccerSpawn { id: string; x: number; z: number }
@@ -389,7 +395,7 @@ export interface SoccerBallState {
 export interface SoccerStateMsg {
   type: 'soccer_state';
   /** 結束是 'done'。break / golden / pk 是階段一的賽制階段 */
-  status: 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'done';
+  status: 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'penalty' | 'done';
   /** 玩法（缺省視為 'striker'） */
   mode?: SoccerMode;
   endTime: number; durationSec: number;
@@ -404,6 +410,8 @@ export interface SoccerStateMsg {
   match?: SoccerMatchMeta;
 }
 export interface SoccerCountdownMsg { type: 'soccer_countdown'; n: number }
+/** 開賽起槳：與 3-2-1 一起送，倒數期間鎖控 */
+export interface SoccerArmMsg { type: 'soccer_arm' }
 export interface SoccerGoMsg {
   type: 'soccer_go';
   endTime: number; spawns: SoccerSpawn[]; players: SoccerPlayerState[];
@@ -433,13 +441,39 @@ export interface SoccerScoresMsg {
   /** PK 換人時附帶，客戶端把輪到的人送到罰球點 */
   spawns?: SoccerSpawn[];
 }
-/** 非攻擊手進入自家圓環（階段一只公告，不發牌） */
+/** 犯規理由：自家圓環、搶跑、得分後未正確返場。階段二都會接著罰球。 */
+export type SoccerFoulReason = 'own_ring' | 'false_start' | 'no_return';
+
 export interface SoccerFoulMsg {
   type: 'soccer_foul';
   team: SoccerTeam;
   by: string;
   byName: string;
-  reason: 'own_ring';
+  reason: SoccerFoulReason;
+}
+
+/** 罰球：10 秒，受益隊攻擊手對犯規隊一名防守 */
+export interface SoccerPenaltyMsg {
+  type: 'soccer_penalty';
+  reason: SoccerFoulReason;
+  attackTeam: SoccerTeam;
+  defendTeam: SoccerTeam;
+  by: string;
+  byName: string;
+  strikerId: string | null;
+  defenderId: string | null;
+  endTime: number;
+  spawns?: SoccerSpawn[];
+}
+
+/** 黃牌／紅牌（碰撞）或墜機紅牌 */
+export interface SoccerCardMsg {
+  type: 'soccer_card';
+  card: 'yellow' | 'red';
+  by: string;
+  byName: string;
+  team: SoccerTeam | null;
+  reason: 'contact' | 'crash';
 }
 export interface SoccerEndMsg {
   type: 'soccer_end';
@@ -457,8 +491,9 @@ export interface SoccerResumeMsg {
 
 /** 學生端會收到的所有 soccer_* 訊息（ws 分派 → multiplayer/soccer 用） */
 export type SoccerServerMsg =
-  | SoccerStateMsg | SoccerCountdownMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerEndMsg
+  | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerPenaltyMsg
+  | SoccerCardMsg | SoccerEndMsg
   | SoccerResumeMsg;
 
 export type ServerToClient =
@@ -469,8 +504,9 @@ export type ServerToClient =
   | ArenaStateMsg | ArenaCountdownMsg | ArenaGoMsg | ArenaPlayersMsg
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
   | ArenaResumeMsg
-  | SoccerStateMsg | SoccerCountdownMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerEndMsg
+  | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerPenaltyMsg
+  | SoccerCardMsg | SoccerEndMsg
   | SoccerResumeMsg;
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */

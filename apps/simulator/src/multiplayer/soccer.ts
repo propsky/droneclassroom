@@ -1,14 +1,13 @@
 // ⚽ 多人足球對戰（3v3；伺服器權威 — apps/api/app/games/soccer.py）。
 // 兩種玩法（伺服器下發 mode）：
-// - 'striker' 前鋒穿門（legacy）：進球偵測在 client（我是前鋒 + armed + 跨門 + 機頭前向 +
-//   1.5s 去抖）→ 送 soccer_goal、得分後 armed=false 須退回半場、前鋒彩帶。
+// - 'striker' 前鋒穿門：客戶端用護罩後緣 + 行進方向偵測後送 soccer_goal（1.5s 去抖）。
+//   伺服器依位置軌跡重算，沒有整顆穿過就不計分。得分後須回己方半場。
 // - 'ball' 推球進門（新）：共用球由伺服器模擬（soccer_ball ~12.5Hz 廣播 → 60Hz 內插渲染），
 //   進球由伺服器判定（client 不偵測不上報）、誰都能得分、烏龍球 own=true。
 // 場地資料驅動：尺寸由 soccer_go / soccer_state 的 field 下發（soccer/field.ts 生效值），
 // 邊界 clamp / 進球判定 / 渲染 / 相機全依它 — 老師調場地大小，客戶端零改動。
 //
-// 本版新增（legacy 沒有）：機對機球體碰撞 — 本機與他人分身互推（只修正本機），
-// 「撞、擋、卡位」有實感；?nocontact=1 可關（教學備用）。
+// 機對機碰撞對齊護罩半徑：推出到不穿模，並加互推反作用；?nocontact=1 可關。
 // 視覺（場地 / 分身 / 彩帶 / 共用球 / 球框）在 render/soccerField.ts；HUD 在 ui/soccerHud.ts。
 import type {
   SoccerServerMsg,
@@ -20,6 +19,7 @@ import type {
   SoccerFieldDef,
   SoccerBallState,
   SoccerMatchMeta,
+  SoccerFoulReason,
 } from '@creafly/shared';
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
 import { clearLevel } from '../core/level';
@@ -28,12 +28,17 @@ import { bus, toast, sound, stateHud } from '../core/events';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
 import {
   SOCCER_BALL_R,
-  SOCCER_CONTACT_R,
-  SOCCER_CONTACT_DAMP,
   soccerCameraSign,
 } from '../soccer/constants';
+import { shieldPassesRing } from '../soccer/crossing';
+import {
+  SOCCER_IMPACT_TICK,
+  bounceSoccerWalls,
+  resolveShieldContact,
+} from '../soccer/contact';
+import { getSoccerFeel, SOCCER_FEELS } from '../soccer/flightFeel';
 import { activeSoccerField, setSoccerFieldFromServer, resetSoccerField } from '../soccer/field';
-import { showSoccerMatchHud, setSoccerMatchTimer, formatSoccerMatchLine } from '../ui/soccerHud';
+import { showSoccerMatchHud, setSoccerMatchTimer, formatSoccerMatchLine, showSoccerFeel } from '../ui/soccerHud';
 
 // ---- 常數（與 legacy / server 對齊）----
 /** 位置上報間隔（legacy sendSoccerPos 同為 80ms ≈ 12.5Hz） */
@@ -42,10 +47,24 @@ const POS_SEND_MS = 80;
 const GOAL_COOLDOWN_MS = 1500;
 /** 分身位置內插係數（每 60Hz tick；與 clones.ts 的 INTERP 同語意） */
 const INTERP = 0.25;
-/** 機對機最小間距（兩機各一個縮放後機身半徑） */
-const CONTACT_DIST = SOCCER_CONTACT_R * 2;
+export type SoccerMatchStatus =
+  | 'idle'
+  | 'countdown'
+  | 'running'
+  | 'break'
+  | 'golden'
+  | 'pk'
+  | 'penalty'
+  | 'done';
 
-export type SoccerMatchStatus = 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'done';
+export interface SoccerPenaltyView {
+  reason: SoccerFoulReason;
+  attackTeam: SoccerTeam;
+  defendTeam: SoccerTeam;
+  strikerId: string | null;
+  defenderId: string | null;
+  byName: string;
+}
 
 /** 其他玩家（分身）的邏輯狀態；pos 為 60Hz 內插後位置 — 碰撞與 render 共用同一份 */
 export interface SoccerOther {
@@ -101,8 +120,19 @@ export const soccerState = {
   pkScores: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
   pkTurn: null as SoccerTeam | null,
   pkRound: 0,
-  /** 最近一次「非攻擊手進自家圓環」還沒被下一則比分清掉 */
+  /** 最近一次犯規還沒被下一則比分清掉 */
   foulNote: false,
+  foulReason: null as SoccerFoulReason | null,
+  /** 起槳後、GO 之前 */
+  motorsArmed: false,
+  penalty: null as SoccerPenaltyView | null,
+  myCard: null as 'yellow' | 'red' | null,
+  disabled: false,
+  crashSent: false,
+  /** 上一 tick 的位置（穿環看整段位移，不只 z） */
+  prevX: 0,
+  prevY: HOME_POSITION.y,
+  lastBumpAt: 0,
 };
 
 let posTimer: ReturnType<typeof setInterval> | null = null;
@@ -123,9 +153,57 @@ export function initSoccerMatch(): void {
   soccerState.contactEnabled =
     new URLSearchParams(location.search).get('nocontact') !== '1';
   // 開發後門：?soccermp=1 自動進對戰（headless 驗收 / demo 用；對齊 ?arena=1）
-  if (new URLSearchParams(location.search).get('soccermp') === '1') {
+  const params = new URLSearchParams(location.search);
+  if (params.get('soccermp') === '1') {
     setTimeout(() => enterSoccerMatch(), 800);
   }
+  // ?phase2preview=arm|penalty|card 把真實 HUD／倒數疊層走一輪（沒有老師伺服器時截圖用）。
+  // 等關卡清單載完再進場，避免預設關的計時器晚到、蓋掉對戰列。
+  const preview = params.get('phase2preview');
+  if (preview === 'arm' || preview === 'penalty' || preview === 'card') {
+    const offReady = bus.on('levels-ready', () => {
+      offReady();
+      const offLoaded = bus.on('level-loaded', () => {
+        offLoaded();
+        setTimeout(() => previewPhase2(preview), 200);
+      });
+    });
+  }
+}
+
+function previewPhase2(kind: 'arm' | 'penalty' | 'card'): void {
+  enterSoccerMatch();
+  soccerState.myTeam = 'blue';
+  soccerState.myStriker = true;
+  soccerState.period = 1;
+  if (kind === 'arm') {
+    soccerState.status = 'countdown';
+    soccerState.motorsArmed = true;
+    syncSoccerLock();
+    bus.emit('countdown', { n: 3 });
+    stateHud('起槳！倒數結束前不要移動');
+  } else if (kind === 'penalty') {
+    soccerState.status = 'penalty';
+    soccerState.endTime = Date.now() + 10_000;
+    soccerState.foulNote = true;
+    soccerState.foulReason = 'false_start';
+    soccerState.penalty = {
+      reason: 'false_start',
+      attackTeam: 'red',
+      defendTeam: 'blue',
+      strikerId: 'other',
+      defenderId: wsState.myId,
+      byName: '預覽',
+    };
+    syncSoccerLock();
+    stateHud('🛡 罰球：你是這記的防守');
+  } else {
+    soccerState.status = 'running';
+    soccerState.endTime = Date.now() + 180_000;
+    soccerState.myCard = 'yellow';
+    stateHud('黃牌：再撞一次會變紅牌並排除');
+  }
+  updateMatchHud();
 }
 
 export function enterSoccerMatch(): void {
@@ -148,6 +226,12 @@ export function enterSoccerMatch(): void {
   soccerState.pkTurn = null;
   soccerState.pkRound = 0;
   soccerState.foulNote = false;
+  soccerState.foulReason = null;
+  soccerState.motorsArmed = false;
+  soccerState.penalty = null;
+  soccerState.myCard = null;
+  soccerState.disabled = false;
+  soccerState.crashSent = false;
   soccerState.others.clear();
   resetSoccerField(); // 先用 fallback 場地建場；伺服器下發 field 後再重建
 
@@ -168,6 +252,7 @@ export function enterSoccerMatch(): void {
   soccerState.prevZ = 0;
 
   showSoccerMatchHud(true);
+  showSoccerFeel(true);
   connectToTeacher();
   sendToServer({ type: 'soccer_join' }); // 未連線時靜默丟棄；ws-connected 後會補送
   if (posTimer) clearInterval(posTimer);
@@ -193,6 +278,8 @@ export function exitSoccerMatch(): void {
   bus.emit('soccer-view-changed', { sign: null });
   bus.emit('soccer-exited', {}); // render 清場地 / 分身 / 彩帶 / 共用球（dispose）、還原機體
   showSoccerMatchHud(false);
+  showSoccerFeel(false);
+  flags.multiplayerLock = false;
   resetDroneState();
   bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
   stateHud('待命');
@@ -222,22 +309,40 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
         applyMySpawn(msg.spawns);
       }
       notePhase(prev);
+      syncSoccerLock();
       updateMatchHud();
       break;
     }
     case 'soccer_players':
       applyMyTeamRole(msg.players);
       updateSoccerPlayers(msg.players);
+      syncSoccerLock();
+      break;
+    case 'soccer_arm':
+      soccerState.motorsArmed = true;
+      soccerState.status = 'countdown';
+      syncSoccerLock();
+      stateHud('起槳！倒數結束前不要移動');
+      toast('起槳，倒數期間鎖控', 'success');
+      updateMatchHud();
       break;
     case 'soccer_countdown':
       soccerState.status = 'countdown';
+      soccerState.motorsArmed = true;
+      syncSoccerLock();
       bus.emit('countdown', { n: msg.n });
       sound('beep');
+      updateMatchHud();
       break;
     case 'soccer_go':
       soccerState.status = 'running';
       soccerState.endTime = msg.endTime || 0;
       soccerState.foulNote = false;
+      soccerState.foulReason = null;
+      soccerState.penalty = null;
+      soccerState.motorsArmed = true;
+      soccerState.crashSent = false;
+      soccerState.disabled = false;
       applyMatch(msg.match);
       applyServerMode(msg.mode);
       applyServerField(msg.field);
@@ -256,6 +361,7 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
               ? '🎀 你是前鋒！穿過對方的圓環得分，得分後先回己方半場'
               : '🛡 你是防守！別飛進自家圓環',
       );
+      syncSoccerLock();
       updateMatchHud();
       break;
     case 'soccer_ball':
@@ -271,15 +377,55 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       applyMatch(msg.match);
       if (msg.spawns && soccerState.status === 'pk') applyMySpawn(msg.spawns);
       notePhase(prev);
+      syncSoccerLock();
       updateMatchHud();
       break;
     }
     case 'soccer_foul':
       soccerState.foulNote = true;
-      toast(`犯規：${msg.byName || '防守'} 進入自家圓環`, 'error');
-      if (msg.by === wsState.myId) stateHud('⚠ 非攻擊手不能進入自家圓環');
+      soccerState.foulReason = msg.reason;
+      toast(`犯規：${foulText(msg.reason, msg.byName)}`, 'error');
+      if (msg.by === wsState.myId) stateHud(`⚠ ${foulText(msg.reason, '')}`);
       updateMatchHud();
       break;
+    case 'soccer_penalty':
+      soccerState.status = 'penalty';
+      soccerState.endTime = msg.endTime || 0;
+      soccerState.foulNote = true;
+      soccerState.foulReason = msg.reason;
+      soccerState.penalty = {
+        reason: msg.reason,
+        attackTeam: msg.attackTeam,
+        defendTeam: msg.defendTeam,
+        strikerId: msg.strikerId,
+        defenderId: msg.defenderId,
+        byName: msg.byName,
+      };
+      if (msg.spawns) applyMySpawn(msg.spawns);
+      syncSoccerLock();
+      toast(`罰球 10 秒：${foulText(msg.reason, msg.byName)}`, 'error');
+      if (msg.strikerId === wsState.myId) stateHud('🎯 罰球：你是攻擊手，10 秒內穿對方圓環');
+      else if (msg.defenderId === wsState.myId) stateHud('🛡 罰球：你是這記的防守');
+      else stateHud('⏸ 罰球進行中，其餘選手鎖控');
+      updateMatchHud();
+      break;
+    case 'soccer_card': {
+      const label = msg.card === 'red' ? '紅牌' : '黃牌';
+      const why = msg.reason === 'crash' ? '墜機' : '碰撞';
+      toast(`${label}：${msg.byName || ''}（${why}）`, 'error');
+      if (msg.by === wsState.myId) {
+        soccerState.myCard = msg.card;
+        if (msg.card === 'red') {
+          soccerState.disabled = true;
+          stateHud('紅牌／墜機：本局排除');
+        } else {
+          stateHud('黃牌：再撞一次會變紅牌並排除');
+        }
+      }
+      syncSoccerLock();
+      updateMatchHud();
+      break;
+    }
     case 'soccer_goal_ok':
       if (msg.scores) soccerState.scores = msg.scores;
       soccerState.foulNote = false;
@@ -377,6 +523,8 @@ function applyMyTeamRole(players: SoccerPlayerState[] | undefined): void {
     bus.emit('soccer-view-changed', { sign: soccerCameraSign(me.team) });
   }
   soccerState.myStriker = !!me.striker;
+  soccerState.myCard = me.card === 'yellow' || me.card === 'red' ? me.card : null;
+  soccerState.disabled = !!me.disabled;
 }
 
 function updateSoccerPlayers(list: SoccerPlayerState[] | undefined): void {
@@ -427,7 +575,30 @@ function applyMySpawn(spawns: SoccerSpawn[]): void {
     soccerState.myTeam === 'red' ? 0 : soccerState.myTeam === 'blue' ? Math.PI : mine.z > 0 ? 0 : Math.PI;
   droneState.isGrounded = true;
   droneState.isFlying = false;
+  soccerState.prevX = mine.x;
+  soccerState.prevY = HOME_POSITION.y;
   soccerState.prevZ = mine.z;
+}
+
+function foulText(reason: SoccerFoulReason, name: string): string {
+  const who = name ? `${name} ` : '';
+  if (reason === 'false_start') return `${who}搶跑`;
+  if (reason === 'no_return') return `${who}得分後未回己方半場`;
+  return `${who}進入自家圓環`;
+}
+
+/** 倒數鎖控、紅牌／墜機排除、罰球時不是上場的那兩台 */
+export function soccerControlsLocked(): boolean {
+  if (!soccerState.active) return false;
+  if (soccerState.disabled || soccerState.status === 'countdown') return true;
+  if (soccerState.status !== 'penalty') return false;
+  const pen = soccerState.penalty;
+  if (!pen) return true;
+  return pen.strikerId !== wsState.myId && pen.defenderId !== wsState.myId;
+}
+
+function syncSoccerLock(): void {
+  flags.multiplayerLock = soccerControlsLocked();
 }
 
 function showMatchResult(msg: SoccerEndMsg): void {
@@ -462,26 +633,47 @@ function showMatchResult(msg: SoccerEndMsg): void {
 // 每 tick（60Hz；main.ts 在 soccerState.active 時呼叫，取代一般關卡判定）
 // =============================================================================
 export function tickSoccerMatch(): void {
+  syncSoccerLock();
+  if (soccerState.status === 'countdown') {
+    droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
+  }
   clampMatchBounds();
   interpolateOthers();
   interpolateBall();
   if (soccerState.contactEnabled) resolveDroneContacts();
+  noteCrash();
   detectGoal(); // striker 模式限定（ball 模式進球由伺服器判定，client 不上報）
+  soccerState.prevX = droneState.position.x;
+  soccerState.prevY = droneState.position.y;
   soccerState.prevZ = droneState.position.z;
   updateMatchHud();
 }
 
-/** 場地邊界 clamp（依伺服器下發的生效場地；以球形保護框半徑內縮） */
+/** 場地邊界：護罩貼牆後輕微反彈（速度不硬夾成 0） */
 function clampMatchBounds(): void {
   const F = activeSoccerField();
-  const p = droneState.position;
-  const v = droneState.velocity;
-  const m = SOCCER_BALL_R;
-  if (p.x > F.halfX - m) { p.x = F.halfX - m; if (v.x > 0) v.x = 0; }
-  else if (p.x < -F.halfX + m) { p.x = -F.halfX + m; if (v.x < 0) v.x = 0; }
-  if (p.z > F.halfZ - m) { p.z = F.halfZ - m; if (v.z > 0) v.z = 0; }
-  else if (p.z < -F.halfZ + m) { p.z = -F.halfZ + m; if (v.z < 0) v.z = 0; }
-  if (p.y > F.top - m) { p.y = F.top - m; if (v.y > 0) v.y = 0; }
+  bounceSoccerWalls(droneState.position, droneState.velocity, {
+    halfX: F.halfX,
+    halfZ: F.halfZ,
+    top: F.top,
+  }, SOCCER_BALL_R);
+}
+
+/** 下降速度夠大撞地 → 通知伺服器，本局排除（只報自己） */
+function noteCrash(): void {
+  if (!droneState.hardLanding) return;
+  droneState.hardLanding = false;
+  const live =
+    soccerState.mode === 'striker' &&
+    (soccerState.status === 'running' ||
+      soccerState.status === 'golden' ||
+      soccerState.status === 'penalty');
+  if (!live || soccerState.crashSent || soccerState.disabled) return;
+  soccerState.crashSent = true;
+  soccerState.disabled = true;
+  syncSoccerLock();
+  sendToServer({ type: 'soccer_crash' });
+  stateHud('墜機：本局排除');
 }
 
 /**
@@ -521,71 +713,63 @@ function interpolateOthers(): void {
 function resolveDroneContacts(): void {
   const p = droneState.position;
   const v = droneState.velocity;
+  const body = { x: p.x, y: p.y, z: p.z, vx: v.x, vy: v.y, vz: v.z };
+  let bumped = false;
   for (const [id, o] of soccerState.others) {
     if (!o.hasPos) continue;
-    let dx = p.x - o.pos.x;
-    let dy = p.y - o.pos.y;
-    let dz = p.z - o.pos.z;
-    let d = Math.hypot(dx, dy, dz);
-    if (d >= CONTACT_DIST) continue;
-    if (d < 1e-6) {
-      // 完全重疊（進場都站中場 (0,0.4,0) / 出生點瞬移撞到人）：沿 x 推開，避免除以零。
-      // 方向必須「兩端相反」— 若兩邊都往 +x，兩機會同步位移、永遠重疊、一路互推到邊牆
-      //（碰撞 QA 5a 復現：d 恆 0，兩機每 tick 同向漂 0.25m 直到牆邊）。
-      // 以 playerId 字典序決定：id 小的往 -x、id 大的往 +x → 兩客戶端各自算出相反方向，一 tick 分開。
-      dx = wsState.myId < id ? -1 : 1; dy = 0; dz = 0; d = 1;
-    }
-    const nx = dx / d;
-    const ny = dy / d;
-    const nz = dz / d;
-    // 推出到最小間距（本機承擔全部推出量；對方 client 那邊也會推他自己）
-    p.x = o.pos.x + nx * CONTACT_DIST;
-    p.y = o.pos.y + ny * CONTACT_DIST;
-    p.z = o.pos.z + nz * CONTACT_DIST;
-    // 移除「往對方撞入」的速度分量（v·n < 0 = 正在靠近），再整體衰減 → 有「撞上去被擋」的手感
-    const vDotN = v.x * nx + v.y * ny + v.z * nz;
-    if (vDotN < 0) {
-      v.x -= vDotN * nx;
-      v.y -= vDotN * ny;
-      v.z -= vDotN * nz;
-    }
-    v.x *= SOCCER_CONTACT_DAMP;
-    v.y *= SOCCER_CONTACT_DAMP;
-    v.z *= SOCCER_CONTACT_DAMP;
+    const hit = resolveShieldContact(body, o.pos, wsState.myId, id, SOCCER_BALL_R);
+    if (hit.separated) bumped = bumped || hit.impact >= SOCCER_IMPACT_TICK;
+  }
+  p.x = body.x;
+  p.y = body.y;
+  p.z = body.z;
+  v.x = body.vx;
+  v.y = body.vy;
+  v.z = body.vz;
+  if (bumped && performance.now() > soccerState.lastBumpAt) {
+    soccerState.lastBumpAt = performance.now() + 280;
+    sound('bump');
   }
 }
 
 /**
- * 前鋒穿對方門偵測 → 上報 server（striker 模式限定；server 才計分，驗證條件與 soccer.py 一致）：
- * 我是前鋒、比賽進行中、該隊 armed、跨越對方門面、機頭朝進攻方向、在門環半徑內。
- * 門面 / 門環尺寸依伺服器下發的生效場地。ball 模式不在此偵測、也不發 soccer_goal —
- * 球穿門由伺服器（球的權威模擬端）判定。
- * 上報前先補送一筆最新位置 — server 以「最後回報座標」驗證（容差 ±1.0m），
- * 避免 80ms 前的舊座標讓合法進球被拒。
+ * 前鋒穿對方門 → 上報 server。判定用護罩後緣與行進方向，不用機頭。
+ * server 會用自己收到的位置軌跡再算一次，對不上就拒絕（擋假得分）。
+ * ball 模式不在此偵測。上報前先補送最新位置，讓伺服器這一段軌跡含穿越。
  */
 function detectGoal(): void {
   if (soccerState.mode !== 'striker') return;
-  if (!soccerState.myStriker || !soccerState.myTeam) return;
+  if (soccerState.disabled || !soccerState.myTeam) return;
+  const pen = soccerState.penalty;
+  const penaltyStriker =
+    soccerState.status === 'penalty' && pen?.strikerId === wsState.myId;
+  if (!soccerState.myStriker && !penaltyStriker) return;
   const live =
     soccerState.status === 'running' ||
     soccerState.status === 'golden' ||
+    penaltyStriker ||
     (soccerState.status === 'pk' && soccerState.pkTurn === soccerState.myTeam);
   if (!live) return;
   const F = activeSoccerField();
   const team = soccerState.myTeam;
-  const attackZ = team === 'blue' ? F.goalZ : -F.goalZ; // 藍攻 +z 門、紅攻 -z 門
-  const p = droneState.position;
-  const z = p.z;
-  const pz = soccerState.prevZ;
-  const fwdZ = -Math.cos(droneState.yaw); // 機頭世界前向的 z 分量（>0 朝 +z）
-  const crossing =
-    team === 'blue'
-      ? pz < attackZ && z >= attackZ && fwdZ > 0 // 藍：朝 +z 穿過 +z 門
-      : pz > attackZ && z <= attackZ && fwdZ < 0; // 紅：朝 -z 穿過 -z 門
-  const inRing = Math.hypot(p.x, p.y - F.goalY) < F.goalR; // 圓形判定與門環同形（伺服器同款）
-  // PK 每一記獨立，不受「得分後回半場」鎖住
-  const armed = soccerState.status === 'pk' || soccerState.armed[team] !== false;
-  if (crossing && inRing && armed && performance.now() > soccerState.goalCooldownUntil) {
+  const attackSign = team === 'blue' ? 1 : -1;
+  const passed = shieldPassesRing(
+    { x: soccerState.prevX, y: soccerState.prevY, z: soccerState.prevZ },
+    droneState.position,
+    {
+      goalZ: attackSign * F.goalZ,
+      goalY: F.goalY,
+      goalR: F.goalR,
+      shieldR: SOCCER_BALL_R,
+      attackSign,
+    },
+  );
+  // PK／罰球每一記獨立，不受「得分後回半場」鎖住；正規局仍看 armed
+  const armed =
+    soccerState.status === 'pk' ||
+    soccerState.status === 'penalty' ||
+    soccerState.armed[team] !== false;
+  if (passed && armed && performance.now() > soccerState.goalCooldownUntil) {
     soccerState.goalCooldownUntil = performance.now() + GOAL_COOLDOWN_MS;
     sendSoccerPos();
     sendToServer({ type: 'soccer_goal' });
@@ -614,6 +798,10 @@ function updateMatchHud(): void {
       pkTurn: soccerState.pkTurn,
       pkRound: soccerState.pkRound,
       foul: soccerState.foulNote,
+      foulReason: soccerState.foulReason,
+      card: soccerState.myCard,
+      disabled: soccerState.disabled,
+      feelLabel: SOCCER_FEELS[getSoccerFeel()].label,
     }),
   );
 }

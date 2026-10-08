@@ -137,9 +137,10 @@ export function integrate(): void {
   v.z *= DRAG;
   if (lenVec3(v) < 0.001) v.x = v.y = v.z = 0;
 
-  // 地板：y < 0.4 落地
+  // 地板：y < 0.4 落地。下降速度夠大才記硬著陸（足球墜機）；輕點落地不算。
   if (p.y < HOME_POSITION.y) {
     const wasFlying = droneState.isFlying;
+    if (wasFlying && v.y < -0.08) droneState.hardLanding = true;
     p.y = HOME_POSITION.y;
     v.y = 0;
     droneState.isGrounded = true;

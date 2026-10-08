@@ -150,9 +150,15 @@ class SoccerPosMsg(_StrictModel):
 
 
 class SoccerGoalMsg(_StrictModel):
-    """宣告進球（伺服器驗證：前鋒 / armed / 最後回報位置在對方門環容差內）。"""
+    """宣告進球。伺服器只在自己看到整顆護罩沿行進方向穿過後才計分。"""
 
     type: Literal["soccer_goal"]
+
+
+class SoccerCrashMsg(_StrictModel):
+    """墜機自報：伺服器把這一台標成紅牌並排除本局。"""
+
+    type: Literal["soccer_crash"]
 
 
 StudentMessage = Annotated[
@@ -169,7 +175,8 @@ StudentMessage = Annotated[
     | SoccerJoinMsg
     | SoccerLeaveMsg
     | SoccerPosMsg
-    | SoccerGoalMsg,
+    | SoccerGoalMsg
+    | SoccerCrashMsg,
     Field(discriminator="type"),
 ]
 STUDENT_MESSAGE_ADAPTER: TypeAdapter[
@@ -187,6 +194,7 @@ STUDENT_MESSAGE_ADAPTER: TypeAdapter[
     | SoccerLeaveMsg
     | SoccerPosMsg
     | SoccerGoalMsg
+    | SoccerCrashMsg
 ] = TypeAdapter(StudentMessage)
 
 # ---------- 老師 → 伺服器 ----------
