@@ -154,3 +154,63 @@ export function sideWorldToCanvas(x: number, y: number, w: number, h: number): [
   const py = h - 10 - (y / EDITOR_MAX_Y) * (h - 24);
   return [px, py];
 }
+
+/** 地圖畫布縮放：zoom=1、pan=0 等於不縮放。pan 是畫布像素。 */
+export interface MapViewTransform {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+export const MAP_ZOOM_MIN = 0.5;
+export const MAP_ZOOM_MAX = 4;
+const MAP_ZOOM_FACTOR = 1.12;
+
+export function clampMapZoom(zoom: number): number {
+  return Math.max(MAP_ZOOM_MIN, Math.min(MAP_ZOOM_MAX, zoom));
+}
+
+/** 指標（畫布像素）→ 縮放前的內容座標，命中測試與拖曳用。 */
+export function mapPointerToContent(
+  pointerX: number,
+  pointerY: number,
+  view: MapViewTransform,
+): [number, number] {
+  return [(pointerX - view.panX) / view.zoom, (pointerY - view.panY) / view.zoom];
+}
+
+/**
+ * 以指標為中心放大或縮小，指標下的內容點保持不動。
+ * zoomIn=true 放大（滾輪向上）。
+ */
+export function zoomMapAtPointer(
+  view: MapViewTransform,
+  pointerX: number,
+  pointerY: number,
+  zoomIn: boolean,
+): MapViewTransform {
+  const zoom = clampMapZoom(view.zoom * (zoomIn ? MAP_ZOOM_FACTOR : 1 / MAP_ZOOM_FACTOR));
+  const [contentX, contentY] = mapPointerToContent(pointerX, pointerY, view);
+  return {
+    zoom,
+    panX: pointerX - contentX * zoom,
+    panY: pointerY - contentY * zoom,
+  };
+}
+
+/** 畫布改尺寸時，讓原本在中心的內容點仍留在中心。 */
+export function refitMapZoom(
+  view: MapViewTransform,
+  prevW: number,
+  prevH: number,
+  nextW: number,
+  nextH: number,
+): MapViewTransform {
+  if (prevW <= 0 || prevH <= 0 || nextW <= 0 || nextH <= 0) return view;
+  const [cx, cy] = mapPointerToContent(prevW / 2, prevH / 2, view);
+  return {
+    zoom: view.zoom,
+    panX: nextW / 2 - (cx / prevW) * nextW * view.zoom,
+    panY: nextH / 2 - (cy / prevH) * nextH * view.zoom,
+  };
+}

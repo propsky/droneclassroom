@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampWorld, heightHueColor, isoCanvasToWorld, isoDepthKey, isoGroundToCanvas, isoLayout, isoWorldToCanvas, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas } from './levelEditorUtils';
+import { clampWorld, heightHueColor, isoCanvasToWorld, isoDepthKey, isoGroundToCanvas, isoLayout, isoWorldToCanvas, mapPointerToContent, MAP_ZOOM_MAX, MAP_ZOOM_MIN, refitMapZoom, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas, zoomMapAtPointer } from './levelEditorUtils';
 
 describe('levelEditorUtils', () => {
   it('snapWorld 1m 格', () => {
@@ -62,6 +62,34 @@ describe('levelEditorUtils', () => {
     const back = isoCanvasToWorld(px, py, w, h, planeY, 0.1);
     expect(back.x).toBeCloseTo(src.x, 1);
     expect(back.z).toBeCloseTo(src.z, 1);
+  });
+
+  it('滾輪縮放保持指標下的內容點，並限制倍率', () => {
+    const view = { zoom: 1, panX: 0, panY: 0 };
+    const [x0, y0] = mapPointerToContent(120, 80, view);
+    const zoomed = zoomMapAtPointer(view, 120, 80, true);
+    const [x1, y1] = mapPointerToContent(120, 80, zoomed);
+    expect(zoomed.zoom).toBeGreaterThan(1);
+    expect(x1).toBeCloseTo(x0, 5);
+    expect(y1).toBeCloseTo(y0, 5);
+
+    let atMax = { zoom: MAP_ZOOM_MAX, panX: 10, panY: 20 };
+    atMax = zoomMapAtPointer(atMax, 40, 40, true);
+    expect(atMax.zoom).toBe(MAP_ZOOM_MAX);
+    expect(atMax.panX).toBe(10);
+
+    let atMin = { zoom: MAP_ZOOM_MIN, panX: 0, panY: 0 };
+    atMin = zoomMapAtPointer(atMin, 10, 10, false);
+    expect(atMin.zoom).toBe(MAP_ZOOM_MIN);
+  });
+
+  it('畫布改尺寸後中心內容點仍在中心', () => {
+    const view = zoomMapAtPointer({ zoom: 1, panX: 0, panY: 0 }, 100, 60, true);
+    const [cx, cy] = mapPointerToContent(200, 150, view);
+    const next = refitMapZoom(view, 400, 300, 800, 600);
+    const [nx, ny] = mapPointerToContent(400, 300, next);
+    expect(nx / 800).toBeCloseTo(cx / 400, 5);
+    expect(ny / 600).toBeCloseTo(cy / 300, 5);
   });
 
   it('isoCanvasToWorld 使用物件平面 y，非放置高度', () => {
