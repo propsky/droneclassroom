@@ -215,7 +215,7 @@ export class SoccerFieldVisuals {
     this.syncBroadcast();
   }
 
-  /** 草皮：程序噪點，不要戶外那片純色大平面 */
+  /** 草皮：深草綠割紋＋細葉，整面鋪一次，不要淺色或發白 */
   private buildTurf(): void {
     const F = activeSoccerField();
     const floor = MeshBuilder.CreateGround(
@@ -225,38 +225,58 @@ export class SoccerFieldVisuals {
     );
     floor.position.y = 0.02;
     const mat = new StandardMaterial('soccerFloorMat', this.scene);
-    const tex = new DynamicTexture('soccerGrass', { width: 256, height: 256 }, this.scene, false);
+    const size = 512;
+    const tex = new DynamicTexture('soccerGrass', { width: size, height: size }, this.scene, false);
     const ctx = tex.getContext() as CanvasRenderingContext2D;
-    ctx.fillStyle = '#2c6b38';
-    ctx.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 1800; i++) {
-      const g = 90 + Math.floor(Math.random() * 70);
-      ctx.fillStyle = `rgba(${30 + Math.floor(Math.random() * 25)},${g},${40},0.45)`;
-      ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 7);
+    const stripes = 8;
+    for (let i = 0; i < stripes; i++) {
+      const x0 = Math.floor((i * size) / stripes);
+      const x1 = Math.floor(((i + 1) * size) / stripes);
+      ctx.fillStyle = i % 2 === 0 ? '#145228' : '#1c6434';
+      ctx.fillRect(x0, 0, x1 - x0, size);
+      ctx.fillStyle = 'rgba(8,36,16,0.45)';
+      ctx.fillRect(x1 - 2, 0, 2, size);
+    }
+    for (let i = 0; i < 3200; i++) {
+      const x = (i * 73) % size;
+      const y = (i * 137) % size;
+      const band = Math.floor((x * stripes) / size) % 2;
+      const g = (band ? 86 : 70) + (i % 18);
+      ctx.fillStyle = `rgba(${14 + (i % 9)},${g},${18 + (i % 7)},0.4)`;
+      ctx.fillRect(x, y, 1 + (i % 2), 4 + (i % 5));
     }
     tex.update();
-    tex.uScale = 6;
-    tex.vScale = 10;
+    tex.uScale = 1;
+    tex.vScale = 1;
     mat.diffuseTexture = tex;
-    mat.specularColor = new Color3(0.04, 0.04, 0.04);
+    mat.specularColor = new Color3(0.03, 0.04, 0.03);
     floor.material = mat;
     floor.receiveShadows = true;
     this.fieldMeshes.push(floor);
   }
 
-  /** 軟墊框架＋網。網在框架內側，天花板也封起來 */
+  /** 球館用的實色材質（護墊、鋼架、色塊）。不改碰撞。 */
+  private gymMat(name: string, color: number, emissiveScale: number, spec: number): StandardMaterial {
+    const mat = new StandardMaterial(name, this.scene);
+    const c = hex(color);
+    mat.diffuseColor = c;
+    mat.emissiveColor = c.scale(emissiveScale);
+    mat.specularColor = new Color3(spec, spec, spec);
+    return mat;
+  }
+
+  /** 軟墊框架＋網＋鋼架。網在框架內側，天花板封起來。尺寸沿用場地生效值。 */
   private buildFrameAndNets(): void {
     const F = activeSoccerField();
     const scene = this.scene;
-    const padMat = new StandardMaterial('soccerPadMat', scene);
-    padMat.diffuseColor = hex(0x2a3038);
-    padMat.specularColor = new Color3(0.08, 0.08, 0.08);
-    padMat.emissiveColor = hex(0x1a1e24).scale(0.4);
+    // 鋼架與外殼以色塊自發光為主、漫反射壓低，避免燈一照就整片過曝成白
+    const steel = this.gymMat('soccerSteel', 0x7a8da3, 0.62, 0.12);
+    steel.diffuseColor = hex(0x24303c);
 
     const darkMat = new StandardMaterial('soccerShellMat', scene);
-    darkMat.diffuseColor = hex(0x12151c);
-    darkMat.specularColor = Color3.Black();
-    darkMat.emissiveColor = hex(0x0c0e12);
+    darkMat.diffuseColor = hex(0x121820);
+    darkMat.specularColor = new Color3(0.03, 0.03, 0.04);
+    darkMat.emissiveColor = hex(0x3a4c60);
 
     const addBox = (
       name: string,
@@ -291,7 +311,7 @@ export class SoccerFieldVisuals {
         scene,
       );
       post.position.set(sx * F.halfX, F.top / 2, sz * F.halfZ);
-      post.material = padMat;
+      post.material = steel;
       post.isPickable = false;
       this.cast(post);
       this.fieldMeshes.push(post);
@@ -300,11 +320,21 @@ export class SoccerFieldVisuals {
     const beamT = 0.16;
     const ys = [beamT / 2, F.top * 0.5, F.top - beamT / 2];
     for (const y of ys) {
-      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, -F.halfZ, padMat);
-      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, F.halfZ, padMat);
-      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, -F.halfX, y, 0, padMat);
-      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, F.halfX, y, 0, padMat);
+      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, -F.halfZ, steel);
+      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, F.halfZ, steel);
+      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, -F.halfX, y, 0, steel);
+      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, F.halfX, y, 0, steel);
     }
+
+    // 兩側護墊：+X 偏紅、-X 偏藍，下緣深、中間一條淺色，不要一片亮白
+    this.addSidePad(1, 0x8c2e34, 0xc46a64, 0x4c1e22);
+    this.addSidePad(-1, 0x2a4c86, 0x6e96c8, 0x16243f);
+    const skirt = this.gymMat('soccerEndSkirt', 0x2c333c, 0.14, 0.05);
+    const skirtLen = F.halfX * 2 - 0.55;
+    addBox('soccerEndSkirt', skirtLen, 1.05, 0.12, 0, 0.68, -F.halfZ + 0.1, skirt, false);
+    addBox('soccerEndSkirt', skirtLen, 1.05, 0.12, 0, 0.68, F.halfZ - 0.1, skirt, false);
+    this.addEndBlocks(-1, [0x1e4f92, 0xb83a34, 0x243044, 0xd4cbb8, 0x1e4f92]);
+    this.addEndBlocks(1, [0xb83a34, 0x243044, 0x1e4f92, 0xd4cbb8, 0xb83a34]);
 
     // 外殼深色擋板（網後面），避免看到戶外天空
     const shellA = 0.02;
@@ -317,75 +347,194 @@ export class SoccerFieldVisuals {
 
     const inset = 0.2;
     const cell = 0.18;
-    const netY = 0.08;
-    const netH = F.top - 0.16;
-    this.addNet(
+    const netY = 1.28;
+    const netH = F.top - netY - 0.2;
+    const netLo = new Color3(0.4, 0.44, 0.48);
+    const netHi = new Color3(0.12, 0.14, 0.18);
+    this.addSplitNet(
       'soccerNetFar',
       new Vector3(-F.halfX + inset, netY, -F.halfZ + 0.05),
       new Vector3((F.halfX - inset) * 2, 0, 0),
-      new Vector3(0, netH, 0),
+      netH,
       Math.round(((F.halfX - inset) * 2) / cell),
-      Math.round(netH / cell),
+      netLo,
+      netHi,
     );
-    this.addNet(
+    this.addSplitNet(
       'soccerNetNear',
       new Vector3(-F.halfX + inset, netY, F.halfZ - 0.05),
       new Vector3((F.halfX - inset) * 2, 0, 0),
-      new Vector3(0, netH, 0),
+      netH,
       Math.round(((F.halfX - inset) * 2) / cell),
-      Math.round(netH / cell),
+      netLo,
+      netHi,
     );
-    this.addNet(
+    this.addSplitNet(
       'soccerNetLeft',
       new Vector3(-F.halfX + 0.05, netY, -F.halfZ + inset),
       new Vector3(0, 0, (F.halfZ - inset) * 2),
-      new Vector3(0, netH, 0),
+      netH,
       Math.round(((F.halfZ - inset) * 2) / cell),
-      Math.round(netH / cell),
+      netLo,
+      netHi,
     );
-    this.addNet(
+    this.addSplitNet(
       'soccerNetRight',
       new Vector3(F.halfX - 0.05, netY, -F.halfZ + inset),
       new Vector3(0, 0, (F.halfZ - inset) * 2),
-      new Vector3(0, netH, 0),
+      netH,
       Math.round(((F.halfZ - inset) * 2) / cell),
-      Math.round(netH / cell),
+      netLo,
+      netHi,
     );
     this.addNet(
       'soccerNetCeil',
-      new Vector3(-F.halfX + inset, F.top - 0.12, -F.halfZ + inset),
+      new Vector3(-F.halfX + inset, F.top - 0.18, -F.halfZ + inset),
       new Vector3((F.halfX - inset) * 2, 0, 0),
       new Vector3(0, 0, (F.halfZ - inset) * 2),
       Math.round(((F.halfX - inset) * 2) / cell),
       Math.round(((F.halfZ - inset) * 2) / cell),
+      new Color3(0.2, 0.24, 0.3),
+      0.7,
     );
 
-    // 球館燈：天花板燈盤（自發光）＋兩盞點光源
+    this.addCeilingTruss(steel);
+
+    // 燈具：深色燈殼包住小燈片，點光源只照一片，留下鋼架陰影
+    const housing = this.gymMat('soccerLampHouse', 0x1a222c, 0.06, 0.18);
     const lampMat = new StandardMaterial('soccerLampMat', scene);
-    lampMat.emissiveColor = hex(0xfff1cc);
+    lampMat.emissiveColor = hex(0xfff1d6);
     lampMat.disableLighting = true;
-    for (const z of [-F.halfZ * 0.55, 0, F.halfZ * 0.55]) {
+    for (const t of [-0.62, -0.22, 0.22, 0.62]) {
+      const z = t * F.halfZ;
+      addBox('soccerLampHouse', 0.95, 0.07, 0.36, 0, F.top - 0.22, z, housing, false);
       const lamp = MeshBuilder.CreateBox(
         `soccerLamp-${z}`,
-        { width: 1.1, height: 0.04, depth: 0.28 },
+        { width: 0.68, height: 0.02, depth: 0.16 },
         scene,
       );
-      lamp.position.set(0, F.top - 0.12, z);
+      lamp.position.set(0, F.top - 0.27, z);
       lamp.material = lampMat;
       lamp.isPickable = false;
       this.fieldMeshes.push(lamp);
-    }
-    for (const z of [-F.halfZ * 0.4, F.halfZ * 0.4]) {
-      const light = new PointLight(`soccerLight-${z}`, new Vector3(0, F.top - 0.4, z), scene);
-      light.diffuse = hex(0xfff3d8);
-      light.specular = hex(0xfff3d8);
-      light.intensity = 30;
-      light.range = 12;
+      const light = new PointLight(`soccerLight-${z}`, new Vector3(0, F.top - 0.55, z), scene);
+      light.diffuse = hex(0xfff3e4);
+      light.specular = hex(0x4a453e);
+      light.intensity = 2.4;
+      light.range = 9;
       this.lights.push(light);
     }
   }
 
-  private addNet(name: string, origin: Vector3, axisU: Vector3, axisV: Vector3, cellsU: number, cellsV: number): void {
+  /** 長邊護墊。sign +1 為 +X。只是外觀，不進碰撞。 */
+  private addSidePad(sign: number, main: number, stripe: number, cap: number): void {
+    const F = activeSoccerField();
+    const x = sign * (F.halfX - 0.06);
+    const len = F.halfZ * 2 - 0.7;
+    const mainMat = this.gymMat(`soccerPad-${sign}`, main, 0.18, 0.06);
+    const stripeMat = this.gymMat(`soccerPadStripe-${sign}`, stripe, 0.28, 0.08);
+    const capMat = this.gymMat(`soccerPadCap-${sign}`, cap, 0.1, 0.04);
+    const add = (
+      name: string,
+      w: number,
+      h: number,
+      d: number,
+      px: number,
+      py: number,
+      pz: number,
+      mat: StandardMaterial,
+      cast = true,
+    ): void => {
+      const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, this.scene);
+      m.position.set(px, py, pz);
+      m.material = mat;
+      m.isPickable = false;
+      if (cast) this.cast(m);
+      this.fieldMeshes.push(m);
+    };
+    add('soccerSidePad', 0.16, 1.05, len, x, 0.68, 0, mainMat);
+    add('soccerSideStripe', 0.05, 0.16, len - 0.15, x - sign * 0.09, 0.78, 0, stripeMat, false);
+    add('soccerSideCap', 0.18, 0.08, len, x, 1.24, 0, capMat);
+  }
+
+  /** 端牆色塊（球館內牆，不是戶外天空，也不是廣告字） */
+  private addEndBlocks(sign: number, colors: number[]): void {
+    const F = activeSoccerField();
+    const gap = 0.1;
+    const span = F.halfX * 2 - 0.9;
+    const bw = (span - gap * (colors.length - 1)) / colors.length;
+    let x = -span / 2 + bw / 2;
+    const z = sign * (F.halfZ - 0.16);
+    colors.forEach((color, i) => {
+      const mat = this.gymMat(`soccerEndBlock-${sign}-${i}`, color, 0.2, 0.05);
+      const m = MeshBuilder.CreateBox(
+        `soccerEndBlock-${sign}-${i}`,
+        { width: bw, height: 2.05, depth: 0.06 },
+        this.scene,
+      );
+      m.position.set(x, 2.55, z);
+      m.material = mat;
+      m.isPickable = false;
+      this.fieldMeshes.push(m);
+      x += bw + gap;
+    });
+  }
+
+  /** 天花板藍灰鋼架，壓在燈具旁邊，讓燈有對比 */
+  private addCeilingTruss(steel: StandardMaterial): void {
+    const F = activeSoccerField();
+    const y = F.top - 0.34;
+    const add = (name: string, w: number, h: number, d: number, x: number, py: number, z: number): void => {
+      const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, this.scene);
+      m.position.set(x, py, z);
+      m.material = steel;
+      m.isPickable = false;
+      this.fieldMeshes.push(m);
+    };
+    for (const t of [-0.62, 0, 0.62]) {
+      add('soccerTrussZ', 0.08, 0.1, F.halfZ * 2 - 0.6, t * F.halfX, y, 0);
+    }
+    for (const t of [-0.72, -0.36, 0, 0.36, 0.72]) {
+      add('soccerTrussX', F.halfX * 2 - 0.45, 0.08, 0.08, 0, y - 0.08, t * F.halfZ);
+    }
+  }
+
+  /** 牆網分上下兩段：下方網紋還在，上方再暗一階 */
+  private addSplitNet(
+    name: string,
+    origin: Vector3,
+    axisU: Vector3,
+    height: number,
+    cellsU: number,
+    lower: Color3,
+    upper: Color3,
+  ): void {
+    const cell = 0.18;
+    const mid = height * 0.45;
+    this.addNet(name + 'Lo', origin, axisU, new Vector3(0, mid, 0), cellsU, Math.max(2, Math.round(mid / cell)), lower, 0.84);
+    const hi = origin.add(new Vector3(0, mid, 0));
+    this.addNet(
+      name + 'Hi',
+      hi,
+      axisU,
+      new Vector3(0, height - mid, 0),
+      cellsU,
+      Math.max(2, Math.round((height - mid) / cell)),
+      upper,
+      0.92,
+    );
+  }
+
+  private addNet(
+    name: string,
+    origin: Vector3,
+    axisU: Vector3,
+    axisV: Vector3,
+    cellsU: number,
+    cellsV: number,
+    color: Color3,
+    alpha: number,
+  ): void {
     const lines: Vector3[][] = [];
     const cu = Math.max(2, cellsU);
     const cv = Math.max(2, cellsV);
@@ -398,8 +547,8 @@ export class SoccerFieldVisuals {
       lines.push([a, a.add(axisU)]);
     }
     const g = MeshBuilder.CreateLineSystem(name, { lines }, this.scene);
-    g.color = new Color3(0.86, 0.9, 0.94);
-    g.alpha = 0.72;
+    g.color = color;
+    g.alpha = alpha;
     g.isPickable = false;
     this.fieldMeshes.push(g);
   }
@@ -408,8 +557,9 @@ export class SoccerFieldVisuals {
     const F = activeSoccerField();
     const scene = this.scene;
     const lineMat = new StandardMaterial('soccerLineMat', scene);
-    lineMat.emissiveColor = Color3.White();
+    lineMat.emissiveColor = hex(0xd2d8d0);
     lineMat.disableLighting = true;
+    lineMat.alpha = 0.9;
     const strip = (name: string, w: number, d: number, x: number, z: number): void => {
       const m = MeshBuilder.CreateGround(name, { width: w, height: d }, scene);
       m.position.set(x, 0.045, z);
@@ -527,12 +677,12 @@ export class SoccerFieldVisuals {
     const mat = new StandardMaterial(`soccerGoalMat-${z}`, this.scene);
     const c = hex(color);
     mat.diffuseColor = c;
-    mat.emissiveColor = c.scale(0.55);
-    mat.specularColor = new Color3(0.2, 0.2, 0.2);
+    mat.emissiveColor = c.scale(0.92);
+    mat.specularColor = new Color3(0.5, 0.5, 0.5);
     ring.material = mat;
     ring.receiveShadows = true;
     this.cast(ring);
-    this.goals.push({ z, color, mat, baseEmissive: c.scale(0.55) });
+    this.goals.push({ z, color, mat, baseEmissive: c.scale(0.92) });
     return ring;
   }
 
@@ -541,8 +691,9 @@ export class SoccerFieldVisuals {
     const F = activeSoccerField();
     const scene = this.scene;
     const strapMat = new StandardMaterial(`soccerStrapMat-${z}`, scene);
-    strapMat.diffuseColor = hex(0x3a4048);
-    strapMat.specularColor = new Color3(0.05, 0.05, 0.05);
+    strapMat.diffuseColor = hex(0x6a7c90);
+    strapMat.specularColor = new Color3(0.28, 0.3, 0.34);
+    strapMat.emissiveColor = hex(0x4a5c6e).scale(0.25);
     const top = F.goalY + F.goalR + F.goalTube * 2;
     const drop = F.top - 0.05 - top;
     for (const x of [-0.28, 0.28]) {
@@ -905,21 +1056,21 @@ export class SoccerFieldVisuals {
         darkness: this.shadows?.darkness ?? 0,
       };
     }
-    this.scene.clearColor = new Color4(0.05, 0.06, 0.08, 1);
+    this.scene.clearColor = new Color4(0.07, 0.09, 0.12, 1);
     this.scene.fogMode = Scene.FOGMODE_EXP2;
-    this.scene.fogDensity = 0.03;
-    this.scene.fogColor = hex(0x1a1e28);
+    this.scene.fogDensity = 0.012;
+    this.scene.fogColor = hex(0x2a3544);
     if (sun) {
-      sun.direction = new Vector3(0.18, -1, 0.06);
-      sun.position = new Vector3(-1.2, 8, 0.4);
-      sun.intensity = 1.25;
+      sun.direction = new Vector3(0.42, -1, 0.22);
+      sun.position = new Vector3(-2.4, 8, 1.4);
+      sun.intensity = 0.82;
     }
     if (hemi) {
-      hemi.intensity = 0.28;
-      hemi.diffuse = hex(0xd5deea);
-      hemi.groundColor = hex(0x243028);
+      hemi.intensity = 0.36;
+      hemi.diffuse = hex(0xc5d0dc);
+      hemi.groundColor = hex(0x163024);
     }
-    if (this.shadows) this.shadows.darkness = 0.45;
+    if (this.shadows) this.shadows.darkness = 0.62;
     this.hideOutdoorMeshes();
   }
 

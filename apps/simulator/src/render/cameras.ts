@@ -144,9 +144,9 @@ export class CameraRig {
     if (this.soccerSign !== null && this.soccerCam === 'team') {
       const sign = this.soccerSign;
       const F = activeSoccerField();
-      // 站在端線外一點、鏡頭在館內高度，近端圓環與計分板都進得了畫面
-      const dist = F.halfZ + 1.6;
-      const camY = Math.min(F.top - 0.6, 3.4);
+      // 端牆外殼在界線外，鏡頭要站在殼內側，近端圓環與整座球館才進得了畫面
+      const dist = F.halfZ - 0.55;
+      const camY = Math.min(F.top - 0.85, 3.15);
       this.camera.position.set(0, camY, sign * dist);
       this.tmpTarget.set(0, 2.1, -sign * F.halfZ * 0.35);
       this.camera.setTarget(this.tmpTarget);

@@ -40,7 +40,9 @@ export function createSoccerDrone(
   };
 
   const cageMat = new StandardMaterial(`soccerCage-${name}`, scene);
-  cageMat.specularColor = new Color3(0.25, 0.25, 0.25);
+  cageMat.diffuseColor = hex(0xd5dce4);
+  cageMat.specularColor = new Color3(0.62, 0.66, 0.72);
+  cageMat.emissiveColor = hex(0xb7c0cc).scale(0.18);
   const ledMat = new StandardMaterial(`soccerLed-${name}`, scene);
   ledMat.disableLighting = true;
   const dark = new StandardMaterial(`soccerDroneDark-${name}`, scene);
@@ -175,8 +177,10 @@ export function createSoccerDrone(
   const apply = (color: number): void => {
     guard = color;
     const c = hex(color);
-    cageMat.diffuseColor = c;
-    cageMat.emissiveColor = c.scale(0.62);
+    // 骨架維持金屬銀，只在邊緣帶一點隊色；LED 環用全亮度隊色，從場地裡跳出來
+    cageMat.diffuseColor = hex(0xd5dce4);
+    cageMat.emissiveColor = c.scale(0.2);
+    cageMat.specularColor = new Color3(0.62, 0.66, 0.72);
     ledMat.emissiveColor = c;
   };
   apply(0xff2d3a);
@@ -192,7 +196,7 @@ export function createSoccerDrone(
       props.forEach((p, i) => {
         p.rotation.y = propAngle * (i % 2 ? 1 : -1);
       });
-      const pulse = 0.82 + 0.18 * Math.sin(propAngle * 3);
+      const pulse = 0.78 + 0.22 * Math.sin(propAngle * 3);
       ledMat.emissiveColor = hex(guard).scale(pulse);
     },
     setEnabled(on: boolean): void {
