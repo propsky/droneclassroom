@@ -1,4 +1,8 @@
+import './style.css';
+
 const TOKEN = 'creafly_admin_token';
+/** 留空 = 同網域（本機 Vite 代理）。Pages 建置時由 VITE_API_URL 帶入後端。 */
+const API_BASE = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
 
 interface Teacher {
   id: number;
@@ -40,7 +44,7 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   headers.set('content-type', 'application/json');
   const tok = token();
   if (tok) headers.set('authorization', `Bearer ${tok}`);
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (res.status === 401 && path !== '/auth/admin/login') {
     sessionStorage.removeItem(TOKEN);
     location.reload();
