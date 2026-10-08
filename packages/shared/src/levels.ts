@@ -136,6 +136,11 @@ export interface LevelDef {
   topdownCam?: TopdownCamDef;
   /** 場景環境：展場模式用不同天空 / 霧效（F-02） */
   sceneEnv?: 'default' | 'exhibition';
+  /**
+   * 場地地板圖。只存本機相對路徑 `/api/levels/{id}/floor`（可帶 ?v=），
+   * 圖片本體在伺服器，不放進 JSON。
+   */
+  floorImage?: string;
   /** 目標圖形參考線（俯視 [x,z] 折線） */
   guide?: [number, number][];
   penColors?: string[];

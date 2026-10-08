@@ -22,6 +22,7 @@ from .admin_api import router as admin_router
 from .auth import TeacherAuth, generate_pin
 from .config import Settings
 from .db.session import create_engine, create_sessionmaker
+from .floor_api import router as floor_router
 from .levels_api import router as levels_router
 from .levels_catalog import ensure_all_teams_catalog, ensure_system_levels, fetch_known_level_ids
 from .mailer import Mailer
@@ -182,6 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_ws_routes(app)
     app.include_router(rest_router)
     app.include_router(levels_router)
+    app.include_router(floor_router)
     app.include_router(students_router)
     app.include_router(admin_router)
     app.include_router(replay_logs_router)

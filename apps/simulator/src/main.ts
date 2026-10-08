@@ -29,7 +29,8 @@ import {
 } from './core/recordingSession';
 import { tickFlightPhysics, tickRecordedLevel } from './core/simTick';
 import { getStudentToken } from './net/studentAuth';
-import { createSceneWorld, applySceneEnv } from './render/scene';
+import { API_BASE } from './net/backend';
+import { createSceneWorld, applySceneEnv, applyLevelFloor } from './render/scene';
 import { DroneVisual } from './render/drone';
 import { LevelVisuals } from './render/levelMeshes';
 import { InkVisual } from './render/ink';
@@ -127,6 +128,10 @@ initRecordingSession(() => levelState.current, () => !!getStudentToken());
 bus.on('level-loaded', ({ level }) => {
   const urlEnv = parseSceneEnv(new URLSearchParams(location.search).get('scene'));
   applySceneEnv(world.scene, level.sceneEnv ?? urlEnv ?? 'default');
+  const floor = level.floorImage;
+  const floorUrl =
+    floor && floor.startsWith('/api/levels/') ? `${API_BASE}${floor}` : null;
+  applyLevelFloor(world.scene, floorUrl);
 });
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）

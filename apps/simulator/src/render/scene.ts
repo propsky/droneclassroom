@@ -14,8 +14,9 @@ import {
   HDRCubeTexture,
   Mesh,
   LinesMesh,
+  Texture,
 } from '@babylonjs/core';
-import type { SceneEnv } from '@creafly/shared';
+import { EDITOR_WORLD, type SceneEnv } from '@creafly/shared';
 import { droneState, HOME_POSITION } from '../core/droneState';
 import { levelState } from '../core/level';
 import { bus } from '../core/events';
@@ -231,6 +232,46 @@ function buildGrid(scene: Scene): void {
   grid.color = hex(0x4dd0e1);
   grid.alpha = 0.6;
   grid.isPickable = false;
+}
+
+/** 關卡場地地板：有圖才顯示，鋪在中央 EDITOR_WORLD 公尺。 */
+export function applyLevelFloor(scene: Scene, url: string | null): void {
+  let mesh = scene.getMeshByName('levelFloor');
+  let mat = scene.getMaterialByName('levelFloorMat') as StandardMaterial | null;
+  if (!mesh) {
+    mesh = MeshBuilder.CreateGround(
+      'levelFloor',
+      { width: EDITOR_WORLD, height: EDITOR_WORLD },
+      scene,
+    );
+    mesh.position.y = 0.02;
+    mesh.receiveShadows = true;
+    mesh.isPickable = false;
+    mat = new StandardMaterial('levelFloorMat', scene);
+    mat.specularColor = new Color3(0.05, 0.05, 0.05);
+    mesh.material = mat;
+  }
+  mesh.metadata = { ...(mesh.metadata ?? {}), hasFloor: false };
+  mesh.isVisible = false;
+  if (!url || !mat) return;
+  const previous = mat.diffuseTexture;
+  const tex = new Texture(
+    url,
+    scene,
+    false,
+    false,
+    Texture.TRILINEAR_SAMPLINGMODE,
+    () => {
+      mesh.metadata = { ...(mesh.metadata ?? {}), hasFloor: true };
+      mesh.isVisible = true;
+      previous?.dispose();
+    },
+    () => {
+      tex.dispose();
+      mesh.isVisible = false;
+    },
+  );
+  mat.diffuseTexture = tex;
 }
 
 /** F-02：依關卡或 URL 切換展場 / 一般霧效與天空後備色 */

@@ -502,6 +502,10 @@ export class SoccerFieldVisuals {
       const m = this.scene.getMeshByName(name);
       if (m) m.isVisible = on;
     }
+    const levelFloor = this.scene.getMeshByName('levelFloor');
+    if (levelFloor) {
+      levelFloor.isVisible = on && levelFloor.metadata?.hasFloor === true;
+    }
   }
 }
 

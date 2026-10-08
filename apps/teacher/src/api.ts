@@ -318,6 +318,45 @@ export function fetchTeacherLevel(id: number): Promise<TeacherLevelDetail> {
   return request<TeacherLevelDetail>(`/api/teacher/levels/${id}`, { auth: true });
 }
 
+export interface FloorUploadResponse {
+  floorImage: string;
+}
+
+/** POST /api/teacher/levels/{id}/floor — JPEG / PNG / WebP，最大 2 MB */
+export async function uploadLevelFloor(id: number, file: File): Promise<FloorUploadResponse> {
+  const session = loadSession();
+  if (!session) throw new ApiError(401, '尚未登入');
+  const body = new FormData();
+  body.append('file', file);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/teacher/levels/${id}/floor`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.ticket}` },
+      body,
+    });
+  } catch {
+    throw new ApiError(0);
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    let msg: string | undefined;
+    try {
+      const errBody = JSON.parse(text) as { detail?: unknown };
+      if (typeof errBody.detail === 'string') msg = errBody.detail;
+    } catch {
+      /* 非 JSON */
+    }
+    throw new ApiError(res.status, msg);
+  }
+  return JSON.parse(text) as FloorUploadResponse;
+}
+
+/** DELETE /api/teacher/levels/{id}/floor */
+export function deleteLevelFloor(id: number): Promise<void> {
+  return request<void>(`/api/teacher/levels/${id}/floor`, { method: 'DELETE', auth: true });
+}
+
 /** PATCH /api/teacher/levels/{id} — 自動儲存草稿 */
 export function patchTeacherLevel(
   id: number,

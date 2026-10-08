@@ -171,6 +171,10 @@ export class PlaygroundScene {
     const grid = this.scene.getMeshByName('grid');
     if (ground) ground.isVisible = !playgroundOn;
     if (grid) grid.isVisible = !playgroundOn;
+    const levelFloor = this.scene.getMeshByName('levelFloor');
+    if (levelFloor) {
+      levelFloor.isVisible = !playgroundOn && levelFloor.metadata?.hasFloor === true;
+    }
   }
 }
 

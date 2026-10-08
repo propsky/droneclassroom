@@ -20,6 +20,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     PrimaryKeyConstraint,
     Text,
     UniqueConstraint,
@@ -122,6 +123,20 @@ class Level(Base):
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LevelFloor(Base):
+    """關卡場地地板圖。definition 只存相對網址，位元組放這裡。"""
+
+    __tablename__ = "level_floors"
+
+    level_pk: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("levels.id", ondelete="CASCADE"), primary_key=True
+    )
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    updated_at: Mapped[datetime] = _updated_at()
 
 
 # ---------- team_level_entries — 班級關卡目錄（上架、分類、可見性）----------

@@ -129,6 +129,17 @@ PK 即唯一索引，`ON CONFLICT (student_id, level_id) DO UPDATE` 做 upsert�
 - 賽局：`match.started` `match.ended`（payload：模式、時長、最終排行/比分）— 先記事件，不開 matches 表
 - 管理：`org.updated` `teacher.disabled`
 
+### level_floors — 關卡場地地板圖
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| level_pk | bigint PK FK levels ON DELETE CASCADE | 一關一張 |
+| content_type | text NOT NULL | image/jpeg、image/png、image/webp |
+| byte_size | integer NOT NULL CHECK 1…2097152 | 最大 2 MB |
+| data | bytea NOT NULL | 檔頭須與 content_type 一致 |
+| updated_at | timestamptz NOT NULL DEFAULT now() | |
+
+關卡 `definition.floorImage` 只存 `/api/levels/{levelId}/floor?v=`，不存圖片本體。
+
 ## 3. 刻意不做（YAGNI，留擴充點）
 | 不做 | 為什麼 | 之後怎麼加 |
 |---|---|---|

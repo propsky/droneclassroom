@@ -31,15 +31,18 @@ import {
   type LevelKitCategory,
   type LevelKitSnippet,
 } from '@creafly/shared';
+import { API_BASE } from '../backend';
 import {
   ApiError,
   createTeacherLevelKit,
+  deleteLevelFloor,
   deleteTeacherLevelKit,
   fetchTeacherLevel,
   fetchTeacherLevelKit,
   fetchTeacherLevelKits,
   patchTeacherLevel,
   patchTeacherLevelKit,
+  uploadLevelFloor,
 } from '../api';
 import { publishAndAddToCatalog, ensureCatalogForBroadcast } from '../catalogFlow';
 import {
@@ -119,7 +122,12 @@ function parseLevel(def: Record<string, unknown>, levelId: string, title: string
     obstacles: Array.isArray(raw.obstacles) ? [...raw.obstacles] : [],
     passZones: Array.isArray(raw.passZones) ? [...raw.passZones] : [],
     balloons: Array.isArray(raw.balloons) ? [...raw.balloons] : [],
+    floorImage: isFloorImagePath(raw.floorImage) ? raw.floorImage : undefined,
   };
+}
+
+function isFloorImagePath(v: unknown): v is string {
+  return typeof v === 'string' && /^\/api\/levels\/[^/]+\/floor(\?v=\d+)?$/.test(v);
 }
 
 /** 發布 / 廣播與班級目錄（由 dashboard 注入） */
@@ -141,23 +149,32 @@ export function openLevelEditor(
   editorOpts?: LevelEditorOptions,
 ): LevelEditorPanel {
   const backdrop = document.createElement('div');
-  backdrop.className = 'modal-backdrop';
+  backdrop.className = 'lvl-studio';
   backdrop.innerHTML = `
-    <div class="modal modal-xl lvl-editor-modal" role="dialog" aria-modal="true">
-      <div class="modal-head">
-        <div class="modal-head-text">
-          <h2 class="modal-title" id="le-title">關卡編輯</h2>
-          <p class="modal-desc" id="le-sub">載入中…</p>
+    <div class="lvl-studio-shell" role="dialog" aria-modal="true" aria-label="關卡編輯">
+      <header class="lvl-studio-bar">
+        <div class="lvl-studio-bar-text">
+          <h2 class="lvl-studio-title" id="le-title">關卡編輯</h2>
+          <p class="lvl-studio-sub" id="le-sub">載入中…</p>
         </div>
         <span class="lvl-save-hint" id="le-save-hint"></span>
-        <button type="button" class="btn btn-ghost btn-sm" id="le-close">${ICONS.x}關閉</button>
-      </div>
+        <div class="lvl-studio-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="le-import">${ICONS.plus}匯入 JSON</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="le-export">匯出 JSON</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="le-preview">${ICONS.play}試飛</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="le-publish" hidden>${ICONS.check}發布並加入本班</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="le-broadcast" hidden>廣播全班</button>
+          <button type="button" class="btn btn-primary btn-sm" id="le-save-now">${ICONS.check}立即儲存</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="le-close">${ICONS.x}關閉</button>
+        </div>
+      </header>
       <div id="le-backup-banner" class="lvl-backup-banner" hidden>
         <span id="le-backup-msg">本機有較新的草稿備份</span>
         <button type="button" class="btn btn-primary btn-sm" id="le-restore-backup">恢復本機草稿</button>
         <button type="button" class="btn btn-ghost btn-sm" id="le-discard-backup">忽略</button>
       </div>
-      <div class="lvl-editor-body">
+      <div class="lvl-studio-body" id="le-studio-body">
+        <aside class="lvl-studio-tools">
         <div id="le-empty-banner" class="lvl-empty-banner" hidden>
           <span>這是空白關卡，可用精靈快速起稿</span>
           <button type="button" class="btn btn-primary btn-sm" id="le-wizard-btn">${ICONS.pencil}快速起稿</button>
@@ -178,6 +195,17 @@ export function openLevelEditor(
           <label class="check-row"><input type="checkbox" id="le-return">需返航降落才算過關</label>
           <label class="check-row"><input type="checkbox" id="le-freeplay">自由活動（無順序過關）</label>
           <label class="check-row"><input type="checkbox" id="le-draw">畫畫教室模式</label>
+
+          <section class="lvl-floor">
+            <h3 class="lvl-kit-title">場地地板</h3>
+            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。圖片會鋪在關卡中央 30×30 公尺的地面。</p>
+            <img id="le-floor-thumb" class="lvl-floor-preview" alt="場地地板預覽" hidden>
+            <div class="lvl-floor-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-pick">上傳圖片</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-clear" hidden>移除地板</button>
+            </div>
+            <input id="le-floor-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          </section>
 
           <div class="lvl-editor-toolbar" id="le-toolbar">
             <button type="button" class="btn btn-ghost btn-sm le-tool active" data-mode="select">選取</button>
@@ -212,54 +240,46 @@ export function openLevelEditor(
             <div id="le-kit-panels"></div>
           </div>
         </div>
-        <div class="lvl-editor-workspace">
-          <div class="lvl-editor-canvas-col">
-            <div class="lvl-canvas-head">
-              <div class="le-view-tabs" id="le-view-tabs" role="tablist" aria-label="編輯視角">
-                <button type="button" class="btn btn-ghost btn-xs le-view active" data-view="top" role="tab">俯視</button>
-                <button type="button" class="btn btn-ghost btn-xs le-view" data-view="iso" role="tab">2.5D</button>
-                <button type="button" class="btn btn-ghost btn-xs le-view" data-view="side" role="tab">側視</button>
-              </div>
-              <span class="mono" id="le-cursor">X 0 · Z 0</span>
-              <span class="note le-canvas-hint">↑ 前方為 -Z · 拖曳移動 · 方向鍵微調 · Del 刪除</span>
+        </aside>
+        <main class="lvl-studio-stage">
+          <div class="lvl-canvas-head">
+            <div class="le-view-tabs" id="le-view-tabs" role="tablist" aria-label="編輯視角">
+              <button type="button" class="btn btn-ghost btn-xs le-view active" data-view="top" role="tab">俯視</button>
+              <button type="button" class="btn btn-ghost btn-xs le-view" data-view="iso" role="tab">2.5D</button>
+              <button type="button" class="btn btn-ghost btn-xs le-view" data-view="side" role="tab">側視</button>
             </div>
-            <div class="lvl-editor-canvas-wrap">
+            <span class="mono" id="le-cursor">X 0 · Z 0</span>
+            <button type="button" class="btn btn-ghost btn-xs le-inspector-toggle" id="le-inspector-toggle" aria-pressed="false" disabled>細節</button>
+            <span class="note le-canvas-hint">↑ 前方為 -Z · 拖曳移動 · 方向鍵微調 · Del 刪除</span>
+          </div>
+          <div class="le-canvas-frame">
+            <div class="le-canvas-box" id="le-canvas-box">
               <canvas id="le-canvas" width="${CANVAS_PX}" height="${CANVAS_PX}" aria-label="關卡編輯器"></canvas>
             </div>
-            <p class="note lvl-legend">
-              <span class="le-legend-ring">○ 圈</span>
-              <span class="le-legend-solid">■ 實心</span>
-              <span class="le-legend-soft">■ 標記</span>
-              <span class="le-legend-balloon">● 氣球</span>
-              <span class="le-legend-zone">▢ 任務</span>
-            </p>
           </div>
-          <aside class="lvl-editor-inspector" id="le-inspector">
-            <h3 class="lvl-inspector-title">檢視器</h3>
-            <div id="le-inspector-idle">
-              <p class="note le-inspector-empty">未選取物件</p>
-              <dl class="le-inspector-readout">
-                <div><dt>游標 X</dt><dd class="mono" id="le-readout-x">0</dd></div>
-                <div><dt>游標 Z</dt><dd class="mono" id="le-readout-z">0</dd></div>
-                <div><dt>放置高度</dt><dd class="mono" id="le-readout-place-y">2.5 m</dd></div>
-              </dl>
-              <p class="note" id="le-view-hint">滾輪調整放置高度 · 側視可拖曳調 Y</p>
-            </div>
-            ${propsPanelHtml()}
-          </aside>
-        </div>
-      </div>
-      <div class="modal-actions lvl-editor-actions">
-        <div class="lvl-editor-actions-left">
-          <button type="button" class="btn btn-ghost btn-sm" id="le-import">${ICONS.plus}匯入 JSON</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="le-export">匯出 JSON</button>
-        </div>
-        <div class="lvl-editor-actions-right">
-          <button type="button" class="btn btn-ghost" id="le-preview">${ICONS.play}試飛</button>
-          <button type="button" class="btn btn-ghost" id="le-publish" hidden>${ICONS.check}發布並加入本班</button>
-          <button type="button" class="btn btn-ghost" id="le-broadcast" hidden>廣播全班</button>
-          <button type="button" class="btn btn-primary" id="le-save-now">${ICONS.check}立即儲存</button>
-        </div>
+          <p class="note lvl-legend">
+            <span class="le-legend-ring">○ 圈</span>
+            <span class="le-legend-solid">■ 實心</span>
+            <span class="le-legend-soft">■ 標記</span>
+            <span class="le-legend-balloon">● 氣球</span>
+            <span class="le-legend-zone">▢ 任務</span>
+          </p>
+        </main>
+        <aside class="lvl-studio-inspector" id="le-inspector" hidden>
+          <div class="lvl-inspector-head">
+            <h3 class="lvl-inspector-title">細節</h3>
+            <button type="button" class="btn btn-ghost btn-xs" id="le-inspector-hide">隱藏</button>
+          </div>
+          <div id="le-inspector-idle">
+            <dl class="le-inspector-readout">
+              <div><dt>游標 X</dt><dd class="mono" id="le-readout-x">0</dd></div>
+              <div><dt>游標 Z</dt><dd class="mono" id="le-readout-z">0</dd></div>
+              <div><dt>放置高度</dt><dd class="mono" id="le-readout-place-y">2.5 m</dd></div>
+            </dl>
+            <p class="note" id="le-view-hint">滾輪調整放置高度 · 側視可拖曳調 Y</p>
+          </div>
+          ${propsPanelHtml()}
+        </aside>
       </div>
     </div>`;
   document.body.appendChild(backdrop);
@@ -285,6 +305,11 @@ export function openLevelEditor(
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let dirty = false;
   let syncingProps = false;
+  let inspectorOpen = false;
+  let floorImg: HTMLImageElement | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+  const prevBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
 
   const getSnapStep = (): number => {
     const v = backdrop.querySelector<HTMLInputElement>('input[name="le-snap"]:checked')?.value;
@@ -512,6 +537,9 @@ export function openLevelEditor(
     const h = canvas.height;
     ctx.fillStyle = viewMode === 'iso' ? '#152030' : '#1a2332';
     ctx.fillRect(0, 0, w, h);
+    if (viewMode === 'top' && floorImg && floorImg.naturalWidth > 0) {
+      ctx.drawImage(floorImg, 0, 0, w, h);
+    }
 
     if (viewMode === 'top') {
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
@@ -765,7 +793,8 @@ export function openLevelEditor(
     syncPlaceHeightReadout();
     syncViewHint();
     syncActionButtons();
-    draw();
+    syncInspectorChrome();
+    loadFloorPreview();
     loadMyKits();
     backdrop.focus();
 
@@ -820,9 +849,39 @@ export function openLevelEditor(
   });
   propsCtrl.bind();
 
+  const fitCanvas = (): void => {
+    const box = q<HTMLElement>('#le-canvas-box');
+    const size = Math.floor(Math.min(box.clientWidth, box.clientHeight));
+    if (size < 64) return;
+    const px = Math.min(1600, Math.floor(size * Math.min(window.devicePixelRatio || 1, 2)));
+    if (canvas.width !== px || canvas.height !== px) {
+      canvas.width = px;
+      canvas.height = px;
+    }
+    draw();
+  };
+
+  const syncInspectorChrome = (): void => {
+    const open = inspectorOpen && selection != null;
+    q<HTMLElement>('#le-inspector').hidden = !open;
+    q<HTMLElement>('#le-studio-body').classList.toggle('inspector-open', open);
+    const btn = q<HTMLButtonElement>('#le-inspector-toggle');
+    btn.disabled = selection == null;
+    btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    btn.textContent = open ? '隱藏細節' : '開啟細節';
+  };
+
+  const setInspectorOpen = (open: boolean): void => {
+    inspectorOpen = open && selection != null;
+    syncInspectorChrome();
+    requestAnimationFrame(() => fitCanvas());
+  };
+
   const setSelection = (sel: Selection | null): void => {
     selection = sel;
+    if (sel == null) inspectorOpen = false;
     propsCtrl.sync();
+    syncInspectorChrome();
     draw();
   };
 
@@ -1523,14 +1582,94 @@ export function openLevelEditor(
     });
   });
 
+  const floorSrc = (path: string): string =>
+    path.startsWith('/') ? `${API_BASE}${path}` : path;
+
+  const syncFloorChrome = (): void => {
+    const thumb = q<HTMLImageElement>('#le-floor-thumb');
+    const clearBtn = q<HTMLButtonElement>('#le-floor-clear');
+    const pickBtn = q<HTMLButtonElement>('#le-floor-pick');
+    const url = level.floorImage;
+    if (url) {
+      thumb.hidden = false;
+      thumb.src = floorSrc(url);
+      clearBtn.hidden = false;
+      pickBtn.textContent = '更換圖片';
+    } else {
+      thumb.hidden = true;
+      thumb.removeAttribute('src');
+      clearBtn.hidden = true;
+      pickBtn.textContent = '上傳圖片';
+    }
+  };
+
+  const loadFloorPreview = (): void => {
+    syncFloorChrome();
+    const url = level.floorImage;
+    if (!url) {
+      floorImg = null;
+      draw();
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (level.floorImage !== url) return;
+      floorImg = img;
+      draw();
+    };
+    img.onerror = () => {
+      if (level.floorImage !== url) return;
+      floorImg = null;
+      draw();
+    };
+    img.src = floorSrc(url);
+  };
+
   const close = (): void => {
     if (dirty) void flushSave();
+    resizeObserver?.disconnect();
+    document.body.style.overflow = prevBodyOverflow;
     backdrop.remove();
   };
   q<HTMLButtonElement>('#le-close').addEventListener('click', close);
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close();
+  q<HTMLButtonElement>('#le-inspector-toggle').addEventListener('click', () => setInspectorOpen(!inspectorOpen));
+  q<HTMLButtonElement>('#le-inspector-hide').addEventListener('click', () => setInspectorOpen(false));
+  q<HTMLButtonElement>('#le-floor-pick').addEventListener('click', () => {
+    q<HTMLInputElement>('#le-floor-file').click();
   });
+  q<HTMLInputElement>('#le-floor-file').addEventListener('change', () => {
+    const input = q<HTMLInputElement>('#le-floor-file');
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast('圖片需小於 2 MB', 'error');
+      return;
+    }
+    void flushSave()
+      .then(() => uploadLevelFloor(levelPkLocal, file))
+      .then((res) => {
+        level.floorImage = res.floorImage;
+        loadFloorPreview();
+        scheduleSave();
+        toast('場地地板已上傳', 'success');
+      })
+      .catch((e) => toast(errText(e, '上傳圖片'), 'error'));
+  });
+  q<HTMLButtonElement>('#le-floor-clear').addEventListener('click', () => {
+    void flushSave()
+      .then(() => deleteLevelFloor(levelPkLocal))
+      .then(() => {
+        delete level.floorImage;
+        loadFloorPreview();
+        scheduleSave();
+      })
+      .catch((e) => toast(errText(e, '移除地板'), 'error'));
+  });
+  resizeObserver = new ResizeObserver(() => fitCanvas());
+  resizeObserver.observe(q('#le-canvas-box'));
+  requestAnimationFrame(() => fitCanvas());
 
   void fetchTeacherLevel(levelPkLocal)
     .then((detail) => {
@@ -1547,6 +1686,8 @@ export function openLevelEditor(
   return {
     destroy(): void {
       if (saveTimer) clearTimeout(saveTimer);
+      resizeObserver?.disconnect();
+      document.body.style.overflow = prevBodyOverflow;
       backdrop.remove();
     },
   };

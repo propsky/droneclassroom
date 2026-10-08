@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .accounts import CurrentTeacher, DbSession, bearer_token, resolve_student_session
 from .config import Settings
-from .db.models import Level, Teacher, TeacherLevelKit, Team, TeamLevelEntry
+from .db.models import Level, LevelFloor, Teacher, TeacherLevelKit, Team, TeamLevelEntry
+from .floor_image import sanitize_floor_image
 from .levels_catalog import (
     build_team_curriculum,
     create_custom_level_draft,
@@ -374,7 +375,13 @@ async def patch_teacher_level(
     if body.title is not None:
         lvl.title = body.title
     if body.definition is not None:
-        lvl.definition = {**body.definition, "id": lvl.level_id, "name": lvl.title}
+        definition = {**body.definition, "id": lvl.level_id, "name": lvl.title}
+        sanitize_floor_image(definition, lvl.level_id)
+        if definition.get("floorImage"):
+            row = await session.get(LevelFloor, lvl.id)
+            if row is None:
+                definition.pop("floorImage", None)
+        lvl.definition = definition
     await session.commit()
     await session.refresh(lvl)
     return TeacherLevelBrief(
