@@ -1,4 +1,4 @@
-// 自訂關卡編輯器 — 預設 2.5D 斜視、格線吸附、物件選取與座標面板、素材庫。
+// 自訂關卡編輯器 — 預設 2.5D 斜視、格線吸附、物件選取與座標面板、範本庫。
 // 滾輪只縮放地圖畫布（#le-canvas），不攔截側欄或頁面其他區域。
 import type { LevelDef, TeacherLevelKitBrief, TeacherLevelBrief } from '@creafly/shared';
 import {
@@ -202,12 +202,12 @@ export function openLevelEditor(
           <label class="check-row"><input type="checkbox" id="le-draw">畫畫教室模式</label>
 
           <section class="lvl-floor">
-            <h3 class="lvl-kit-title">場地地板</h3>
-            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。圖片會鋪在關卡中央 30×30 公尺的地面。</p>
-            <img id="le-floor-thumb" class="lvl-floor-preview" alt="場地地板預覽" hidden>
+            <h3 class="lvl-kit-title">場地底圖</h3>
+            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。場地底圖會鋪在關卡中央 30×30 公尺的地面。</p>
+            <img id="le-floor-thumb" class="lvl-floor-preview" alt="場地底圖預覽" hidden>
             <div class="lvl-floor-actions">
-              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-pick">上傳圖片</button>
-              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-clear" hidden>移除地板</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-pick">上傳場地底圖</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-clear" hidden>移除場地底圖</button>
             </div>
             <input id="le-floor-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
           </section>
@@ -229,10 +229,10 @@ export function openLevelEditor(
 
           <div class="lvl-kit">
             <div class="lvl-kit-head">
-              <h3 class="lvl-kit-title">我的素材</h3>
-              <button type="button" class="btn btn-ghost btn-sm" id="le-save-kit">${ICONS.plus}儲存為素材</button>
+              <h3 class="lvl-kit-title">我的範本</h3>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-save-kit">${ICONS.plus}儲存為範本</button>
             </div>
-            <p class="note lvl-kit-hint">完成佈局後可存成片段；勾選「分享」後同校老師也能使用。</p>
+            <p class="note lvl-kit-hint">完成佈局後可存成範本；勾選「分享」後同校老師也能使用。</p>
             <div id="le-my-kits" class="lvl-kit-grid"></div>
             <div id="le-org-kits-wrap" hidden>
               <h4 class="lvl-kit-subtitle">同校分享</h4>
@@ -240,8 +240,8 @@ export function openLevelEditor(
             </div>
           </div>
           <div class="lvl-kit">
-            <h3 class="lvl-kit-title">官方素材庫</h3>
-            <p class="note lvl-kit-hint">點選插入片段；任務 / 畫畫類會覆寫步驟。</p>
+            <h3 class="lvl-kit-title">官方範本庫</h3>
+            <p class="note lvl-kit-hint">點選插入範本；任務或畫畫類會覆寫目前的步驟。</p>
             <div id="le-kit-panels"></div>
           </div>
         </div>
@@ -455,7 +455,7 @@ export function openLevelEditor(
     ctx.fillStyle = 'rgba(30,45,65,0.55)';
     ctx.fill();
     if (floorImg && floorImg.naturalWidth > 0) {
-      // 矩形圖沿 2.5D 的 X/Z 斜軸貼上菱形，預設視圖才看得到剛上傳的地板。
+      // 矩形圖沿 2.5D 的 X/Z 斜軸貼上菱形，預設視圖才看得到剛上傳的場地底圖。
       ctx.save();
       traceDiamond();
       ctx.clip();
@@ -1339,7 +1339,7 @@ export function openLevelEditor(
 
   const renderMyKits = (): void => {
     if (!myKits.length) {
-      myKitsHost.innerHTML = '<p class="note">尚無自訂素材，完成佈局後點「儲存為素材」。</p>';
+      myKitsHost.innerHTML = '<p class="note">尚無自訂範本，完成佈局後點「儲存為範本」。</p>';
     } else {
       myKitsHost.innerHTML = myKits
         .map(
@@ -1353,7 +1353,7 @@ export function openLevelEditor(
                 <input type="checkbox" data-share-kit="${k.id}" ${k.sharedWithOrg ? 'checked' : ''}>
                 <span>分享</span>
               </label>
-              <button type="button" class="lvl-kit-del" data-del-kit="${k.id}" title="刪除素材">${ICONS.x}</button>
+              <button type="button" class="lvl-kit-del" data-del-kit="${k.id}" title="刪除範本">${ICONS.x}</button>
             </div>`,
         )
         .join('');
@@ -1377,12 +1377,12 @@ export function openLevelEditor(
       myKitsHost.querySelectorAll<HTMLButtonElement>('[data-del-kit]').forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = Number(btn.dataset['delKit']);
-          if (!confirm('確定刪除此素材？')) return;
+          if (!confirm('確定刪除此範本？')) return;
           void deleteTeacherLevelKit(id)
             .then(() => {
               myKits = myKits.filter((k) => k.id !== id);
               renderMyKits();
-              toast('已刪除素材', 'success');
+              toast('已刪除範本', 'success');
             })
             .catch((e) => toast(errText(e, '刪除'), 'error'));
         });
@@ -1417,7 +1417,7 @@ export function openLevelEditor(
         renderMyKits();
       })
       .catch(() => {
-        myKitsHost.innerHTML = '<p class="note">無法載入我的素材</p>';
+        myKitsHost.innerHTML = '<p class="note">無法載入我的範本</p>';
       });
   };
 
@@ -1463,14 +1463,14 @@ export function openLevelEditor(
     dlg.className = 'modal-backdrop';
     dlg.innerHTML = `
       <div class="modal" role="dialog">
-        <div class="modal-head"><h2 class="modal-title">儲存為素材</h2></div>
-        <div class="field"><label class="field-label">名稱</label><input id="sk-name" type="text" maxlength="120" value="${esc(level.name)}"></div>
+        <div class="modal-head"><h2 class="modal-title">儲存為範本</h2></div>
+        <div class="field"><label class="field-label">範本名稱</label><input id="sk-name" type="text" maxlength="120" value="${esc(level.name)}"></div>
         <div class="field"><label class="field-label">說明</label><input id="sk-desc" type="text" maxlength="400" placeholder="選填"></div>
         <div class="field"><label class="field-label">分類</label>
           <select id="sk-cat">${LEVEL_KIT_CATEGORIES.map((c) => `<option value="${c.id}" ${c.id === category ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}</select>
         </div>
-        <label class="check-row"><input type="checkbox" id="sk-tasks" ${includeTasks ? 'checked' : ''}>含任務步驟（passZones）</label>
-        <label class="check-row"><input type="checkbox" id="sk-draw" ${includeDraw ? 'checked' : ''}>含畫畫設定（draw / guide）</label>
+        <label class="check-row"><input type="checkbox" id="sk-tasks" ${includeTasks ? 'checked' : ''}>包含任務步驟</label>
+        <label class="check-row"><input type="checkbox" id="sk-draw" ${includeDraw ? 'checked' : ''}>包含畫畫設定</label>
         <label class="check-row"><input type="checkbox" id="sk-share">分享給同校老師</label>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="sk-cancel">取消</button>
@@ -1493,12 +1493,12 @@ export function openLevelEditor(
       });
       const valErrs = validateLevelKitPatch(finalPatch);
       if (valErrs.length) {
-        toast(valErrs[0] ?? '素材內容無效', 'error');
+        toast(valErrs[0] ?? '範本內容無效', 'error');
         return;
       }
       const name = (dlg.querySelector<HTMLInputElement>('#sk-name'))!.value.trim();
       if (!name) {
-        toast('請輸入素材名稱', 'error');
+        toast('請輸入範本名稱', 'error');
         return;
       }
       void createTeacherLevelKit({
@@ -1657,12 +1657,12 @@ export function openLevelEditor(
       thumb.hidden = false;
       thumb.src = floorSrc(url);
       clearBtn.hidden = false;
-      pickBtn.textContent = '更換圖片';
+      pickBtn.textContent = '更換場地底圖';
     } else {
       thumb.hidden = true;
       thumb.removeAttribute('src');
       clearBtn.hidden = true;
-      pickBtn.textContent = '上傳圖片';
+      pickBtn.textContent = '上傳場地底圖';
     }
   };
 
@@ -1705,7 +1705,7 @@ export function openLevelEditor(
     input.value = '';
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      toast('圖片需小於 2 MB', 'error');
+      toast('場地底圖需小於 2 MB', 'error');
       return;
     }
     void flushSave()
@@ -1714,9 +1714,9 @@ export function openLevelEditor(
         level.floorImage = res.floorImage;
         loadFloorPreview();
         scheduleSave();
-        toast('場地地板已上傳', 'success');
+        toast('場地底圖已上傳', 'success');
       })
-      .catch((e) => toast(errText(e, '上傳圖片'), 'error'));
+      .catch((e) => toast(errText(e, '上傳場地底圖'), 'error'));
   });
   q<HTMLButtonElement>('#le-floor-clear').addEventListener('click', () => {
     void flushSave()
@@ -1726,7 +1726,7 @@ export function openLevelEditor(
         loadFloorPreview();
         scheduleSave();
       })
-      .catch((e) => toast(errText(e, '移除地板'), 'error'));
+      .catch((e) => toast(errText(e, '移除場地底圖'), 'error'));
   });
   resizeObserver = new ResizeObserver(() => fitCanvas());
   resizeObserver.observe(q('#le-canvas-box'));

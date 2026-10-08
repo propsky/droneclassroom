@@ -369,7 +369,7 @@ export function patchTeacherLevel(
   });
 }
 
-/** GET /api/teacher/level-kits — 老師自訂素材 */
+/** GET /api/teacher/level-kits — 老師自訂範本 */
 export function fetchTeacherLevelKits(): Promise<TeacherLevelKitsResponse> {
   return request<TeacherLevelKitsResponse>('/api/teacher/level-kits', { auth: true });
 }
@@ -379,7 +379,7 @@ export function fetchTeacherLevelKit(id: number): Promise<TeacherLevelKitDetail>
   return request<TeacherLevelKitDetail>(`/api/teacher/level-kits/${id}`, { auth: true });
 }
 
-/** POST /api/teacher/level-kits — 儲存素材 */
+/** POST /api/teacher/level-kits — 儲存範本 */
 export function createTeacherLevelKit(
   body: CreateTeacherLevelKitRequest,
 ): Promise<TeacherLevelKitDetail> {
@@ -398,7 +398,7 @@ export function deleteTeacherLevelKit(id: number): Promise<{ ok: true }> {
   });
 }
 
-/** PATCH /api/teacher/level-kits/{id} — 更新素材或分享設定 */
+/** PATCH /api/teacher/level-kits/{id} — 更新範本或分享設定 */
 export function patchTeacherLevelKit(
   id: number,
   body: PatchTeacherLevelKitRequest,
