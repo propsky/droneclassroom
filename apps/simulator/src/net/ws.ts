@@ -385,6 +385,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
     case 'soccer_ball': // 推球模式：共用球位置廣播（~12.5Hz）
     case 'soccer_goal_ok':
     case 'soccer_scores':
+    case 'soccer_foul':
     case 'soccer_end':
     case 'soccer_resume':
       bus.emit('soccer-message', { msg });

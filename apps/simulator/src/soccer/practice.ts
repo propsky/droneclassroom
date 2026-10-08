@@ -1,6 +1,6 @@
 // ⚽ 無人機足球 — 單人練習（7 個 drill、過中線退半場、窄邊定點視角）。
 // 行為對齊 legacy main.js §16：SOC 場地常數、穿門判定（prevZ 跨越 + 門環半徑內）、
-// 最佳紀錄 localStorage（沿用 legacy key 'creafly_soccer_<id>'）、飛機縮 0.65。
+// 最佳紀錄 localStorage（沿用 legacy key 'creafly_soccer_<id>'）、飛機縮放見 SOCCER_DRONE_SCALE。
 // 視覺（場地 / 球門 / 門框碰撞 / 球形保護框 / 假人）在 render/soccerField.ts；HUD 在 ui/soccerHud.ts。
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
 import { setSolidObstacles } from '../core/physics';

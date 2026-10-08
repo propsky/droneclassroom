@@ -293,12 +293,12 @@ class ArenaStopMsg(_RoomScopedModel):
 class SoccerStartMsg(_RoomScopedModel):
     """開始足球。durationSec 下限 5 秒由 handler clamp（對齊 legacy Math.max(5, …)）。
 
-    mode 缺省 'ball'（推球進門，共用球由伺服器模擬）；'striker' = FAI 前鋒穿門（進階）。
+    mode 缺省 'striker'（FAI 前鋒穿門）。'ball' 是隱藏選配，只有明確指定才啟用。
     """
 
     type: Literal["soccer_start"]
     durationSec: FiniteFloat
-    mode: Literal["ball", "striker"] = "ball"
+    mode: Literal["ball", "striker"] = "striker"
 
 
 class SoccerStateReqMsg(_RoomScopedModel):

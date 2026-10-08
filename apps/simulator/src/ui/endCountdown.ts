@@ -27,7 +27,14 @@ function activeEndTime(): number {
   if (arenaState.active && arenaState.status === 'running' && arenaState.endTime) {
     return arenaState.endTime;
   }
-  if (soccerState.active && soccerState.status === 'running' && soccerState.endTime) {
+  if (
+    soccerState.active &&
+    (soccerState.status === 'running' ||
+      soccerState.status === 'break' ||
+      soccerState.status === 'golden' ||
+      soccerState.status === 'pk') &&
+    soccerState.endTime
+  ) {
     return soccerState.endTime;
   }
   return 0;

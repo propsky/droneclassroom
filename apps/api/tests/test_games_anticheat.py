@@ -37,7 +37,7 @@ def test_arena座標clamp到場地邊界(client: TestClient, teacher_ticket: str
 
 
 def test_soccer座標clamp到場地邊界(client: TestClient, teacher_ticket: str) -> None:
-    """足球場地邊界隨設定換算（預設 x ±10、z ±20、y 0~15）。"""
+    """足球場地邊界隨設定換算（F9A 預設 x ±3.5、z ±7、y 0~5）。"""
     soccer = client.app.state.soccer
     f = soccer.field
     with teacher_connect(client, teacher_ticket) as t:
@@ -47,7 +47,7 @@ def test_soccer座標clamp到場地邊界(client: TestClient, teacher_ticket: st
             s.send_json({"type": "soccer_pos", "x": -100, "y": 99, "z": 100, "yaw": 0})
             settle(client)
             p = soccer.players["g:小明"]
-            assert (p.x, p.y, p.z) == (-f.half_x, f.ceil, f.half_z) == (-10.0, 15.0, 20.0)
+            assert (p.x, p.y, p.z) == (-f.half_x, f.ceil, f.half_z) == (-3.5, 5.0, 7.0)
 
 
 def test_超速回報忽略且strike累積標suspect(

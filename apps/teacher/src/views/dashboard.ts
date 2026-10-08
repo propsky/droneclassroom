@@ -12,6 +12,7 @@ import type {
   LevelsResponse,
   RoomInfo,
   RoomSettings,
+  SoccerMatchMeta,
   SoccerMode,
   SoccerPlayerState,
   SoccerTeam,
@@ -416,24 +417,10 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-body">
-              <div class="field">
-                <span class="field-label">玩法選擇（開賽時套用）</span>
-                <div class="mode-pick" id="soccer-mode-pick">
-                  <label class="mode-option">
-                    <input type="radio" name="soccer-mode" value="ball" checked>
-                    <span class="mode-title">推球進門（推薦）</span>
-                    <span class="mode-desc">全班一起把大球推進對方門，誰都能得分</span>
-                  </label>
-                  <label class="mode-option">
-                    <input type="radio" name="soccer-mode" value="striker">
-                    <span class="mode-title">前鋒穿門（進階）</span>
-                    <span class="mode-desc">FAI 真實規則，只有前鋒穿門得分</span>
-                  </label>
-                </div>
-              </div>
+              <p class="hint">FAI 前鋒穿門（預設）：只有攻擊手穿對方圓環得分，得分後該機須回己方半場。三局兩勝、局間休息；平手黃金進球，再平手 PK。推球模式不在這裡選。</p>
               <div class="ctl-grid">
                 <div class="field">
-                  <label class="field-label" for="soccer-dur">局時長</label>
+                  <label class="field-label" for="soccer-dur">每局時長</label>
                   <select id="soccer-dur">
                     <option value="180">3 分鐘</option>
                     <option value="120">2 分鐘</option>
@@ -442,7 +429,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                   </select>
                 </div>
               </div>
-              <p class="hint">前鋒與「得分後須回自家半場才能再得分」規則只在「前鋒穿門」玩法生效。</p>
+              <p class="hint">非攻擊手飛進自家圓環算犯規（本階段只公告，不發牌）。</p>
               <div class="soccer-score" id="soccer-score"><span class="score-side blue">藍隊</span><span class="score-num">0 : 0</span><span class="score-side red">紅隊</span><span class="score-status">等待開始</span></div>
               <div class="hint" id="soccer-armed"></div>
             </div>
@@ -729,47 +716,63 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     red: root.querySelector<HTMLElement>('#soccer-red')!,
   };
   // 比分列的最新狀態（goal_ok 只帶比分 → 其餘沿用上一筆）；mode 缺省 'striker'（legacy 相容）
+  const emptyMatch = (): SoccerMatchMeta => ({
+    phase: 'idle',
+    period: 0,
+    sets: { blue: 0, red: 0 },
+    pkScores: { blue: 0, red: 0 },
+    pkTurn: null,
+    pkRound: 0,
+  });
   const soccer: {
     scores: Record<SoccerTeam, number>;
     armed: Record<SoccerTeam, boolean>;
     status: string;
     endTime: number;
     mode: SoccerMode;
+    match: SoccerMatchMeta;
   } = {
     scores: { blue: 0, red: 0 },
     armed: { blue: true, red: true },
     status: 'idle',
     endTime: 0,
     mode: 'striker',
+    match: emptyMatch(),
   };
+  const shownScores = (): Record<SoccerTeam, number> =>
+    soccer.status === 'pk' ? soccer.match.pkScores : soccer.scores;
   /** 比分列（藍/紅隊色標 + mono 大號數字；statusText 例 '2:30' / '等待開始'） */
   const drawScore = (statusText: string): void => {
+    const sc = shownScores();
     soccerScoreEl.innerHTML =
       `<span class="score-side blue">藍隊</span>` +
-      `<span class="score-num">${soccer.scores.blue} : ${soccer.scores.red}</span>` +
+      `<span class="score-num">${sc.blue} : ${sc.red}</span>` +
       `<span class="score-side red">紅隊</span>` +
       `<span class="score-status">${esc(statusText)}</span>`;
   };
+  const phasePrefix = (): string => {
+    const m = soccer.match;
+    const sets = `局數 ${m.sets.blue}:${m.sets.red}`;
+    if (soccer.status === 'break') return `局間休息 ${sets}`;
+    if (soccer.status === 'golden') return `黃金進球 ${sets}`;
+    if (soccer.status === 'pk') return `PK 第${m.pkRound || 1}輪 ${m.pkTurn === 'red' ? '紅' : '藍'}方`;
+    if (soccer.status === 'running' && soccer.mode === 'striker') return `第${m.period || 1}局 ${sets}`;
+    return '';
+  };
   const soccerClock = makeCountdown((text) => {
-    drawScore(text);
+    const prefix = phasePrefix();
+    drawScore(prefix ? `${prefix} ${text}` : text);
     soccerPillClock.textContent = text; // 卡頭狀態膠囊同步 mono 倒數
   });
 
-  /** 讀玩法選擇（radio）：'ball' 推球進門（預設）/ 'striker' FAI 前鋒穿門 */
-  const pickedSoccerMode = (): SoccerMode =>
-    root.querySelector<HTMLInputElement>('input[name="soccer-mode"]:checked')?.value === 'striker'
-      ? 'striker'
-      : 'ball';
-
   on('btn-soccer-start', () => {
     const dur = Number.parseInt(soccerDurSel.value, 10) || 180;
-    const mode = pickedSoccerMode();
     const ok = sendGame(
-      { type: 'soccer_start', durationSec: dur, mode },
-      `足球賽開始（${mode === 'ball' ? '推球進門' : '前鋒穿門'}，${dur} 秒）`,
+      { type: 'soccer_start', durationSec: dur, mode: 'striker' },
+      `足球賽開始（前鋒穿門，每局 ${dur} 秒，三局兩勝）`,
     );
     if (ok) {
-      soccer.mode = mode; // 進球 toast 文案先跟著本地選擇，之後以 soccer_state 為準
+      soccer.mode = 'striker';
       soccerStartBtn.disabled = true; // 本地即時回饋（伺服器 soccer_state 隨後校正）
     }
   });
@@ -821,33 +824,50 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   };
 
   /** 比分列 + armed 狀態 + 倒數時鐘 + 卡頭狀態膠囊（狀態沿用 soccer 物件的最新值） */
+  const applySoccerMatch = (match: SoccerMatchMeta | undefined): void => {
+    if (match) soccer.match = match;
+  };
   const renderSoccerScore = (): void => {
     const { armed, status, endTime } = soccer;
     gameState.soccer = status;
-    const live = status === 'running' || status === 'countdown';
+    const live = status === 'running' || status === 'countdown' || status === 'break' || status === 'golden' || status === 'pk';
+    const timed = status === 'running' || status === 'break' || status === 'golden' || status === 'pk';
     setTabLive('soccer', live);
-    soccerStopBtn.hidden = !live; // 停止鈕在卡頭，只在倒數/進行中顯示
+    soccerStopBtn.hidden = !live; // 停止鈕在卡頭，賽事進行（含休息／黃金／PK）才顯示
     soccerStartBtn.disabled = live; // 開始鈕 disabled 不隱藏（版面不跳）
     soccerPill.hidden = !live && status !== 'done';
     soccerPill.classList.toggle('live', live);
     soccerPillLabel.textContent =
-      status === 'running' ? '進行中' : status === 'countdown' ? '即將開始' : status === 'done' ? '已結束' : '';
-    if (status !== 'running') soccerPillClock.textContent = status === 'countdown' ? '3-2-1…' : '';
+      status === 'running'
+        ? '進行中'
+        : status === 'countdown'
+          ? '即將開始'
+          : status === 'break'
+            ? '局間休息'
+            : status === 'golden'
+              ? '黃金進球'
+              : status === 'pk'
+                ? 'PK'
+                : status === 'done'
+                  ? '已結束'
+                  : '';
+    if (!timed) soccerPillClock.textContent = status === 'countdown' ? '3-2-1…' : '';
     soccerClock.stop();
-    if (status === 'running' && endTime) {
+    if (timed && endTime) {
       soccerClock.run(endTime);
     } else if (status === 'done') {
-      drawScore('結束');
+      const sets = soccer.mode === 'striker' ? `局數 ${soccer.match.sets.blue}:${soccer.match.sets.red}` : '';
+      drawScore(sets ? `結束 ${sets}` : '結束');
     } else if (status === 'countdown') {
       drawScore('3-2-1…');
     } else {
       drawScore('等待開始');
     }
-    // armed：得分後前鋒須過中線回自家半場才能再得分（前鋒穿門玩法賽中才顯示）
+    // armed：得分的那台攻擊手須回己方半場才能再得分
     const armedText = (ok: boolean): string =>
-      ok ? '<span class="armed-ok">可得分</span>' : '<span class="armed-no">前鋒須回自家半場</span>';
+      ok ? '<span class="armed-ok">可得分</span>' : '<span class="armed-no">攻擊手須回半場</span>';
     soccerArmedEl.innerHTML =
-      status === 'running' && soccer.mode === 'striker'
+      (status === 'running' || status === 'golden') && soccer.mode === 'striker'
         ? `得分狀態：藍隊 ${armedText(armed.blue)} ｜ 紅隊 ${armedText(armed.red)}`
         : '';
   };
@@ -1299,7 +1319,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           soccer.armed = msg.armed;
           soccer.status = msg.status;
           soccer.endTime = msg.endTime;
-          soccer.mode = msg.mode ?? 'striker'; // 缺省視為 'striker'（legacy 相容）
+          soccer.mode = msg.mode ?? 'striker'; // 缺省視為 'striker'
+          applySoccerMatch(msg.match);
           renderSoccerRoster(msg.players);
           renderSoccerScore();
           break;
@@ -1311,7 +1332,11 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           soccer.armed = msg.armed;
           soccer.status = msg.status;
           soccer.endTime = msg.endTime;
+          applySoccerMatch(msg.match);
           renderSoccerScore();
+          break;
+        case 'soccer_foul':
+          toast(`犯規：${msg.byName || '?'} 進入自家圓環`, 'error');
           break;
         case 'soccer_goal_ok': {
           soccer.scores = msg.scores;
@@ -1330,6 +1355,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         case 'soccer_end':
           soccer.scores = msg.scores;
           soccer.status = 'done';
+          applySoccerMatch(msg.match);
           renderSoccerScore();
           // 結束原因：老師手動停止 / 切換關卡（智能停止）→ 提示原因；其餘照舊報勝負
           if (msg.reason === 'teacher_stop') {

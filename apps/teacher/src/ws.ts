@@ -10,6 +10,7 @@ import type {
   RoomScoped,
   ServerToClient,
   SoccerEndMsg,
+  SoccerFoulMsg,
   SoccerGoalOkMsg,
   SoccerPlayersMsg,
   SoccerScoresMsg,
@@ -25,7 +26,7 @@ import { WS_CLOSE_UNAUTHORIZED } from '@creafly/shared';
 export type TeacherArenaMsg = ArenaStateMsg | ArenaScoresMsg | ArenaEndMsg;
 /** 老師端會收到的足球訊息（快照 / 名單 / 比分 / 進球 / 結束） */
 export type TeacherSoccerMsg =
-  | SoccerStateMsg | SoccerPlayersMsg | SoccerScoresMsg | SoccerGoalOkMsg | SoccerEndMsg;
+  | SoccerStateMsg | SoccerPlayersMsg | SoccerScoresMsg | SoccerGoalOkMsg | SoccerFoulMsg | SoccerEndMsg;
 
 export interface TeacherWsHandlers {
   /** 連線狀態變化（頂列狀態燈） */
@@ -209,6 +210,7 @@ export class TeacherWs {
       case 'soccer_players':
       case 'soccer_scores':
       case 'soccer_goal_ok':
+      case 'soccer_foul':
       case 'soccer_end':
         this.handlers.onSoccer(msg);
         break;
