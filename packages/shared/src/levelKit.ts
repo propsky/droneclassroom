@@ -1055,7 +1055,7 @@ export function validateLevelKitSnippet(snippet: LevelKitSnippet): string[] {
     p.draw === true ||
     (p.guide?.length ?? 0) > 0;
 
-  if (!hasContent) errs.push(`${tag}: 片段無任何可玩內容`);
+  if (!hasContent) errs.push(`${tag}: 範本沒有任何可玩內容`);
 
   if (p.draw && !p.view) errs.push(`${tag}: draw 模式需指定 view`);
 
