@@ -12,6 +12,13 @@ const audioState = {
   bgmPlaying: false,
 };
 
+/** 足球場內：撞擊與進球改用球館音色（離開場地就還原） */
+let soccerArena = false;
+
+export function setSoccerArenaAudio(on: boolean): void {
+  soccerArena = on;
+}
+
 function ensureAudio(): AudioContext | null {
   if (!audioState.ctx) {
     try {
@@ -25,8 +32,77 @@ function ensureAudio(): AudioContext | null {
   return audioState.ctx;
 }
 
+// 進球：短促喇叭 + 上行三音（只在足球場取代一般過圈音）
+function playSoccerGoalSound(): void {
+  const ctx = ensureAudio();
+  if (!ctx || audioState.muted) return;
+  const now = ctx.currentTime;
+  const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.18), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.12, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 1400;
+  src.connect(bp).connect(ng).connect(ctx.destination);
+  src.start(now);
+  src.stop(now + 0.2);
+  [523.25, 659.25, 987.77].forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.value = f;
+    gain.gain.setValueAtTime(0.0001, now + i * 0.07);
+    gain.gain.exponentialRampToValueAtTime(0.06, now + i * 0.07 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.07 + 0.28);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now + i * 0.07);
+    osc.stop(now + i * 0.07 + 0.3);
+  });
+}
+
+// 護罩撞網／對撞：低頻一記 + 短噪音
+function playSoccerImpactSound(): void {
+  const ctx = ensureAudio();
+  if (!ctx || audioState.muted) return;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(180, now);
+  osc.frequency.exponentialRampToValueAtTime(55, now + 0.12);
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.22, now + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.18);
+  const noise = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.08), ctx.sampleRate);
+  const data = noise.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = noise;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.08, now);
+  ng.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 900;
+  src.connect(hp).connect(ng).connect(ctx.destination);
+  src.start(now);
+  src.stop(now + 0.09);
+}
+
 // 過圈音效：3 個上升音（C5-E5-G5）
 function playRingSound(): void {
+  if (soccerArena) {
+    playSoccerGoalSound();
+    return;
+  }
   const ctx = ensureAudio();
   if (!ctx || audioState.muted) return;
   const now = ctx.currentTime;
@@ -46,6 +122,10 @@ function playRingSound(): void {
 
 // 撞牆 / 撞地音效：低頻方波短暫下滑
 function playBumpSound(): void {
+  if (soccerArena) {
+    playSoccerImpactSound();
+    return;
+  }
   const ctx = ensureAudio();
   if (!ctx || audioState.muted) return;
   const now = ctx.currentTime;

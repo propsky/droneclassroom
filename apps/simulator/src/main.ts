@@ -104,7 +104,7 @@ const arenaClones = new ArenaCloneVisuals(world.scene, droneVisual);
 new PlaygroundScene(world.scene);
 // ⚽ 足球：場地 / 球門（Havok 門框碰撞）/ 球形保護框 / 隊色分身＋前鋒彩帶
 // （訂閱 soccer-entered / soccer-exited 自動建與清）
-const soccerVisuals = new SoccerFieldVisuals(world.scene, droneVisual);
+const soccerVisuals = new SoccerFieldVisuals(world.scene, droneVisual, world.shadowGenerator);
 const cameraRig = new CameraRig(world.scene);
 cameraRig.snapBehindDrone();
 
@@ -364,6 +364,7 @@ world.engine.runRenderLoop(() => {
   const bodyVisible = cameraRig.update(interpPos, interpYaw);
   droneVisual.setVisible(bodyVisible);
   droneVisual.render(interpPos, interpYaw);
+  soccerVisuals.present(interpPos.x, interpPos.y, interpPos.z, interpYaw, bodyVisible);
 
   updateHudFrame();
   world.scene.render();
