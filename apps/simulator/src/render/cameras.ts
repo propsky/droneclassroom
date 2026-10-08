@@ -144,11 +144,11 @@ export class CameraRig {
     if (this.soccerSign !== null && this.soccerCam === 'team') {
       const sign = this.soccerSign;
       const F = activeSoccerField();
-      // 端牆外殼在界線外，鏡頭要站在殼內側，近端圓環與整座球館才進得了畫面
-      const dist = F.halfZ - 0.55;
-      const camY = Math.min(F.top - 0.85, 3.15);
+      // 站在端牆內側、略高於近端圓環，才看得到天花鋼架，也不會被圓環擋滿
+      const dist = F.halfZ - 0.75;
+      const camY = Math.min(F.top - 0.95, 4.05);
       this.camera.position.set(0, camY, sign * dist);
-      this.tmpTarget.set(0, 2.1, -sign * F.halfZ * 0.35);
+      this.tmpTarget.set(0, 1.7, -sign * F.halfZ * 0.45);
       this.camera.setTarget(this.tmpTarget);
       return true;
     }

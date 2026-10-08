@@ -49,8 +49,10 @@ export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboar
 
   // 吊桿：天花板到板子上緣
   const rodMat = new StandardMaterial('soccerBoardRod', scene);
-  rodMat.diffuseColor = hex(0x2c3138);
-  rodMat.specularColor = new Color3(0.05, 0.05, 0.05);
+  rodMat.diffuseColor = hex(0x8ea3b6);
+  rodMat.emissiveColor = hex(0x7d93a8);
+  rodMat.specularColor = Color3.Black();
+  rodMat.disableLighting = true;
   for (const x of [-1.2, 1.2]) {
     const rod = MeshBuilder.CreateCylinder(
       `soccerBoardRod-${x}`,
@@ -70,8 +72,10 @@ export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboar
   );
   shell.parent = root;
   const shellMat = new StandardMaterial('soccerBoardShellMat', scene);
-  shellMat.diffuseColor = hex(0x12151a);
-  shellMat.specularColor = new Color3(0.04, 0.04, 0.04);
+  shellMat.diffuseColor = hex(0x6d8196);
+  shellMat.emissiveColor = hex(0x62778c);
+  shellMat.specularColor = Color3.Black();
+  shellMat.disableLighting = true;
   shell.material = shellMat;
   shell.isPickable = false;
 
@@ -79,11 +83,14 @@ export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboar
 
   const paint = (view: BroadcastView): void => {
     const ctx = tex.getContext() as CanvasRenderingContext2D;
-    ctx.fillStyle = '#07090d';
+    ctx.fillStyle = '#1a2836';
     ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = '#2a3140';
-    ctx.lineWidth = 8;
-    ctx.strokeRect(8, 8, W - 16, H - 16);
+    ctx.strokeStyle = '#8ea4b8';
+    ctx.lineWidth = 28;
+    ctx.strokeRect(18, 18, W - 36, H - 36);
+    ctx.strokeStyle = '#3e5164';
+    ctx.lineWidth = 10;
+    ctx.strokeRect(48, 48, W - 96, H - 96);
 
     ctx.fillStyle = '#9aa4b2';
     ctx.font = 'bold 28px sans-serif';
@@ -118,7 +125,7 @@ export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboar
     drawDigit(ctx, r[0] ?? '0', W / 2 + 70, 286, 78, 130, '#ff4d5a');
     drawDigit(ctx, r[1] ?? '0', W / 2 + 165, 286, 78, 130, '#ff4d5a');
 
-    ctx.fillStyle = view.flag === '請返場' ? '#ffb020' : view.flag === '可得分' ? '#3dde7a' : '#07090d';
+    ctx.fillStyle = view.flag === '請返場' ? '#ffb020' : view.flag === '可得分' ? '#3dde7a' : '#1a2836';
     if (view.flag) {
       ctx.font = 'bold 36px sans-serif';
       ctx.textAlign = 'left';
@@ -194,7 +201,7 @@ function drawDigit(
   const t = Math.max(6, Math.round(w * 0.18));
   const hGap = t * 0.55;
   const vLen = (h - t * 3) / 2;
-  ctx.fillStyle = '#1a1f28';
+  ctx.fillStyle = '#2c3c4c';
   // 熄滅的段先鋪一層暗的，亮段再蓋上
   for (let i = 0; i < 7; i++) fillSeg(ctx, i, x, y, w, h, t, vLen, hGap);
   ctx.fillStyle = color;

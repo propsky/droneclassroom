@@ -342,7 +342,14 @@ export class SoccerFieldVisuals {
     addBox('soccerShell', F.halfX * 2, F.top, shellA, 0, F.top / 2, F.halfZ + 0.08, darkMat, false);
     addBox('soccerShell', shellA, F.top, F.halfZ * 2, -F.halfX - 0.08, F.top / 2, 0, darkMat, false);
     addBox('soccerShell', shellA, F.top, F.halfZ * 2, F.halfX + 0.08, F.top / 2, 0, darkMat, false);
-    const ceil = addBox('soccerCeil', F.halfX * 2, 0.06, F.halfZ * 2, 0, F.top, 0, darkMat, false);
+    // 天花板單獨用藍灰、不吃光，避免燈一弱就整片死黑
+    const ceilMat = new StandardMaterial('soccerCeilMat', scene);
+    ceilMat.diffuseColor = hex(0x7e96ae);
+    ceilMat.emissiveColor = hex(0x7e96ae);
+    ceilMat.specularColor = Color3.Black();
+    ceilMat.disableLighting = true;
+    ceilMat.backFaceCulling = false;
+    const ceil = addBox('soccerCeil', F.halfX * 2, 0.08, F.halfZ * 2, 0, F.top - 0.02, 0, ceilMat, false);
     ceil.receiveShadows = false;
 
     const inset = 0.2;
@@ -389,35 +396,39 @@ export class SoccerFieldVisuals {
     );
     this.addNet(
       'soccerNetCeil',
-      new Vector3(-F.halfX + inset, F.top - 0.18, -F.halfZ + inset),
+      new Vector3(-F.halfX + inset, F.top - 0.16, -F.halfZ + inset),
       new Vector3((F.halfX - inset) * 2, 0, 0),
       new Vector3(0, 0, (F.halfZ - inset) * 2),
       Math.round(((F.halfX - inset) * 2) / cell),
       Math.round(((F.halfZ - inset) * 2) / cell),
-      new Color3(0.2, 0.24, 0.3),
-      0.7,
+      new Color3(0.55, 0.62, 0.7),
+      0.55,
     );
 
-    this.addCeilingTruss(steel);
+    this.addCeilingTruss();
 
-    // 燈具：深色燈殼包住小燈片，點光源只照一片，留下鋼架陰影
-    const housing = this.gymMat('soccerLampHouse', 0x1a222c, 0.06, 0.18);
+    // 燈具掛在鋼架下方：藍灰燈殼（不吃光，避免變成黑塊）＋朝下的亮燈片
+    const housing = new StandardMaterial('soccerLampHouseMat', scene);
+    housing.diffuseColor = hex(0xb7c6d4);
+    housing.emissiveColor = hex(0xb7c6d4);
+    housing.specularColor = Color3.Black();
+    housing.disableLighting = true;
     const lampMat = new StandardMaterial('soccerLampMat', scene);
-    lampMat.emissiveColor = hex(0xfff1d6);
+    lampMat.emissiveColor = hex(0xfff6df);
     lampMat.disableLighting = true;
-    for (const t of [-0.62, -0.22, 0.22, 0.62]) {
+    for (const t of [-0.62, -0.2, 0.2, 0.62]) {
       const z = t * F.halfZ;
-      addBox('soccerLampHouse', 0.95, 0.07, 0.36, 0, F.top - 0.22, z, housing, false);
+      addBox('soccerLampHouse', 1.25, 0.1, 0.48, 0, F.top - 0.7, z, housing, false);
       const lamp = MeshBuilder.CreateBox(
         `soccerLamp-${z}`,
-        { width: 0.68, height: 0.02, depth: 0.16 },
+        { width: 1.02, height: 0.04, depth: 0.32 },
         scene,
       );
-      lamp.position.set(0, F.top - 0.27, z);
+      lamp.position.set(0, F.top - 0.76, z);
       lamp.material = lampMat;
       lamp.isPickable = false;
       this.fieldMeshes.push(lamp);
-      const light = new PointLight(`soccerLight-${z}`, new Vector3(0, F.top - 0.55, z), scene);
+      const light = new PointLight(`soccerLight-${z}`, new Vector3(0, F.top - 0.9, z), scene);
       light.diffuse = hex(0xfff3e4);
       light.specular = hex(0x4a453e);
       light.intensity = 2.4;
@@ -480,22 +491,27 @@ export class SoccerFieldVisuals {
     });
   }
 
-  /** 天花板藍灰鋼架，壓在燈具旁邊，讓燈有對比 */
-  private addCeilingTruss(steel: StandardMaterial): void {
+  /** 天花板藍灰鋼架。不吃光，掛在燈的上方，從場內就看得到格子。 */
+  private addCeilingTruss(): void {
     const F = activeSoccerField();
-    const y = F.top - 0.34;
+    const trussMat = new StandardMaterial('soccerTrussMat', this.scene);
+    trussMat.diffuseColor = hex(0xe4edf4);
+    trussMat.emissiveColor = hex(0xe4edf4);
+    trussMat.specularColor = Color3.Black();
+    trussMat.disableLighting = true;
+    const y = F.top - 0.42;
     const add = (name: string, w: number, h: number, d: number, x: number, py: number, z: number): void => {
       const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, this.scene);
       m.position.set(x, py, z);
-      m.material = steel;
+      m.material = trussMat;
       m.isPickable = false;
       this.fieldMeshes.push(m);
     };
-    for (const t of [-0.62, 0, 0.62]) {
-      add('soccerTrussZ', 0.08, 0.1, F.halfZ * 2 - 0.6, t * F.halfX, y, 0);
-    }
     for (const t of [-0.72, -0.36, 0, 0.36, 0.72]) {
-      add('soccerTrussX', F.halfX * 2 - 0.45, 0.08, 0.08, 0, y - 0.08, t * F.halfZ);
+      add('soccerTrussZ', 0.22, 0.16, F.halfZ * 2 - 0.45, t * F.halfX, y, 0);
+    }
+    for (const t of [-0.78, -0.52, -0.26, 0, 0.26, 0.52, 0.78]) {
+      add('soccerTrussX', F.halfX * 2 - 0.3, 0.14, 0.22, 0, y - 0.12, t * F.halfZ);
     }
   }
 
