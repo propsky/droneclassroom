@@ -635,8 +635,8 @@ async def student_login(
         event_type="student.login",
         actor_type="student",
         actor_id=student.id,
-        org_id=team.org_id,
-        team_id=team.id,
+        org_id=team.org_id if team is not None else None,
+        team_id=team.id if team is not None else None,
         student_id=student.id,
         payload={"ip": ip, "method": method},
     )
