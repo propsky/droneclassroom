@@ -78,20 +78,26 @@ function renderLogin(): void {
   const node = $(`
     <div class="gate">
       <form class="card" id="login">
-        <h1>CREAFLY 管理</h1>
-        <p>平台管理員。老師與學生帳號不在這裡登入。</p>
-        <label for="user">帳號</label>
-        <input id="user" name="username" autocomplete="username" value="admin" required>
-        <label for="pw">密碼</label>
-        <input id="pw" name="password" type="password" autocomplete="current-password" required>
+        <p class="brand-kicker">CREAFLY</p>
+        <h1>管理</h1>
+        <p class="lede">平台管理員。老師與學生帳號不在這裡登入。</p>
+        <label class="field">
+          <span>帳號</span>
+          <input id="user" name="username" type="text" autocomplete="username" value="admin" required>
+        </label>
+        <label class="field">
+          <span>密碼</span>
+          <input id="pw" name="password" type="password" autocomplete="current-password" placeholder="輸入密碼" required>
+        </label>
         <div class="err" id="err"></div>
-        <div class="row-actions"><button class="btn primary" type="submit">進入</button></div>
+        <button class="btn primary block" type="submit">進入</button>
       </form>
     </div>`);
   app.replaceChildren(node);
-  node.addEventListener('submit', (ev) => {
+  const form = node.querySelector('form')!;
+  form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    const fd = new FormData(node as HTMLFormElement);
+    const fd = new FormData(form);
     void api<{ token: string }>('/auth/admin/login', {
       method: 'POST',
       body: JSON.stringify({ username: fd.get('username'), password: fd.get('password') }),
@@ -198,14 +204,14 @@ async function renderShell(): Promise<void> {
     }>('/api/admin/summary');
     const node = $(`
       <div>
-        <div class="top"><h1>總覽</h1></div>
+        <div class="top"><div><h1>總覽</h1><p>帳號、授權與班級現況</p></div></div>
         <div class="stats">
           <div class="stat"><em>老師</em><strong>${data.teachers}</strong></div>
           <div class="stat"><em>學生</em><strong>${data.students}</strong></div>
           <div class="stat"><em>班級</em><strong>${data.teams}</strong></div>
           <div class="stat"><em>到期學生</em><strong>${data.expiredStudents}</strong></div>
         </div>
-        <p class="empty">停用的老師 ${data.disabledTeachers} 位。授權期限空白代表不限期。</p>
+        <p class="note">停用的老師 ${data.disabledTeachers} 位。授權期限留空表示不限期。</p>
       </div>`);
     return node;
   }
@@ -223,17 +229,21 @@ async function renderShell(): Promise<void> {
     const wrap = document.createElement('div');
     wrap.innerHTML = `
       <div class="top">
-        <h1>${kind === 'teachers' ? '老師' : '學生'}</h1>
-        <input class="search" id="q" placeholder="搜尋名稱或 email" value="${query.replace(/"/g, '&quot;')}">
+        <div>
+          <h1>${kind === 'teachers' ? '老師' : '學生'}</h1>
+          <p>${rows.length} 筆</p>
+        </div>
+        <input class="search" id="q" type="search" placeholder="搜尋名稱或 email" value="${query.replace(/"/g, '&quot;')}">
         <button class="btn primary" id="add" type="button">新增</button>
       </div>`;
     wrap.append(filters(kind));
     const table = document.createElement('div');
     table.className = 'table-wrap';
-    table.innerHTML =
+    const grid =
       kind === 'teachers'
         ? teacherTable(data.teachers ?? [])
         : studentTable(data.students ?? []);
+    table.innerHTML = `<div class="table-card">${grid}</div>`;
     wrap.append(table);
     if (rows.length === 0) wrap.insertAdjacentHTML('beforeend', '<p class="empty">沒有符合的帳號</p>');
     wrap.querySelector('#q')?.addEventListener('change', (ev) => {
@@ -308,35 +318,33 @@ function openDrawer(
     <div class="drawer-back">
       <form class="drawer">
         <h2>${row ? '編輯' : '新增'}${isTeacher ? '老師' : '學生'}</h2>
-        <label>名稱</label>
-        <input name="name" required value="${row ? esc(row.name) : ''}">
+        <p class="lede">授權到期留空表示不限期。</p>
+        <label class="field"><span>名稱</span><input name="name" type="text" required value="${row ? esc(row.name) : ''}"></label>
         ${
           isTeacher
-            ? `<label>Email</label><input name="email" type="email" required value="${row ? esc((row as Teacher).email) : ''}" ${row ? 'readonly' : ''}>`
-            : `<label>Email（可空白）</label><input name="email" type="email" value="${row ? esc((row as Student).email ?? '') : ''}" ${row ? 'readonly' : ''}>`
+            ? `<label class="field"><span>Email</span><input name="email" type="email" required value="${row ? esc((row as Teacher).email) : ''}" ${row ? 'readonly' : ''}></label>`
+            : `<label class="field"><span>Email（可空白）</span><input name="email" type="email" value="${row ? esc((row as Student).email ?? '') : ''}" ${row ? 'readonly' : ''}></label>`
         }
-        <label>${row ? '新密碼（空白表示不改）' : '密碼'}</label>
-        <input name="password" type="password" autocomplete="new-password" ${row ? '' : 'required'}>
+        <label class="field"><span>${row ? '新密碼（空白表示不改）' : '密碼'}</span><input name="password" type="password" autocomplete="new-password" ${row ? '' : 'required'}></label>
         ${
           row
-            ? `<label>狀態</label>
+            ? `<label class="field"><span>狀態</span>
                <select name="status">
                  <option value="active">使用中</option>
                  <option value="disabled">停用</option>
                  ${isTeacher ? '' : '<option value="removed">移除</option>'}
-               </select>
-               <label>授權到期（空白 = 不限期）</label>
-               <input name="licensedUntil" type="date" value="${dateInput(row.licensedUntil)}">
-               <label><input name="clearLicense" type="checkbox"> 清除期限</label>
-               <label><input name="emailVerified" type="checkbox" ${row.emailVerified ? 'checked' : ''}> 已驗證 email</label>
+               </select></label>
+               <label class="field"><span>授權到期</span><input name="licensedUntil" type="date" value="${dateInput(row.licensedUntil)}"></label>
+               <label class="check"><input name="clearLicense" type="checkbox"><span>清除期限，改為不限期</span></label>
+               <label class="check"><input name="emailVerified" type="checkbox" ${row.emailVerified ? 'checked' : ''}><span>已驗證 email</span></label>
                ${
                  isTeacher
                    ? ''
-                   : `<label>進度帳本</label>
+                   : `<label class="field"><span>進度帳本</span>
                       <select name="progressMode">
                         <option value="personal">自己的進度</option>
                         <option value="class">目前班級的進度</option>
-                      </select>`
+                      </select></label>`
                }`
             : ''
         }
