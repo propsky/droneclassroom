@@ -14,7 +14,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from starlette.datastructures import UploadFile
 
-from .accounts import CurrentTeacher, DbSession
+from .accounts import (
+    CurrentTeacher,
+    DbSession,
+    get_account_session,
+    get_current_session,
+    get_current_teacher,
+)
 from .db.models import Level, LevelFloor
 from .floor_image import (
     MAX_FLOOR_BYTES,
@@ -51,6 +57,28 @@ async def _read_upload(upload: UploadFile) -> bytes:
     return b"".join(chunks)
 
 
+async def _read_floor_bytes(request: Request) -> tuple[bytes, str]:
+    """先把 multipart 讀完再碰資料庫或登入檢查。
+
+    依賴若先回 503／401，或沒裝 python-multipart 就在讀 body 前丟例外，
+    瀏覽器會在檔案還沒送完時收到連線中斷，fetch 失敗。
+    老師端因此把上傳顯示成「無法連到伺服器」，即使後端其實有在聽。
+    """
+    form = await request.form(max_files=1, max_fields=2, max_part_size=MAX_FLOOR_BYTES)
+    upload = form.get("file")
+    if not isinstance(upload, UploadFile):
+        raise HTTPException(status_code=400, detail="請上傳圖片檔")
+    data = await _read_upload(upload)
+    try:
+        content_type = sniff_floor_image(data, upload.content_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="只接受 JPEG、PNG 或 WebP，且需小於 2 MB",
+        ) from None
+    return data, content_type
+
+
 def _apply_floor_url(lvl: Level, path: str | None) -> None:
     definition = dict(lvl.definition)
     if path:
@@ -64,42 +92,33 @@ def _apply_floor_url(lvl: Level, path: str | None) -> None:
 
 
 @router.post("/api/teacher/levels/{level_pk}/floor", response_model=FloorUploadResponse)
-async def upload_level_floor(
-    level_pk: int,
-    request: Request,
-    teacher: CurrentTeacher,
-    session: DbSession,
-) -> FloorUploadResponse:
-    lvl = await _owned_teacher_level(session, level_pk, teacher)
-    form = await request.form(max_files=1, max_fields=2, max_part_size=MAX_FLOOR_BYTES)
-    upload = form.get("file")
-    if not isinstance(upload, UploadFile):
-        raise HTTPException(status_code=400, detail="請上傳圖片檔")
-    data = await _read_upload(upload)
+async def upload_level_floor(level_pk: int, request: Request) -> FloorUploadResponse:
+    data, content_type = await _read_floor_bytes(request)
+    session_iter = get_account_session(request)
     try:
-        content_type = sniff_floor_image(data, upload.content_type)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="只接受 JPEG、PNG 或 WebP，且需小於 2 MB",
-        ) from None
-    row = await session.get(LevelFloor, lvl.id)
-    if row is None:
-        row = LevelFloor(
-            level_pk=lvl.id,
-            content_type=content_type,
-            byte_size=len(data),
-            data=data,
-        )
-        session.add(row)
-    else:
-        row.content_type = content_type
-        row.byte_size = len(data)
-        row.data = data
-    path = floor_image_path(lvl.level_id, int(time.time()))
-    _apply_floor_url(lvl, path)
-    await session.commit()
-    return FloorUploadResponse(floorImage=path)
+        session = await anext(session_iter)
+        current = await get_current_session(request, session)
+        teacher = await get_current_teacher(current, session)
+        lvl = await _owned_teacher_level(session, level_pk, teacher)
+        row = await session.get(LevelFloor, lvl.id)
+        if row is None:
+            row = LevelFloor(
+                level_pk=lvl.id,
+                content_type=content_type,
+                byte_size=len(data),
+                data=data,
+            )
+            session.add(row)
+        else:
+            row.content_type = content_type
+            row.byte_size = len(data)
+            row.data = data
+        path = floor_image_path(lvl.level_id, int(time.time()))
+        _apply_floor_url(lvl, path)
+        await session.commit()
+        return FloorUploadResponse(floorImage=path)
+    finally:
+        await session_iter.aclose()
 
 
 @router.delete("/api/teacher/levels/{level_pk}/floor", status_code=204)

@@ -1,4 +1,5 @@
-// 自訂關卡編輯器 — 俯視 2D、格線吸附、物件選取與座標面板、素材庫。
+// 自訂關卡編輯器 — 預設 2.5D 斜視、格線吸附、物件選取與座標面板、素材庫。
+// 滾輪只縮放地圖畫布（#le-canvas），不攔截側欄或頁面其他區域。
 import type { LevelDef, TeacherLevelKitBrief, TeacherLevelBrief } from '@creafly/shared';
 import {
   balloonDiameter,
@@ -11,6 +12,9 @@ import {
   isoGroundToCanvas,
   isoLayout,
   isoWorldToCanvas,
+  mapPointerToContent,
+  refitMapZoom,
+  zoomMapAtPointer,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
   applyLevelGoalPreset,
@@ -28,6 +32,7 @@ import {
   topWorldToCanvas,
   validateLevelKitPatch,
   type EditorViewMode,
+  type MapViewTransform,
   type LevelKitCategory,
   type LevelKitSnippet,
 } from '@creafly/shared';
@@ -244,12 +249,13 @@ export function openLevelEditor(
         <main class="lvl-studio-stage">
           <div class="lvl-canvas-head">
             <div class="le-view-tabs" id="le-view-tabs" role="tablist" aria-label="編輯視角">
-              <button type="button" class="btn btn-ghost btn-xs le-view active" data-view="top" role="tab">俯視</button>
-              <button type="button" class="btn btn-ghost btn-xs le-view" data-view="iso" role="tab">2.5D</button>
+              <button type="button" class="btn btn-ghost btn-xs le-view" data-view="top" role="tab">俯視</button>
+              <button type="button" class="btn btn-ghost btn-xs le-view active" data-view="iso" role="tab">2.5D</button>
               <button type="button" class="btn btn-ghost btn-xs le-view" data-view="side" role="tab">側視</button>
             </div>
             <span class="mono" id="le-cursor">X 0 · Z 0</span>
-            <span class="note le-canvas-hint">↑ 前方為 -Z · 拖曳移動 · 方向鍵微調 · Del 刪除</span>
+            <span class="mono" id="le-zoom" title="地圖縮放">100%</span>
+            <span class="note le-canvas-hint">↑ 前方為 -Z · 拖曳移動 · 滾輪縮放 · 方向鍵微調 · Del 刪除</span>
             <p class="note lvl-legend">
               <span class="le-legend-ring">○ 圈</span>
               <span class="le-legend-solid">■ 實心</span>
@@ -272,9 +278,13 @@ export function openLevelEditor(
             <dl class="le-inspector-readout">
               <div><dt>游標 X</dt><dd class="mono" id="le-readout-x">0</dd></div>
               <div><dt>游標 Z</dt><dd class="mono" id="le-readout-z">0</dd></div>
-              <div><dt>放置高度</dt><dd class="mono" id="le-readout-place-y">2.5 m</dd></div>
+              <div class="le-place-y-row">
+                <dt>放置高度</dt>
+                <dd class="mono" id="le-readout-place-y">2.5 m</dd>
+                <input id="le-place-y" class="le-height-range" type="range" min="0.5" max="8" step="0.5" value="2.5" aria-label="放置高度">
+              </div>
             </dl>
-            <p class="note" id="le-view-hint">滾輪調整放置高度 · 側視可拖曳調 Y</p>
+            <p class="note" id="le-view-hint">2.5D：拖曳沿地面移動 X/Z · 滾輪放大縮小 · 藍柱=高度</p>
           </div>
           ${propsPanelHtml()}
         </aside>
@@ -297,8 +307,9 @@ export function openLevelEditor(
   let selection: Selection | null = null;
   let dragSel: Selection | null = null;
   let placeMode: PlaceMode = 'select';
-  let viewMode: EditorViewMode = 'top';
+  let viewMode: EditorViewMode = 'iso';
   let placeHeightY = 2.5;
+  let mapView: MapViewTransform = { zoom: 1, panX: 0, panY: 0 };
   let snapStep = 1;
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let dirty = false;
@@ -361,6 +372,11 @@ export function openLevelEditor(
 
   const syncPlaceHeightReadout = (): void => {
     q<HTMLElement>('#le-readout-place-y').textContent = `${placeHeightY.toFixed(1)} m`;
+    q<HTMLInputElement>('#le-place-y').value = String(placeHeightY);
+  };
+
+  const syncZoomReadout = (): void => {
+    q<HTMLElement>('#le-zoom').textContent = `${Math.round(mapView.zoom * 100)}%`;
   };
 
   const syncInspectorIdle = (x: number, z: number): void => {
@@ -383,11 +399,11 @@ export function openLevelEditor(
   const syncViewHint = (): void => {
     const el = q<HTMLElement>('#le-view-hint');
     if (viewMode === 'iso') {
-      el.textContent = '2.5D：拖曳沿地面移動 X/Z · 滾輪調放置高度 · 藍柱=高度';
+      el.textContent = '2.5D：拖曳沿地面移動 X/Z · 滾輪放大縮小 · 藍柱=高度';
     } else if (viewMode === 'side') {
-      el.textContent = '側視：拖曳調 Y · 放置請切換俯視或 2.5D';
+      el.textContent = '側視：拖曳調 Y · 滾輪放大縮小 · 放置請切換俯視或 2.5D';
     } else {
-      el.textContent = '滾輪調整放置高度 · 側視可拖曳調 Y';
+      el.textContent = '俯視：滾輪放大縮小 · 放置高度用右側滑桿 · 側視可拖曳調 Y';
     }
   };
 
@@ -413,7 +429,7 @@ export function openLevelEditor(
   const drawIsoFloor = (): void => {
     const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
     const gridStep = snapStep >= 1 ? 5 : 2.5;
-    const { cx, cy } = isoLayout(size, size);
+    const { cx, cy, tileW, tileH } = isoLayout(size, size);
     const ground = (x: number, z: number): [number, number] => {
       const [px, py] = isoGroundToCanvas(x, z, size, size);
       return [px + ox, py + oy];
@@ -426,15 +442,40 @@ export function openLevelEditor(
       [HALF, HALF],
       [-HALF, HALF],
     ];
+    const traceDiamond = (): void => {
+      ctx.beginPath();
+      corners.forEach(([x, z], i) => {
+        const [px, py] = ground(x, z);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+    };
+    traceDiamond();
     ctx.fillStyle = 'rgba(30,45,65,0.55)';
-    ctx.beginPath();
-    corners.forEach(([x, z], i) => {
-      const [px, py] = ground(x, z);
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
-    ctx.closePath();
     ctx.fill();
+    if (floorImg && floorImg.naturalWidth > 0) {
+      // 矩形圖沿 2.5D 的 X/Z 斜軸貼上菱形，預設視圖才看得到剛上傳的地板。
+      ctx.save();
+      traceDiamond();
+      ctx.clip();
+      const halfW = tileW * 0.5;
+      const halfH = tileH * 0.5;
+      const imgW = floorImg.naturalWidth;
+      const imgH = floorImg.naturalHeight;
+      const local = new DOMMatrix([
+        (WORLD * halfW) / imgW,
+        (WORLD * halfH) / imgW,
+        -(WORLD * halfW) / imgH,
+        (WORLD * halfH) / imgH,
+        ox + cx,
+        oy + cy - WORLD * halfH,
+      ]);
+      ctx.setTransform(ctx.getTransform().multiply(local));
+      ctx.drawImage(floorImg, 0, 0);
+      ctx.restore();
+    }
+    traceDiamond();
     ctx.strokeStyle = 'rgba(96,165,250,0.35)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
@@ -751,8 +792,14 @@ export function openLevelEditor(
   const draw = (): void => {
     const w = canvas.width;
     const h = canvas.height;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = viewMode === 'side' ? '#141c28' : viewMode === 'iso' ? '#152030' : '#1a2332';
+    ctx.fillRect(0, 0, w, h);
+    ctx.setTransform(mapView.zoom, 0, 0, mapView.zoom, mapView.panX, mapView.panY);
     if (viewMode === 'side') drawSideView(w, h);
     else drawPlanView();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    syncZoomReadout();
     updateEmptyBanner();
   };
 
@@ -880,6 +927,7 @@ export function openLevelEditor(
     const pxW = Math.min(2400, Math.floor(box.clientWidth * dpr));
     const pxH = Math.min(2400, Math.floor(box.clientHeight * dpr));
     if (canvas.width !== pxW || canvas.height !== pxH) {
+      mapView = refitMapZoom(mapView, canvas.width, canvas.height, pxW, pxH);
       canvas.width = pxW;
       canvas.height = pxH;
     }
@@ -1096,12 +1144,17 @@ export function openLevelEditor(
     scheduleSave();
   };
 
-  const canvasPos = (e: MouseEvent): [number, number] => {
+  const pointerOnCanvas = (e: MouseEvent): [number, number] => {
     const rect = canvas.getBoundingClientRect();
     return [
       ((e.clientX - rect.left) / rect.width) * canvas.width,
       ((e.clientY - rect.top) / rect.height) * canvas.height,
     ];
+  };
+
+  const canvasPos = (e: MouseEvent): [number, number] => {
+    const [sx, sy] = pointerOnCanvas(e);
+    return mapPointerToContent(sx, sy, mapView);
   };
 
   canvas.addEventListener('mousemove', (e) => {
@@ -1167,17 +1220,20 @@ export function openLevelEditor(
   canvas.addEventListener(
     'wheel',
     (e) => {
-      if (viewMode === 'side') return;
       e.preventDefault();
-      const step = 0.5;
-      placeHeightY = Math.max(
-        0.5,
-        Math.min(EDITOR_MAX_Y, placeHeightY + (e.deltaY > 0 ? -step : step)),
-      );
-      syncPlaceHeightReadout();
+      const [sx, sy] = pointerOnCanvas(e);
+      mapView = zoomMapAtPointer(mapView, sx, sy, e.deltaY < 0);
+      draw();
     },
     { passive: false },
   );
+
+  q<HTMLInputElement>('#le-place-y').addEventListener('input', () => {
+    const next = Number(q<HTMLInputElement>('#le-place-y').value);
+    if (!Number.isFinite(next)) return;
+    placeHeightY = Math.max(0.5, Math.min(EDITOR_MAX_Y, next));
+    syncPlaceHeightReadout();
+  });
 
   q<HTMLElement>('#le-view-tabs').querySelectorAll<HTMLButtonElement>('.le-view').forEach((btn) => {
     btn.addEventListener('click', () => {
