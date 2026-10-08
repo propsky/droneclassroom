@@ -144,10 +144,23 @@ export class CameraRig {
     if (this.soccerSign !== null && this.soccerCam === 'team') {
       const sign = this.soccerSign;
       const F = activeSoccerField();
-      const dist = F.halfZ + Math.max(9, F.halfZ * 0.5); // 端線後方：至少 9m，大場地按比例退
-      const camY = F.goalY + F.goalR + 2; // 高過門頂一點 → 近端門環不擋視線
+      // 站在端牆內側、略高於近端圓環，才看得到天花鋼架，也不會被圓環擋滿
+      const dist = F.halfZ - 0.75;
+      const camY = Math.min(F.top - 0.95, 4.05);
       this.camera.position.set(0, camY, sign * dist);
-      this.tmpTarget.set(0, Math.max(F.goalY - 1, 2), -sign * F.halfZ * 0.3);
+      this.tmpTarget.set(0, 1.7, -sign * F.halfZ * 0.45);
+      this.camera.setTarget(this.tmpTarget);
+      return true;
+    }
+
+    // 足球跟隨：護罩直徑約 24cm，機位 2.6m 才看得到螺旋槳與 LED
+    if (this.soccerSign !== null && this.soccerCam === 'follow') {
+      const dist = 2.6;
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
+      const target = new Vector3(pos.x + dist * sin, pos.y + 0.9, pos.z + dist * cos);
+      Vector3.LerpToRef(this.camera.position, target, 0.28, this.camera.position);
+      this.tmpTarget.set(pos.x, pos.y + 0.02, pos.z);
       this.camera.setTarget(this.tmpTarget);
       return true;
     }

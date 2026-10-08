@@ -1,105 +1,153 @@
-// ⚽ 足球視覺 + 門框碰撞：場地（地板 / 邊牆 / 中線 / 起始區）、兩端 torus 球門（隊色）、
-// 球形保護框、P-5 假人、多人隊色分身＋前鋒彩帶（striker 玩法）、推球模式共用球 —
-// Babylon 版，行為對齊 legacy §16 / §16b。
-// 場地尺寸資料驅動：一律讀 soccer/field.ts 的生效值（伺服器下發優先、constants fallback），
-// 收到 soccer-field-changed 以新尺寸整場重建（含門框碰撞）。
-//
-// 門框碰撞：torus mesh 烤成世界座標三角網格註冊進共用 HavokBackend
-// （球門洞可穿、框實心 — legacy 用 BVH，本版走 PhysicsBackend 介面），
-// 碰撞半徑用 SOCCER_BALL_R（球形保護框）。牆 / 天花板的 clamp 在邏輯層
-// （soccer/practice.ts、multiplayer/soccer.ts）照 legacy 處理。
+// ⚽ 足球視覺：室內護網球館、護罩機、吊掛發光圓環、雙面計分板、撞擊／進球特效。
+// 門框碰撞仍用同一顆 torus（內徑 70cm、厚度 20cm）烤進 Havok，不改判定。
+// 場地尺寸一律讀 soccer/field.ts 的生效值。
 import {
   Scene,
   Mesh,
   MeshBuilder,
   StandardMaterial,
+  DynamicTexture,
   Color3,
+  Color4,
   Vector3,
   TransformNode,
+  DirectionalLight,
+  HemisphericLight,
+  PointLight,
+  ShadowGenerator,
+  type AbstractMesh,
 } from '@babylonjs/core';
 import { bus, toast } from '../core/events';
 import { droneState, DRONE_RADIUS, type Vec3 } from '../core/droneState';
 import { setMeshCollisionBackend } from '../core/physics';
 import {
   SOCCER_BALL_R,
-  SOCCER_DRONE_SCALE,
   SOCCER_START_DEPTH,
   SOCCER_START_WIDTH,
   SOCCER_TEAM_COLORS,
   soccerGoalTorusDiameter,
   soccerGoalTorusThickness,
-  soccerTeamColorHex,
 } from '../soccer/constants';
+import {
+  readBroadcast,
+  readPracticeBroadcast,
+  soccerGuardColor,
+  type BroadcastView,
+} from '../soccer/broadcast';
 import { activeSoccerField } from '../soccer/field';
 import { soccerState, type SoccerOther } from '../multiplayer/soccer';
+import { practiceState } from '../soccer/practice';
 import { getHavokBackend, type HavokBackend } from './havokBackend';
 import { bakeTriangleSoup } from './playground';
-import { makeNameLabel, makeCloneDrone } from './clones';
+import { makeNameLabel } from './clones';
 import { hex } from './scene';
 import type { DroneVisual } from './drone';
+import { createSoccerDrone, type SoccerDroneModel } from './soccerDrone';
+import { createSoccerScoreboard, stretchScoreboardRods, type SoccerScoreboard } from './soccerScoreboard';
+import { setSoccerArenaAudio } from '../ui/audio';
+import { setSoccerEndScreen, setSoccerFlag } from '../ui/soccerHud';
 
-/** 分身位置 / 彩帶擺動的視覺常數（對齊 20cm 級機身，不要比圓環還大） */
-const RIBBON_SCALE = 0.22;
-const RIBBON_SWING = 0.25; // 彩帶擺動幅度（rad）
-const CLONE_LABEL_Y = 0.45;
-/** 分身縮放：機臂長約 1.56×此值，對齊縮小後的自機 */
-const CLONE_SCALE = 0.16;
-
-/** 推球模式共用球的視覺常數（亮黃 + emissive → 綠地板上好追） */
-const BALL_COLOR = 0xffd60a; // 亮黃
-const BALL_GLOW_IDLE = 0.42; // 平時 emissive 比例
-const BALL_GLOW_NEAR = 0.95; // 本機貼近球時微發亮（純視覺回饋，物理在伺服器）
+const CLONE_LABEL_Y = 0.34;
 
 type SoccerVariant = 'practice' | 'match';
 
-/** 一個他人分身的視覺物件組 */
 interface SoccerCloneVisual {
   root: TransformNode;
-  bodyMat: StandardMaterial;
-  ribbon: TransformNode;
+  model: SoccerDroneModel;
   appliedTeam: string | null;
-  /** 彩帶目前是否顯示（= striker 且玩法為 'striker'；ball 模式一律不顯示） */
-  appliedRibbon: boolean;
+  appliedStriker: boolean;
+}
+
+interface Spark {
+  mesh: Mesh;
+  vx: number;
+  vy: number;
+  vz: number;
+  life: number;
+}
+
+interface GoalVisual {
+  z: number;
+  color: number;
+  mat: StandardMaterial;
+  baseEmissive: Color3;
+}
+
+interface SavedOutdoor {
+  clear: Color4;
+  fogDensity: number;
+  fogColor: Color3;
+  sunPos: Vector3;
+  sunDir: Vector3;
+  sunInt: number;
+  hemiInt: number;
+  hemiDiffuse: Color3;
+  hemiGround: Color3;
+  darkness: number;
+}
+
+function previewKind(): string | null {
+  try {
+    return new URLSearchParams(globalThis.location?.search ?? '').get('phase3preview');
+  } catch {
+    return null;
+  }
 }
 
 export class SoccerFieldVisuals {
   private readonly scene: Scene;
   private readonly drone: DroneVisual;
   private readonly backend: HavokBackend;
-  /** 場地所有靜態視覺（地板 / 牆 / 線 / 球門 / 起始區） */
+  private readonly shadows: ShadowGenerator | null;
   private fieldMeshes: Mesh[] = [];
   private dummyMeshes: Mesh[] = [];
   private goalMeshes: Mesh[] = [];
-  private ballCage: Mesh | null = null;
-  /** 推球模式的共用球（伺服器模擬；lazy 建立、依 soccerState.ball 位置渲染） */
+  private goals: GoalVisual[] = [];
+  private myDrone: SoccerDroneModel | null = null;
+  private scoreboard: SoccerScoreboard | null = null;
+  private lights: PointLight[] = [];
   private sharedBall: Mesh | null = null;
   private sharedBallMat: StandardMaterial | null = null;
   private sharedBallR = 0;
   private sharedBallGlow = 0;
-  private myRibbon: TransformNode | null = null;
   private clones = new Map<string, SoccerCloneVisual>();
+  private sparks: Spark[] = [];
   private active = false;
-  /** 目前場地 variant（伺服器下發場地定義變更時據此重建） */
   private variant: SoccerVariant = 'practice';
   private collisionReady = false;
-  /** 世代計數：Havok WASM 載入中離場 → 作廢舊的非同步註冊 */
   private generation = 0;
+  private savedOutdoor: SavedOutdoor | null = null;
+  private hiddenOutdoor: { mesh: AbstractMesh; was: boolean }[] = [];
+  private outdoorSweep = 0;
+  private goalFlashUntil = 0;
+  private goalFlashZ = 0;
+  private preview: string | null = null;
+  private previewHeld = false;
+  private previewBurstTick = 0;
+  private casters: Mesh[] = [];
 
-  constructor(scene: Scene, drone: DroneVisual) {
+  constructor(scene: Scene, drone: DroneVisual, shadows: ShadowGenerator | null = null) {
     this.scene = scene;
     this.drone = drone;
-    this.backend = getHavokBackend(scene); // 與 playground 共用單例（scene 只能 enablePhysics 一次）
+    this.shadows = shadows;
+    this.backend = getHavokBackend(scene);
     bus.on('soccer-entered', ({ variant }) => this.build(variant));
     bus.on('soccer-exited', () => this.disposeAll());
     bus.on('soccer-dummies-changed', ({ boxes }) => this.buildDummies(boxes));
-    // 伺服器下發場地定義（生效值在 soccer/field.ts）→ 以新尺寸整場重建（含門框碰撞）
     bus.on('soccer-field-changed', () => {
       if (this.active) this.build(this.variant);
     });
+    bus.on('sound', ({ name }) => {
+      if (!this.active) return;
+      if (name === 'ring') this.burstGoal();
+      else if (name === 'bump') this.burstHit();
+    });
 
-    // headless 驗收 / debug 後門（對齊 __creaflyPlayground）：
-    // collisionReady = 門框網格已註冊；probe(x,y,z) = 以球框半徑做一次推出查詢（不動 droneState）
-    (window as unknown as Record<string, unknown>).__creaflySoccer = {
+    const debug = (window as unknown as Record<string, unknown>).__creaflySoccer as
+      | Record<string, unknown>
+      | undefined;
+    const api = {
+      ...(debug ?? {}),
       collisionReady: () => this.collisionReady,
       probe: (x: number, y: number, z: number): { pos: Vec3; bumped: boolean } => {
         const pos = { x, y, z };
@@ -107,59 +155,465 @@ export class SoccerFieldVisuals {
         const { bumped } = this.backend.resolveCollisions(pos, vel, SOCCER_BALL_R);
         return { pos, bumped };
       },
+      burstGoal: () => this.burstGoal(),
+      burstHit: () => this.burstHit(),
     };
+    (window as unknown as Record<string, unknown>).__creaflySoccer = api;
   }
 
   // ---------------------------------------------------------------------------
-  // 場地建置
+  // 場地
   // ---------------------------------------------------------------------------
   private build(variant: SoccerVariant): void {
-    this.disposeAll(); // 防重複（practice ↔ match 直切、伺服器場地定義變更重建）
+    this.disposeAll();
     this.active = true;
     this.variant = variant;
+    this.preview = previewKind();
+    this.previewHeld = false;
     const gen = ++this.generation;
     const scene = this.scene;
-    // 場地尺寸：伺服器下發的生效值（未下發 = constants fallback）— 資料驅動
     const F = activeSoccerField();
-    this.drone.setScaleFactor(SOCCER_DRONE_SCALE); // 縮小飛機 → 場地相對變大、比例正確
+    this.drone.setScaleFactor(1);
+    this.drone.setForceHidden(true);
     this.setDefaultGroundVisible(false);
+    this.enterIndoor();
+    setSoccerArenaAudio(true);
 
-    // ---- 地板（草綠）----
-    const floor = MeshBuilder.CreateGround('soccerFloor', { width: F.halfX * 2, height: F.halfZ * 2 }, scene);
+    this.buildTurf();
+    this.buildFrameAndNets();
+    this.buildMarkings(variant);
+    if (variant === 'match') {
+      this.buildStartZone(-1, SOCCER_TEAM_COLORS.blue);
+      this.buildStartZone(1, SOCCER_TEAM_COLORS.red);
+    } else {
+      this.buildStartZone(1, SOCCER_TEAM_COLORS.blue);
+      this.buildStartZone(-1, SOCCER_TEAM_COLORS.red);
+    }
+
+    const farColor = variant === 'match' ? SOCCER_TEAM_COLORS.blue : SOCCER_TEAM_COLORS.red;
+    const nearColor = variant === 'match' ? SOCCER_TEAM_COLORS.red : SOCCER_TEAM_COLORS.blue;
+    this.goalMeshes = [this.makeGoalRing(-F.goalZ, farColor), this.makeGoalRing(F.goalZ, nearColor)];
+    this.fieldMeshes.push(...this.goalMeshes);
+    this.hangGoal(-F.goalZ);
+    this.hangGoal(F.goalZ);
+    void this.registerGoalCollision(gen);
+
+    this.myDrone = createSoccerDrone(scene, 'me', SOCCER_BALL_R, this.shadows);
+    this.myDrone.pose(
+      droneState.position.x,
+      droneState.position.y,
+      droneState.position.z,
+      droneState.yaw,
+      0,
+      0,
+      0,
+    );
+
+    const boardY = Math.min(F.top - 1.15, F.goalY + 0.55);
+    this.scoreboard = createSoccerScoreboard(scene, boardY);
+    stretchScoreboardRods(this.scoreboard.root, F.top - 0.05);
+    this.syncBroadcast();
+  }
+
+  /** 草皮：深草綠割紋＋細葉，整面鋪一次，不要淺色或發白 */
+  private buildTurf(): void {
+    const F = activeSoccerField();
+    const floor = MeshBuilder.CreateGround(
+      'soccerFloor',
+      { width: F.halfX * 2, height: F.halfZ * 2 },
+      this.scene,
+    );
     floor.position.y = 0.02;
-    const floorMat = new StandardMaterial('soccerFloorMat', scene);
-    floorMat.diffuseColor = hex(0x3a7d44);
-    floorMat.specularColor = new Color3(0.05, 0.05, 0.05);
-    floor.material = floorMat;
+    const mat = new StandardMaterial('soccerFloorMat', this.scene);
+    const size = 512;
+    const tex = new DynamicTexture('soccerGrass', { width: size, height: size }, this.scene, false);
+    const ctx = tex.getContext() as CanvasRenderingContext2D;
+    const stripes = 8;
+    for (let i = 0; i < stripes; i++) {
+      const x0 = Math.floor((i * size) / stripes);
+      const x1 = Math.floor(((i + 1) * size) / stripes);
+      ctx.fillStyle = i % 2 === 0 ? '#145228' : '#1c6434';
+      ctx.fillRect(x0, 0, x1 - x0, size);
+      ctx.fillStyle = 'rgba(8,36,16,0.45)';
+      ctx.fillRect(x1 - 2, 0, 2, size);
+    }
+    for (let i = 0; i < 3200; i++) {
+      const x = (i * 73) % size;
+      const y = (i * 137) % size;
+      const band = Math.floor((x * stripes) / size) % 2;
+      const g = (band ? 86 : 70) + (i % 18);
+      ctx.fillStyle = `rgba(${14 + (i % 9)},${g},${18 + (i % 7)},0.4)`;
+      ctx.fillRect(x, y, 1 + (i % 2), 4 + (i % 5));
+    }
+    tex.update();
+    tex.uScale = 1;
+    tex.vScale = 1;
+    mat.diffuseTexture = tex;
+    mat.specularColor = new Color3(0.03, 0.04, 0.03);
+    floor.material = mat;
     floor.receiveShadows = true;
     this.fieldMeshes.push(floor);
+  }
 
-    // ---- 四面透明邊牆（視覺提示；clamp 在邏輯層）----
-    const wallMat = new StandardMaterial('soccerWallMat', scene);
-    wallMat.diffuseColor = hex(0x4dd0e1);
-    wallMat.alpha = 0.12;
-    wallMat.backFaceCulling = false;
-    const walls: [number, number, number, number, number, number][] = [
-      [F.halfX * 2, F.top, 0.15, 0, F.top / 2, -F.halfZ],
-      [F.halfX * 2, F.top, 0.15, 0, F.top / 2, F.halfZ],
-      [0.15, F.top, F.halfZ * 2, -F.halfX, F.top / 2, 0],
-      [0.15, F.top, F.halfZ * 2, F.halfX, F.top / 2, 0],
-    ];
-    walls.forEach(([w, h, d, x, y, z], i) => {
-      const m = MeshBuilder.CreateBox(`soccerWall${i}`, { width: w, height: h, depth: d }, scene);
+  /** 球館用的實色材質（護墊、鋼架、色塊）。不改碰撞。 */
+  private gymMat(name: string, color: number, emissiveScale: number, spec: number): StandardMaterial {
+    const mat = new StandardMaterial(name, this.scene);
+    const c = hex(color);
+    mat.diffuseColor = c;
+    mat.emissiveColor = c.scale(emissiveScale);
+    mat.specularColor = new Color3(spec, spec, spec);
+    return mat;
+  }
+
+  /** 軟墊框架＋網＋鋼架。網在框架內側，天花板封起來。尺寸沿用場地生效值。 */
+  private buildFrameAndNets(): void {
+    const F = activeSoccerField();
+    const scene = this.scene;
+    // 鋼架與外殼以色塊自發光為主、漫反射壓低，避免燈一照就整片過曝成白
+    const steel = this.gymMat('soccerSteel', 0x7a8da3, 0.62, 0.12);
+    steel.diffuseColor = hex(0x24303c);
+
+    const darkMat = new StandardMaterial('soccerShellMat', scene);
+    darkMat.diffuseColor = hex(0x121820);
+    darkMat.specularColor = new Color3(0.03, 0.03, 0.04);
+    darkMat.emissiveColor = hex(0x3a4c60);
+
+    const addBox = (
+      name: string,
+      w: number,
+      h: number,
+      d: number,
+      x: number,
+      y: number,
+      z: number,
+      mat: StandardMaterial,
+      cast = true,
+    ): Mesh => {
+      const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
       m.position.set(x, y, z);
-      m.material = wallMat;
+      m.material = mat;
+      m.isPickable = false;
+      if (cast) this.cast(m);
+      this.fieldMeshes.push(m);
+      return m;
+    };
+
+    const corners: Array<[number, number]> = [
+      [-1, -1],
+      [1, -1],
+      [-1, 1],
+      [1, 1],
+    ];
+    for (const [sx, sz] of corners) {
+      const post = MeshBuilder.CreateCylinder(
+        `soccerPost-${sx}-${sz}`,
+        { diameter: 0.28, height: F.top, tessellation: 12 },
+        scene,
+      );
+      post.position.set(sx * F.halfX, F.top / 2, sz * F.halfZ);
+      post.material = steel;
+      post.isPickable = false;
+      this.cast(post);
+      this.fieldMeshes.push(post);
+    }
+
+    const beamT = 0.16;
+    const ys = [beamT / 2, F.top * 0.5, F.top - beamT / 2];
+    for (const y of ys) {
+      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, -F.halfZ, steel);
+      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, F.halfZ, steel);
+      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, -F.halfX, y, 0, steel);
+      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, F.halfX, y, 0, steel);
+    }
+
+    // 兩側護墊：+X 偏紅、-X 偏藍，下緣深、中間一條淺色，不要一片亮白
+    this.addSidePad(1, 0x8c2e34, 0xc46a64, 0x4c1e22);
+    this.addSidePad(-1, 0x2a4c86, 0x6e96c8, 0x16243f);
+    const skirt = this.gymMat('soccerEndSkirt', 0x2c333c, 0.14, 0.05);
+    const skirtLen = F.halfX * 2 - 0.55;
+    addBox('soccerEndSkirt', skirtLen, 1.05, 0.12, 0, 0.68, -F.halfZ + 0.1, skirt, false);
+    addBox('soccerEndSkirt', skirtLen, 1.05, 0.12, 0, 0.68, F.halfZ - 0.1, skirt, false);
+    this.addEndBlocks(-1, [0x1e4f92, 0xb83a34, 0x243044, 0xd4cbb8, 0x1e4f92]);
+    this.addEndBlocks(1, [0xb83a34, 0x243044, 0x1e4f92, 0xd4cbb8, 0xb83a34]);
+
+    // 外殼深色擋板（網後面），避免看到戶外天空
+    const shellA = 0.02;
+    addBox('soccerShell', F.halfX * 2, F.top, shellA, 0, F.top / 2, -F.halfZ - 0.08, darkMat, false);
+    addBox('soccerShell', F.halfX * 2, F.top, shellA, 0, F.top / 2, F.halfZ + 0.08, darkMat, false);
+    addBox('soccerShell', shellA, F.top, F.halfZ * 2, -F.halfX - 0.08, F.top / 2, 0, darkMat, false);
+    addBox('soccerShell', shellA, F.top, F.halfZ * 2, F.halfX + 0.08, F.top / 2, 0, darkMat, false);
+    // 天花板單獨用藍灰、不吃光，避免燈一弱就整片死黑
+    const ceilMat = new StandardMaterial('soccerCeilMat', scene);
+    ceilMat.diffuseColor = hex(0x7e96ae);
+    ceilMat.emissiveColor = hex(0x7e96ae);
+    ceilMat.specularColor = Color3.Black();
+    ceilMat.disableLighting = true;
+    ceilMat.backFaceCulling = false;
+    const ceil = addBox('soccerCeil', F.halfX * 2, 0.08, F.halfZ * 2, 0, F.top - 0.02, 0, ceilMat, false);
+    ceil.receiveShadows = false;
+
+    const inset = 0.2;
+    const cell = 0.18;
+    const netY = 1.28;
+    const netH = F.top - netY - 0.2;
+    const netLo = new Color3(0.4, 0.44, 0.48);
+    const netHi = new Color3(0.12, 0.14, 0.18);
+    this.addSplitNet(
+      'soccerNetFar',
+      new Vector3(-F.halfX + inset, netY, -F.halfZ + 0.05),
+      new Vector3((F.halfX - inset) * 2, 0, 0),
+      netH,
+      Math.round(((F.halfX - inset) * 2) / cell),
+      netLo,
+      netHi,
+    );
+    this.addSplitNet(
+      'soccerNetNear',
+      new Vector3(-F.halfX + inset, netY, F.halfZ - 0.05),
+      new Vector3((F.halfX - inset) * 2, 0, 0),
+      netH,
+      Math.round(((F.halfX - inset) * 2) / cell),
+      netLo,
+      netHi,
+    );
+    this.addSplitNet(
+      'soccerNetLeft',
+      new Vector3(-F.halfX + 0.05, netY, -F.halfZ + inset),
+      new Vector3(0, 0, (F.halfZ - inset) * 2),
+      netH,
+      Math.round(((F.halfZ - inset) * 2) / cell),
+      netLo,
+      netHi,
+    );
+    this.addSplitNet(
+      'soccerNetRight',
+      new Vector3(F.halfX - 0.05, netY, -F.halfZ + inset),
+      new Vector3(0, 0, (F.halfZ - inset) * 2),
+      netH,
+      Math.round(((F.halfZ - inset) * 2) / cell),
+      netLo,
+      netHi,
+    );
+    this.addNet(
+      'soccerNetCeil',
+      new Vector3(-F.halfX + inset, F.top - 0.16, -F.halfZ + inset),
+      new Vector3((F.halfX - inset) * 2, 0, 0),
+      new Vector3(0, 0, (F.halfZ - inset) * 2),
+      Math.round(((F.halfX - inset) * 2) / cell),
+      Math.round(((F.halfZ - inset) * 2) / cell),
+      new Color3(0.55, 0.62, 0.7),
+      0.55,
+    );
+
+    this.addCeilingTruss();
+
+    // 燈具掛在鋼架下方：藍灰燈殼（不吃光，避免變成黑塊）＋朝下的亮燈片
+    const housing = new StandardMaterial('soccerLampHouseMat', scene);
+    housing.diffuseColor = hex(0xb7c6d4);
+    housing.emissiveColor = hex(0xb7c6d4);
+    housing.specularColor = Color3.Black();
+    housing.disableLighting = true;
+    const lampMat = new StandardMaterial('soccerLampMat', scene);
+    lampMat.emissiveColor = hex(0xfff6df);
+    lampMat.disableLighting = true;
+    for (const t of [-0.62, -0.2, 0.2, 0.62]) {
+      const z = t * F.halfZ;
+      addBox('soccerLampHouse', 1.25, 0.1, 0.48, 0, F.top - 0.7, z, housing, false);
+      const lamp = MeshBuilder.CreateBox(
+        `soccerLamp-${z}`,
+        { width: 1.02, height: 0.04, depth: 0.32 },
+        scene,
+      );
+      lamp.position.set(0, F.top - 0.76, z);
+      lamp.material = lampMat;
+      lamp.isPickable = false;
+      this.fieldMeshes.push(lamp);
+      const light = new PointLight(`soccerLight-${z}`, new Vector3(0, F.top - 0.9, z), scene);
+      light.diffuse = hex(0xfff3e4);
+      light.specular = hex(0x4a453e);
+      light.intensity = 2.4;
+      light.range = 9;
+      this.lights.push(light);
+    }
+  }
+
+  /** 長邊護墊。sign +1 為 +X。只是外觀，不進碰撞。 */
+  private addSidePad(sign: number, main: number, stripe: number, cap: number): void {
+    const F = activeSoccerField();
+    const x = sign * (F.halfX - 0.06);
+    const len = F.halfZ * 2 - 0.7;
+    const mainMat = this.gymMat(`soccerPad-${sign}`, main, 0.18, 0.06);
+    const stripeMat = this.gymMat(`soccerPadStripe-${sign}`, stripe, 0.28, 0.08);
+    const capMat = this.gymMat(`soccerPadCap-${sign}`, cap, 0.1, 0.04);
+    const add = (
+      name: string,
+      w: number,
+      h: number,
+      d: number,
+      px: number,
+      py: number,
+      pz: number,
+      mat: StandardMaterial,
+      cast = true,
+    ): void => {
+      const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, this.scene);
+      m.position.set(px, py, pz);
+      m.material = mat;
+      m.isPickable = false;
+      if (cast) this.cast(m);
+      this.fieldMeshes.push(m);
+    };
+    add('soccerSidePad', 0.16, 1.05, len, x, 0.68, 0, mainMat);
+    add('soccerSideStripe', 0.05, 0.16, len - 0.15, x - sign * 0.09, 0.78, 0, stripeMat, false);
+    add('soccerSideCap', 0.18, 0.08, len, x, 1.24, 0, capMat);
+  }
+
+  /** 端牆色塊（球館內牆，不是戶外天空，也不是廣告字） */
+  private addEndBlocks(sign: number, colors: number[]): void {
+    const F = activeSoccerField();
+    const gap = 0.1;
+    const span = F.halfX * 2 - 0.9;
+    const bw = (span - gap * (colors.length - 1)) / colors.length;
+    let x = -span / 2 + bw / 2;
+    const z = sign * (F.halfZ - 0.16);
+    colors.forEach((color, i) => {
+      const mat = this.gymMat(`soccerEndBlock-${sign}-${i}`, color, 0.2, 0.05);
+      const m = MeshBuilder.CreateBox(
+        `soccerEndBlock-${sign}-${i}`,
+        { width: bw, height: 2.05, depth: 0.06 },
+        this.scene,
+      );
+      m.position.set(x, 2.55, z);
+      m.material = mat;
       m.isPickable = false;
       this.fieldMeshes.push(m);
+      x += bw + gap;
     });
+  }
 
-    // ---- 中線 ----
-    const midMat = new StandardMaterial('soccerMidMat', scene);
+  /** 天花板藍灰鋼架。不吃光，掛在燈的上方，從場內就看得到格子。 */
+  private addCeilingTruss(): void {
+    const F = activeSoccerField();
+    const trussMat = new StandardMaterial('soccerTrussMat', this.scene);
+    trussMat.diffuseColor = hex(0xe4edf4);
+    trussMat.emissiveColor = hex(0xe4edf4);
+    trussMat.specularColor = Color3.Black();
+    trussMat.disableLighting = true;
+    const y = F.top - 0.42;
+    const add = (name: string, w: number, h: number, d: number, x: number, py: number, z: number): void => {
+      const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, this.scene);
+      m.position.set(x, py, z);
+      m.material = trussMat;
+      m.isPickable = false;
+      this.fieldMeshes.push(m);
+    };
+    for (const t of [-0.72, -0.36, 0, 0.36, 0.72]) {
+      add('soccerTrussZ', 0.22, 0.16, F.halfZ * 2 - 0.45, t * F.halfX, y, 0);
+    }
+    for (const t of [-0.78, -0.52, -0.26, 0, 0.26, 0.52, 0.78]) {
+      add('soccerTrussX', F.halfX * 2 - 0.3, 0.14, 0.22, 0, y - 0.12, t * F.halfZ);
+    }
+  }
+
+  /** 牆網分上下兩段：下方網紋還在，上方再暗一階 */
+  private addSplitNet(
+    name: string,
+    origin: Vector3,
+    axisU: Vector3,
+    height: number,
+    cellsU: number,
+    lower: Color3,
+    upper: Color3,
+  ): void {
+    const cell = 0.18;
+    const mid = height * 0.45;
+    this.addNet(name + 'Lo', origin, axisU, new Vector3(0, mid, 0), cellsU, Math.max(2, Math.round(mid / cell)), lower, 0.84);
+    const hi = origin.add(new Vector3(0, mid, 0));
+    this.addNet(
+      name + 'Hi',
+      hi,
+      axisU,
+      new Vector3(0, height - mid, 0),
+      cellsU,
+      Math.max(2, Math.round((height - mid) / cell)),
+      upper,
+      0.92,
+    );
+  }
+
+  private addNet(
+    name: string,
+    origin: Vector3,
+    axisU: Vector3,
+    axisV: Vector3,
+    cellsU: number,
+    cellsV: number,
+    color: Color3,
+    alpha: number,
+  ): void {
+    const lines: Vector3[][] = [];
+    const cu = Math.max(2, cellsU);
+    const cv = Math.max(2, cellsV);
+    for (let i = 0; i <= cu; i++) {
+      const a = origin.add(axisU.scale(i / cu));
+      lines.push([a, a.add(axisV)]);
+    }
+    for (let j = 0; j <= cv; j++) {
+      const a = origin.add(axisV.scale(j / cv));
+      lines.push([a, a.add(axisU)]);
+    }
+    const g = MeshBuilder.CreateLineSystem(name, { lines }, this.scene);
+    g.color = color;
+    g.alpha = alpha;
+    g.isPickable = false;
+    this.fieldMeshes.push(g);
+  }
+
+  private buildMarkings(variant: SoccerVariant): void {
+    const F = activeSoccerField();
+    const scene = this.scene;
+    const lineMat = new StandardMaterial('soccerLineMat', scene);
+    lineMat.emissiveColor = hex(0xd2d8d0);
+    lineMat.disableLighting = true;
+    lineMat.alpha = 0.9;
+    const strip = (name: string, w: number, d: number, x: number, z: number): void => {
+      const m = MeshBuilder.CreateGround(name, { width: w, height: d }, scene);
+      m.position.set(x, 0.045, z);
+      m.material = lineMat;
+      m.isPickable = false;
+      this.fieldMeshes.push(m);
+    };
+    const t = 0.08;
+    const width = F.halfX * 2 - 0.7;
+    const length = F.halfZ * 2 - 0.7;
+    strip('soccerLineN', width, t, 0, -length / 2);
+    strip('soccerLineS', width, t, 0, length / 2);
+    strip('soccerLineW', t, length, -width / 2, 0);
+    strip('soccerLineE', t, length, width / 2, 0);
+    strip('soccerMidLine', width, variant === 'match' ? 0.1 : 0.12, 0, 0);
+
+    const spot = MeshBuilder.CreateCylinder(
+      'soccerCenterSpot',
+      { diameter: 0.36, height: 0.01, tessellation: 20 },
+      scene,
+    );
+    spot.position.set(0, 0.05, 0);
+    spot.material = lineMat;
+    spot.isPickable = false;
+    this.fieldMeshes.push(spot);
+
+    const circle = MeshBuilder.CreateTorus(
+      'soccerCenterCircle',
+      { diameter: 2.4, thickness: 0.08, tessellation: 40 },
+      scene,
+    );
+    circle.scaling.y = 0.06;
+    circle.position.y = 0.05;
+    circle.material = lineMat;
+    circle.isPickable = false;
+    this.fieldMeshes.push(circle);
+
     if (variant === 'match') {
-      // 多人：黃色發光中線 + 半場淡隊色（藍 -z 半場、紅 +z 半場 — 與 server 站位一致）
-      midMat.emissiveColor = hex(0xffe066);
-      midMat.disableLighting = true;
-      midMat.alpha = 0.9;
       (
         [
           ['blue', -1],
@@ -175,81 +629,14 @@ export class SoccerFieldVisuals {
         const hm = new StandardMaterial(`soccerHalfMat-${team}`, scene);
         hm.emissiveColor = hex(SOCCER_TEAM_COLORS[team]);
         hm.disableLighting = true;
-        hm.alpha = 0.08;
+        hm.alpha = 0.06;
         half.material = hm;
         half.isPickable = false;
         this.fieldMeshes.push(half);
       });
-    } else {
-      midMat.emissiveColor = Color3.White();
-      midMat.disableLighting = true;
-      midMat.alpha = 0.6;
     }
-    const mid = MeshBuilder.CreateGround(
-      'soccerMidLine',
-      { width: F.halfX * 2, height: variant === 'match' ? 0.12 : 0.3 },
-      scene,
-    );
-    mid.position.set(0, 0.05, 0);
-    mid.material = midMat;
-    mid.isPickable = false;
-    this.fieldMeshes.push(mid);
-
-    // ---- 中心點（中線正中央的圓點）----
-    const spot = MeshBuilder.CreateCylinder(
-      'soccerCenterSpot',
-      { diameter: 0.7, height: 0.02, tessellation: 24 },
-      scene,
-    );
-    spot.position.set(0, 0.06, 0);
-    const spotMat = new StandardMaterial('soccerCenterSpotMat', scene);
-    spotMat.emissiveColor = hex(0xffe066);
-    spotMat.disableLighting = true;
-    spot.material = spotMat;
-    spot.isPickable = false;
-    this.fieldMeshes.push(spot);
-
-    // ---- 起飛區：底線中段、寬約 1m 的窄帶，兩隊各一 ----
-    // 多人：藍守 -z、紅守 +z。單人練習鏡頭在 +z，近端藍、遠端紅。
-    if (variant === 'match') {
-      this.buildStartZone(-1, SOCCER_TEAM_COLORS.blue);
-      this.buildStartZone(1, SOCCER_TEAM_COLORS.red);
-    } else {
-      this.buildStartZone(1, SOCCER_TEAM_COLORS.blue);
-      this.buildStartZone(-1, SOCCER_TEAM_COLORS.red);
-    }
-
-    // ---- 兩端 torus 球門 ----
-    // 單人：遠端（-z）紅 = 攻、近端（+z）藍 = 守。
-    // 多人：球門環用「該端守方」隊色 — 藍守 -z、紅守 +z（與 server SOCCER_TEAMS 對齊）。
-    const farColor = variant === 'match' ? SOCCER_TEAM_COLORS.blue : SOCCER_TEAM_COLORS.red;
-    const nearColor = variant === 'match' ? SOCCER_TEAM_COLORS.red : SOCCER_TEAM_COLORS.blue;
-    this.goalMeshes = [this.makeGoalRing(-F.goalZ, farColor), this.makeGoalRing(F.goalZ, nearColor)];
-    this.fieldMeshes.push(...this.goalMeshes);
-
-    // ---- 門框實心（網格碰撞）→ 只能從中間的洞穿過，撞到框會被擋 ----
-    void this.registerGoalCollision(gen);
-
-    // ---- 機體外的球形保護框（像真實無人機足球的球；每 tick 貼齊飛機，不受飛機縮放影響）----
-    this.ballCage = MeshBuilder.CreateIcoSphere(
-      'soccerBallCage',
-      { radius: SOCCER_BALL_R, subdivisions: 1 },
-      scene,
-    );
-    const cageMat = new StandardMaterial('soccerBallCageMat', scene);
-    cageMat.emissiveColor = Color3.White();
-    cageMat.disableLighting = true;
-    cageMat.wireframe = true;
-    cageMat.alpha = variant === 'match' ? 0.28 : 0.4;
-    this.ballCage.material = cageMat;
-    this.ballCage.isPickable = false;
-    this.ballCage.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
   }
 
-  /**
-   * 起飛區：貼底線內側的窄帶（寬 SOCCER_START_WIDTH、進深 SOCCER_START_DEPTH）。
-   * sign = 底線的 z 符號（+1 貼 +z 底線）。
-   */
   private buildStartZone(sign: number, color: number): void {
     const F = activeSoccerField();
     const w = SOCCER_START_WIDTH;
@@ -260,7 +647,7 @@ export class SoccerFieldVisuals {
     const mat = new StandardMaterial(`soccerStartMat-${centerZ}`, this.scene);
     mat.emissiveColor = hex(color);
     mat.disableLighting = true;
-    mat.alpha = 0.16;
+    mat.alpha = 0.22;
     fill.material = mat;
     fill.isPickable = false;
     this.fieldMeshes.push(fill);
@@ -287,9 +674,8 @@ export class SoccerFieldVisuals {
   }
 
   /**
-   * 球門環：torus 孔朝 z → 沿長軸穿過（Babylon torus 預設孔朝 y，轉 90°）。
-   * goalR 是內半徑（穿環判定），goalTube 是管半徑；環心直徑要加上管半徑，
-   * 洞才會是內徑 70cm、外徑 110cm、厚度 20cm。
+   * 圓環本體維持階段一尺寸（洞 70cm、管厚 20cm），材質改成軟墊發光。
+   * 這顆 mesh 會烤進碰撞，幾何不要改。
    */
   private makeGoalRing(z: number, color: number): Mesh {
     const F = activeSoccerField();
@@ -305,14 +691,49 @@ export class SoccerFieldVisuals {
     ring.rotation.x = Math.PI / 2;
     ring.position.set(0, F.goalY, z);
     const mat = new StandardMaterial(`soccerGoalMat-${z}`, this.scene);
-    mat.diffuseColor = hex(color);
-    mat.emissiveColor = hex(color).scale(0.45);
-    mat.specularColor = new Color3(0.6, 0.6, 0.6);
+    const c = hex(color);
+    mat.diffuseColor = c;
+    mat.emissiveColor = c.scale(0.92);
+    mat.specularColor = new Color3(0.5, 0.5, 0.5);
     ring.material = mat;
+    ring.receiveShadows = true;
+    this.cast(ring);
+    this.goals.push({ z, color, mat, baseEmissive: c.scale(0.92) });
     return ring;
   }
 
-  /** 門框碰撞：Havok WASM lazy 載入 → torus 烤三角網格註冊（失敗降級 = 門框可穿，其餘照常） */
+  /** 從天花板垂兩條吊帶，不進碰撞網格 */
+  private hangGoal(z: number): void {
+    const F = activeSoccerField();
+    const scene = this.scene;
+    const strapMat = new StandardMaterial(`soccerStrapMat-${z}`, scene);
+    strapMat.diffuseColor = hex(0x6a7c90);
+    strapMat.specularColor = new Color3(0.28, 0.3, 0.34);
+    strapMat.emissiveColor = hex(0x4a5c6e).scale(0.25);
+    const top = F.goalY + F.goalR + F.goalTube * 2;
+    const drop = F.top - 0.05 - top;
+    for (const x of [-0.28, 0.28]) {
+      const strap = MeshBuilder.CreateCylinder(
+        `soccerStrap-${z}-${x}`,
+        { diameter: 0.025, height: Math.max(0.2, drop), tessellation: 8 },
+        scene,
+      );
+      strap.position.set(x, top + drop / 2, z);
+      strap.material = strapMat;
+      strap.isPickable = false;
+      this.fieldMeshes.push(strap);
+    }
+    const bar = MeshBuilder.CreateBox(
+      `soccerStrapBar-${z}`,
+      { width: 0.7, height: 0.04, depth: 0.08 },
+      scene,
+    );
+    bar.position.set(0, F.top - 0.06, z);
+    bar.material = strapMat;
+    bar.isPickable = false;
+    this.fieldMeshes.push(bar);
+  }
+
   private async registerGoalCollision(gen: number): Promise<void> {
     try {
       await this.backend.init();
@@ -321,15 +742,14 @@ export class SoccerFieldVisuals {
       toast('⚠ 碰撞引擎載入失敗 — 門框暫時可穿過', 'warning');
       return;
     }
-    if (gen !== this.generation || !this.active) return; // 載入期間已離場 → 作廢
+    if (gen !== this.generation || !this.active) return;
     const soup = bakeTriangleSoup(this.goalMeshes);
     if (!soup) return;
     this.backend.addStaticMesh('soccer-goals', soup.positions, soup.indices);
-    setMeshCollisionBackend(this.backend, SOCCER_BALL_R); // 碰撞半徑 = 球形保護框
+    setMeshCollisionBackend(this.backend, SOCCER_BALL_R);
     this.collisionReady = true;
   }
 
-  /** P-5 防守假人（紫色方塊；碰撞 AABB 由 practice.ts setSolidObstacles 註冊） */
   private buildDummies(boxes: { x: number; y: number; z: number; half: number }[]): void {
     this.dummyMeshes.forEach((m) => m.dispose(false, true));
     this.dummyMeshes = boxes.map((b, i) => {
@@ -346,50 +766,161 @@ export class SoccerFieldVisuals {
   }
 
   // ---------------------------------------------------------------------------
-  // 每個物理 tick（main.ts 在足球模式時呼叫）
+  // 每 tick／每幀
   // ---------------------------------------------------------------------------
   tick(): void {
     if (!this.active) return;
-    const now = performance.now();
-    // 球形保護框貼齊自機
-    this.ballCage?.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
+    this.outdoorSweep++;
+    if (this.outdoorSweep % 20 === 1) this.hideOutdoorMeshes();
+    this.holdPreviewPose();
+    this.stepSparks();
+    this.stepGoalFlash();
+    this.syncBroadcast();
+    if (this.preview && (this.preview === '1' || this.preview === 'goal')) {
+      this.previewBurstTick++;
+      if (this.previewBurstTick === 25 || this.previewBurstTick % 140 === 0) this.burstGoal();
+    }
 
-    if (!soccerState.active) return; // 以下為多人分身 / 共用球視覺
+    if (!soccerState.active) return;
     this.syncClones();
     this.syncSharedBall();
-    // 前鋒彩帶只在 striker 玩法顯示（ball 模式誰都能得分 → 沒有前鋒識別）
-    const ribbonsOn = soccerState.mode === 'striker';
     for (const [id, c] of this.clones) {
       const o = soccerState.others.get(id);
       if (!o) continue;
-      // 位置：直接取邏輯層內插後的 o.pos（機對機碰撞與視覺共用同一份 → 不會「看起來沒撞到」）
-      if (o.hasPos) {
-        c.root.position.set(o.pos.x, o.pos.y, o.pos.z);
-        c.root.rotation.y = o.pos.yaw;
-      }
-      // 隊色 / 彩帶（前鋒 × 玩法）變動 → 重套外觀
-      const wantRibbon = ribbonsOn && o.striker;
-      if (c.appliedTeam !== o.team || c.appliedRibbon !== wantRibbon) {
+      if (o.hasPos) c.model.pose(o.pos.x, o.pos.y, o.pos.z, o.pos.yaw, 0, 0, droneState.propellerRotation);
+      const striker = soccerState.mode === 'striker' && o.striker;
+      if (c.appliedTeam !== o.team || c.appliedStriker !== striker) {
         c.appliedTeam = o.team;
-        c.appliedRibbon = wantRibbon;
-        const col = hex(soccerTeamColorHex(o.team));
-        c.bodyMat.diffuseColor = col;
-        c.bodyMat.emissiveColor = col.scale(0.3);
-        c.ribbon.setEnabled(wantRibbon);
-      }
-      // 前鋒彩帶輕微擺動
-      if (c.appliedRibbon) {
-        c.ribbon.rotation.z = Math.sin(now * 0.005 + c.root.position.x) * RIBBON_SWING;
+        c.appliedStriker = striker;
+        const team = o.team === 'red' || o.team === 'blue' ? o.team : null;
+        c.model.setGuardColor(soccerGuardColor(team, striker));
       }
     }
-    this.updateMyRibbon(now);
   }
 
-  /**
-   * 推球模式的共用球：亮黃 emissive 球體（學生好追）＋黑色接縫線，位置取邏輯層
-   * 60Hz 內插後的 soccerState.ball.pos；本機貼近球時微發亮（純視覺回饋，物理在伺服器）。
-   * lazy 建立 / 半徑變更重建 / 非 ball 模式自動清除。
-   */
+  /** 插值後的自機姿態（主迴圈在渲染前呼叫） */
+  present(x: number, y: number, z: number, yaw: number, visible: boolean): void {
+    if (!this.active || !this.myDrone) return;
+    const pitch = -(droneState.attitudePitch ?? 0);
+    const roll = -(droneState.attitudeRoll ?? 0);
+    this.myDrone.pose(x, y, z, yaw, pitch, roll, droneState.propellerRotation);
+    this.myDrone.setEnabled(visible);
+  }
+
+  private holdPreviewPose(): void {
+    if (!this.preview || this.previewHeld) return;
+    this.previewHeld = true;
+    droneState.position.x = 0.35;
+    droneState.position.y = 1.65;
+    droneState.position.z = 0.8;
+    droneState.velocity.x = 0;
+    droneState.velocity.y = 0;
+    droneState.velocity.z = 0;
+    droneState.yaw = 0;
+    droneState.isFlying = true;
+    droneState.isGrounded = false;
+  }
+
+  private syncBroadcast(): void {
+    const view = this.broadcastView();
+    this.scoreboard?.update(view);
+    setSoccerFlag(view.flag);
+    setSoccerEndScreen({
+      show: view.ended,
+      title: view.title,
+      detail: view.detail,
+    });
+    if (!this.myDrone) return;
+    if (soccerState.active) {
+      const team = soccerState.myTeam === 'red' || soccerState.myTeam === 'blue' ? soccerState.myTeam : null;
+      const striker = soccerState.mode === 'striker' && soccerState.myStriker;
+      this.myDrone.setGuardColor(soccerGuardColor(team, striker));
+    } else {
+      this.myDrone.setGuardColor(soccerGuardColor('blue', true));
+    }
+  }
+
+  private broadcastView(): BroadcastView {
+    if (this.preview === 'end') {
+      return readBroadcast({
+        status: 'done',
+        mode: 'striker',
+        scores: { blue: 3, red: 2 },
+        sets: { blue: 2, red: 1 },
+        period: 3,
+        endTime: 0,
+        now: 0,
+        myTeam: 'blue',
+        myStriker: true,
+        needReturn: false,
+      });
+    }
+    if (this.preview) {
+      return readBroadcast({
+        status: 'running',
+        mode: 'striker',
+        scores: { blue: 2, red: 1 },
+        sets: { blue: 1, red: 0 },
+        period: 2,
+        endTime: Date.now() + 95_000,
+        now: Date.now(),
+        myTeam: 'blue',
+        myStriker: true,
+        needReturn: this.preview === 'return',
+      });
+    }
+    if (soccerState.active) {
+      const team = soccerState.myTeam;
+      return readBroadcast({
+        status: soccerState.status,
+        mode: soccerState.mode,
+        scores: soccerState.scores,
+        sets: soccerState.sets,
+        period: soccerState.period,
+        endTime: soccerState.endTime,
+        now: Date.now(),
+        myTeam: team,
+        myStriker: soccerState.myStriker,
+        needReturn: !!team && soccerState.armed[team] === false,
+        pkScores: soccerState.pkScores,
+      });
+    }
+    const drill = practiceState.drill;
+    const elapsed = practiceState.startTime ? (Date.now() - practiceState.startTime) / 1000 : 0;
+    return readPracticeBroadcast({
+      running: practiceState.status === 'running',
+      goals: practiceState.count,
+      elapsedSec: elapsed,
+      needReturn: drill?.type === 'shuttle' && !practiceState.shuttleReturned && practiceState.count > 0,
+      scoredDrill: drill?.type === 'pass' || drill?.type === 'shuttle',
+    });
+  }
+
+  private syncClones(): void {
+    for (const [id, o] of soccerState.others) {
+      if (!this.clones.has(id)) this.clones.set(id, this.makeClone(id, o));
+    }
+    for (const [id, c] of this.clones) {
+      if (!soccerState.others.has(id)) {
+        c.model.dispose();
+        this.clones.delete(id);
+      }
+    }
+  }
+
+  private makeClone(id: string, o: SoccerOther): SoccerCloneVisual {
+    const team = o.team === 'red' || o.team === 'blue' ? o.team : null;
+    const striker = soccerState.mode === 'striker' && o.striker;
+    const model = createSoccerDrone(this.scene, id, SOCCER_BALL_R, this.shadows);
+    model.setGuardColor(soccerGuardColor(team, striker));
+    const label = makeNameLabel(this.scene, `${o.emoji || ''}${o.name || '?'}`);
+    label.scaling.setAll(0.22);
+    label.position.y = CLONE_LABEL_Y;
+    label.parent = model.root;
+    if (o.hasPos) model.pose(o.pos.x, o.pos.y, o.pos.z, o.pos.yaw, 0, 0, 0);
+    return { root: model.root, model, appliedTeam: o.team, appliedStriker: striker };
+  }
+
   private syncSharedBall(): void {
     const b = soccerState.ball;
     const want = soccerState.mode === 'ball' && !!b && b.hasPos;
@@ -402,7 +933,8 @@ export class SoccerFieldVisuals {
       }
       return;
     }
-    const ball = b!;
+    const ball = b;
+    if (!ball) return;
     if (!this.sharedBall || this.sharedBallR !== ball.r) {
       this.sharedBall?.dispose(false, true);
       this.sharedBallR = ball.r;
@@ -412,12 +944,11 @@ export class SoccerFieldVisuals {
         this.scene,
       );
       const mat = new StandardMaterial('soccerSharedBallMat', this.scene);
-      mat.diffuseColor = hex(BALL_COLOR);
-      mat.emissiveColor = hex(BALL_COLOR).scale(BALL_GLOW_IDLE);
+      mat.diffuseColor = hex(0xffd60a);
+      mat.emissiveColor = hex(0xffd60a).scale(0.42);
       mat.specularColor = new Color3(0.3, 0.3, 0.3);
       mesh.material = mat;
       mesh.isPickable = false;
-      // 黑色接縫線（icosphere 線框）→ 滾動 / 位移看得出來，像顆足球
       const seams = MeshBuilder.CreateIcoSphere(
         'soccerSharedBallSeams',
         { radius: ball.r * 1.002, subdivisions: 1 },
@@ -432,108 +963,229 @@ export class SoccerFieldVisuals {
       seams.parent = mesh;
       this.sharedBall = mesh;
       this.sharedBallMat = mat;
-      this.sharedBallGlow = BALL_GLOW_IDLE;
+      this.sharedBallGlow = 0.42;
     }
     this.sharedBall.position.set(ball.pos.x, ball.pos.y, ball.pos.z);
-    // 貼近球 → 微發亮（有變才寫材質）
-    const glow = soccerState.ballNear ? BALL_GLOW_NEAR : BALL_GLOW_IDLE;
+    const glow = soccerState.ballNear ? 0.95 : 0.42;
     if (glow !== this.sharedBallGlow && this.sharedBallMat) {
       this.sharedBallGlow = glow;
-      this.sharedBallMat.emissiveColor = hex(BALL_COLOR).scale(glow);
+      this.sharedBallMat.emissiveColor = hex(0xffd60a).scale(glow);
     }
   }
 
-  /** 自己是前鋒（striker 玩法限定）→ 機體上方掛彩帶（跟著自機位置 / 朝向） */
-  private updateMyRibbon(now: number): void {
-    if (soccerState.myStriker && soccerState.mode === 'striker') {
-      if (!this.myRibbon) {
-        this.myRibbon = makeStrikerRibbon(this.scene, 'me');
-        this.myRibbon.scaling.setAll(RIBBON_SCALE);
+  private burstGoal(): void {
+    const F = activeSoccerField();
+    const z = this.pickGoalZ();
+    const goal = this.goals.find((g) => g.z === z) ?? this.goals[0];
+    const color = goal?.color ?? 0xffe08a;
+    this.spawnBurst(0, F.goalY, z, color, 28, 0.08);
+    this.goalFlashZ = z;
+    this.goalFlashUntil = performance.now() + 700;
+  }
+
+  private burstHit(): void {
+    const p = droneState.position;
+    this.spawnBurst(p.x, p.y, p.z, 0xffe08a, 14, 0.05);
+  }
+
+  private pickGoalZ(): number {
+    const F = activeSoccerField();
+    if (this.preview) return F.goalZ;
+    const nearPos = Math.abs(droneState.position.z - F.goalZ);
+    const nearNeg = Math.abs(droneState.position.z + F.goalZ);
+    return nearPos <= nearNeg ? F.goalZ : -F.goalZ;
+  }
+
+  private spawnBurst(x: number, y: number, z: number, color: number, count: number, speed: number): void {
+    while (this.sparks.length > 70) {
+      const old = this.sparks.shift();
+      old?.mesh.dispose(false, true);
+    }
+    for (let i = 0; i < count; i++) {
+      const mesh = MeshBuilder.CreateBox(
+        `soccerSpark-${this.generation}-${this.sparks.length}-${i}`,
+        { size: 0.05 + Math.random() * 0.04 },
+        this.scene,
+      );
+      mesh.position.set(x, y, z);
+      mesh.isPickable = false;
+      const mat = new StandardMaterial(`soccerSparkMat-${mesh.name}`, this.scene);
+      mat.emissiveColor = hex(color);
+      mat.disableLighting = true;
+      mesh.material = mat;
+      const a = Math.random() * Math.PI * 2;
+      const b = Math.random() * Math.PI;
+      const sp = speed * (0.45 + Math.random());
+      this.sparks.push({
+        mesh,
+        vx: Math.sin(b) * Math.cos(a) * sp,
+        vy: Math.abs(Math.cos(b)) * sp,
+        vz: Math.sin(b) * Math.sin(a) * sp,
+        life: 1,
+      });
+    }
+  }
+
+  private stepSparks(): void {
+    for (let i = this.sparks.length - 1; i >= 0; i--) {
+      const s = this.sparks[i];
+      if (!s) continue;
+      s.life -= 0.045;
+      s.mesh.position.x += s.vx;
+      s.mesh.position.y += s.vy;
+      s.mesh.position.z += s.vz;
+      s.vy -= 0.003;
+      const mat = s.mesh.material as StandardMaterial | null;
+      if (mat) mat.alpha = Math.max(0, s.life);
+      if (s.life <= 0) {
+        s.mesh.dispose(false, true);
+        this.sparks.splice(i, 1);
       }
-      this.myRibbon.setEnabled(true);
-      this.myRibbon.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
-      this.myRibbon.rotation.y = droneState.yaw;
-      this.myRibbon.rotation.z = Math.sin(now * 0.005) * RIBBON_SWING;
-    } else {
-      this.myRibbon?.setEnabled(false);
     }
   }
 
-  /** 依 soccerState.others 差集建立 / 移除分身 */
-  private syncClones(): void {
-    for (const [id, o] of soccerState.others) {
-      if (!this.clones.has(id)) this.clones.set(id, this.makeClone(id, o));
+  private stepGoalFlash(): void {
+    const flashing = performance.now() < this.goalFlashUntil;
+    for (const g of this.goals) {
+      const hot = flashing && g.z === this.goalFlashZ;
+      g.mat.emissiveColor = hot ? hex(g.color) : g.baseEmissive;
     }
-    for (const [id, c] of this.clones) {
-      if (!soccerState.others.has(id)) {
-        c.root.dispose(false, true);
-        this.clones.delete(id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 室內／戶外切換
+  // ---------------------------------------------------------------------------
+  private enterIndoor(): void {
+    const sun = this.scene.getLightByName('sun') as DirectionalLight | null;
+    const hemi = this.scene.getLightByName('hemi') as HemisphericLight | null;
+    if (!this.savedOutdoor && sun && hemi) {
+      this.savedOutdoor = {
+        clear: this.scene.clearColor.clone(),
+        fogDensity: this.scene.fogDensity,
+        fogColor: this.scene.fogColor.clone(),
+        sunPos: sun.position.clone(),
+        sunDir: sun.direction.clone(),
+        sunInt: sun.intensity,
+        hemiInt: hemi.intensity,
+        hemiDiffuse: hemi.diffuse.clone(),
+        hemiGround: hemi.groundColor.clone(),
+        darkness: this.shadows?.darkness ?? 0,
+      };
+    }
+    this.scene.clearColor = new Color4(0.07, 0.09, 0.12, 1);
+    this.scene.fogMode = Scene.FOGMODE_EXP2;
+    this.scene.fogDensity = 0.012;
+    this.scene.fogColor = hex(0x2a3544);
+    if (sun) {
+      sun.direction = new Vector3(0.42, -1, 0.22);
+      sun.position = new Vector3(-2.4, 8, 1.4);
+      sun.intensity = 0.82;
+    }
+    if (hemi) {
+      hemi.intensity = 0.36;
+      hemi.diffuse = hex(0xc5d0dc);
+      hemi.groundColor = hex(0x163024);
+    }
+    if (this.shadows) this.shadows.darkness = 0.62;
+    this.hideOutdoorMeshes();
+  }
+
+  private leaveIndoor(): void {
+    const saved = this.savedOutdoor;
+    if (!saved) return;
+    const sun = this.scene.getLightByName('sun') as DirectionalLight | null;
+    const hemi = this.scene.getLightByName('hemi') as HemisphericLight | null;
+    this.scene.clearColor = saved.clear;
+    this.scene.fogDensity = saved.fogDensity;
+    this.scene.fogColor = saved.fogColor;
+    if (sun) {
+      sun.position.copyFrom(saved.sunPos);
+      sun.direction.copyFrom(saved.sunDir);
+      sun.intensity = saved.sunInt;
+    }
+    if (hemi) {
+      hemi.intensity = saved.hemiInt;
+      hemi.diffuse = saved.hemiDiffuse;
+      hemi.groundColor = saved.hemiGround;
+    }
+    if (this.shadows) this.shadows.darkness = saved.darkness;
+    for (const h of this.hiddenOutdoor) {
+      if (!h.mesh.isDisposed()) h.mesh.setEnabled(h.was);
+    }
+    this.hiddenOutdoor = [];
+    this.savedOutdoor = null;
+  }
+
+  private hideOutdoorMeshes(): void {
+    for (const mesh of this.scene.meshes) {
+      if (!this.isOutdoorMesh(mesh)) continue;
+      if (this.hiddenOutdoor.some((h) => h.mesh === mesh)) {
+        mesh.setEnabled(false);
+        continue;
       }
+      this.hiddenOutdoor.push({ mesh, was: mesh.isEnabled() });
+      mesh.setEnabled(false);
     }
   }
 
-  /** 他人分身：簡化無人機外型（makeCloneDrone 共用工廠，隊色）+ 名牌 + 前鋒彩帶 */
-  private makeClone(id: string, o: SoccerOther): SoccerCloneVisual {
-    const scene = this.scene;
-    const col = hex(soccerTeamColorHex(o.team));
-    // 尺寸對齊縮小後的自機（約 20cm 級）→ 與 70cm 圓環同比例
-    const { root, bodyMat } = makeCloneDrone(scene, `soccer-${id}`, col, CLONE_SCALE);
-    bodyMat.emissiveColor = col.scale(0.3); // 隊色亮一點（與舊盒身相同）
+  private isOutdoorMesh(mesh: AbstractMesh): boolean {
+    const n = mesh.name.toLowerCase();
+    if (n.startsWith('soccer')) return false;
+    if (n.startsWith('cloud')) return true;
+    if (n.includes('sky')) return true;
+    if (mesh.infiniteDistance) return true;
+    if (n === 'groundshadow' || n === 'trail') return true;
+    return false;
+  }
 
-    const label = makeNameLabel(scene, `${o.emoji || ''}${o.name || '?'}`);
-    label.position.y = CLONE_LABEL_Y;
-    label.parent = root;
-
-    const ribbon = makeStrikerRibbon(scene, id);
-    ribbon.scaling.setAll(RIBBON_SCALE);
-    ribbon.parent = root;
-    const wantRibbon = soccerState.mode === 'striker' && o.striker; // ball 模式不顯示彩帶
-    ribbon.setEnabled(wantRibbon);
-
-    if (o.hasPos) {
-      root.position.set(o.pos.x, o.pos.y, o.pos.z);
-      root.rotation.y = o.pos.yaw;
-    }
-    return { root, bodyMat, ribbon, appliedTeam: o.team, appliedRibbon: wantRibbon };
+  private cast(mesh: Mesh): void {
+    this.shadows?.addShadowCaster(mesh);
+    this.casters.push(mesh);
   }
 
   // ---------------------------------------------------------------------------
   // 清理
   // ---------------------------------------------------------------------------
   private disposeAll(): void {
-    if (!this.active && this.fieldMeshes.length === 0) return;
+    if (!this.active && this.fieldMeshes.length === 0 && !this.myDrone) return;
     this.active = false;
     this.generation++;
-    // 門框碰撞卸下（backend 是共用單例，只移自己的靜態體）
     this.backend.removeStatic('soccer-goals');
     setMeshCollisionBackend(null, DRONE_RADIUS);
     this.collisionReady = false;
+    setSoccerArenaAudio(false);
+    setSoccerFlag('');
+    setSoccerEndScreen({ show: false, title: '', detail: '' });
 
+    for (const mesh of this.casters) this.shadows?.removeShadowCaster(mesh);
+    this.casters = [];
     this.fieldMeshes.forEach((m) => m.dispose(false, true));
     this.fieldMeshes = [];
     this.goalMeshes = [];
+    this.goals = [];
     this.dummyMeshes.forEach((m) => m.dispose(false, true));
     this.dummyMeshes = [];
-    this.ballCage?.dispose(false, true);
-    this.ballCage = null;
+    this.myDrone?.dispose();
+    this.myDrone = null;
+    this.scoreboard?.dispose();
+    this.scoreboard = null;
+    for (const light of this.lights) light.dispose();
+    this.lights = [];
+    for (const s of this.sparks) s.mesh.dispose(false, true);
+    this.sparks = [];
     this.sharedBall?.dispose(false, true);
     this.sharedBall = null;
     this.sharedBallMat = null;
     this.sharedBallR = 0;
-    for (const c of this.clones.values()) c.root.dispose(false, true);
+    for (const c of this.clones.values()) c.model.dispose();
     this.clones.clear();
-    this.myRibbon?.dispose(false, true);
-    this.myRibbon = null;
 
-    this.drone.setScaleFactor(1); // 還原飛機大小
+    this.drone.setForceHidden(false);
+    this.drone.setScaleFactor(1);
     this.setDefaultGroundVisible(true);
+    this.leaveIndoor();
   }
 
-  /**
-   * 足球場地與預設地面物件互斥（對齊 legacy：ground / grid 跟著切）。
-   * 起飛台（黃色圓盤）與起點白圈也一併隱藏 — 它們卡在中場，推球模式的共用球是亮黃色，
-   * 留著會跟球混淆。
-   */
   private setDefaultGroundVisible(on: boolean): void {
     for (const name of ['ground', 'grid', 'pad', 'startMarker']) {
       const m = this.scene.getMeshByName(name);
@@ -544,32 +1196,4 @@ export class SoccerFieldVisuals {
       levelFloor.isVisible = on && levelFloor.metadata?.hasFloor === true;
     }
   }
-}
-
-/** 前鋒識別彩帶：機體上方一條醒目亮黃飄帶（不做布料物理，tick 內輕微擺動） */
-function makeStrikerRibbon(scene: Scene, id: string): TransformNode {
-  const g = new TransformNode(`strikerRibbon-${id}`, scene);
-  const bandMat = new StandardMaterial(`strikerRibbonMat-${id}`, scene);
-  bandMat.emissiveColor = hex(0xffe066);
-  bandMat.disableLighting = true;
-  bandMat.alpha = 0.95;
-  bandMat.backFaceCulling = false;
-  const band = MeshBuilder.CreatePlane(`strikerBand-${id}`, { width: 0.14, height: 0.9 }, scene);
-  band.position.y = 0.6;
-  band.material = bandMat;
-  band.isPickable = false;
-  band.parent = g;
-  const tipMat = new StandardMaterial(`strikerTipMat-${id}`, scene);
-  tipMat.emissiveColor = hex(0xffd000);
-  tipMat.disableLighting = true;
-  const tip = MeshBuilder.CreateCylinder(
-    `strikerTip-${id}`,
-    { height: 0.18, diameterTop: 0, diameterBottom: 0.2, tessellation: 4 },
-    scene,
-  );
-  tip.position.y = 1.06;
-  tip.material = tipMat;
-  tip.isPickable = false;
-  tip.parent = g;
-  return g;
 }
