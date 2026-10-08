@@ -249,28 +249,26 @@ export function openLevelEditor(
               <button type="button" class="btn btn-ghost btn-xs le-view" data-view="side" role="tab">側視</button>
             </div>
             <span class="mono" id="le-cursor">X 0 · Z 0</span>
-            <button type="button" class="btn btn-ghost btn-xs le-inspector-toggle" id="le-inspector-toggle" aria-pressed="false" disabled>細節</button>
             <span class="note le-canvas-hint">↑ 前方為 -Z · 拖曳移動 · 方向鍵微調 · Del 刪除</span>
+            <p class="note lvl-legend">
+              <span class="le-legend-ring">○ 圈</span>
+              <span class="le-legend-solid">■ 實心</span>
+              <span class="le-legend-soft">■ 標記</span>
+              <span class="le-legend-balloon">● 氣球</span>
+              <span class="le-legend-zone">▢ 任務</span>
+            </p>
           </div>
           <div class="le-canvas-frame">
             <div class="le-canvas-box" id="le-canvas-box">
               <canvas id="le-canvas" width="${CANVAS_PX}" height="${CANVAS_PX}" aria-label="關卡編輯器"></canvas>
             </div>
           </div>
-          <p class="note lvl-legend">
-            <span class="le-legend-ring">○ 圈</span>
-            <span class="le-legend-solid">■ 實心</span>
-            <span class="le-legend-soft">■ 標記</span>
-            <span class="le-legend-balloon">● 氣球</span>
-            <span class="le-legend-zone">▢ 任務</span>
-          </p>
         </main>
-        <aside class="lvl-studio-inspector" id="le-inspector" hidden>
-          <div class="lvl-inspector-head">
-            <h3 class="lvl-inspector-title">細節</h3>
-            <button type="button" class="btn btn-ghost btn-xs" id="le-inspector-hide">隱藏</button>
-          </div>
+        <aside class="lvl-studio-inspector" id="le-inspector">
+          <h3 class="lvl-inspector-title">細節</h3>
           <div id="le-inspector-idle">
+            <p class="le-inspector-prompt">尚未選取物件</p>
+            <p class="note">在地圖上點選穿圈、障礙、氣球或任務點，即可在這裡調整。</p>
             <dl class="le-inspector-readout">
               <div><dt>游標 X</dt><dd class="mono" id="le-readout-x">0</dd></div>
               <div><dt>游標 Z</dt><dd class="mono" id="le-readout-z">0</dd></div>
@@ -305,7 +303,6 @@ export function openLevelEditor(
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let dirty = false;
   let syncingProps = false;
-  let inspectorOpen = false;
   let floorImg: HTMLImageElement | null = null;
   let resizeObserver: ResizeObserver | null = null;
   const prevBodyOverflow = document.body.style.overflow;
@@ -324,19 +321,30 @@ export function openLevelEditor(
     return Math.max(0, Math.min(EDITOR_MAX_Y, Math.round(raw * 2) / 2));
   };
 
+  /** 俯視／2.5D 用正方形場地，置中鋪在滿版畫布上，圓不會被拉成橢圓。 */
+  const fieldFrame = (w: number, h: number): { ox: number; oy: number; size: number } => {
+    const size = Math.max(1, Math.min(w, h));
+    return { ox: (w - size) / 2, oy: (h - size) / 2, size };
+  };
+
   const project = (x: number, z: number, y = 0): [number, number] => {
     const w = canvas.width;
     const h = canvas.height;
     if (viewMode === 'side') return sideWorldToCanvas(x, y, w, h);
-    if (viewMode === 'iso') return isoWorldToCanvas(x, z, y, w, h);
-    return topWorldToCanvas(x, z, w, h);
+    const { ox, oy, size } = fieldFrame(w, h);
+    const [px, py] =
+      viewMode === 'iso'
+        ? isoWorldToCanvas(x, z, y, size, size)
+        : topWorldToCanvas(x, z, size, size);
+    return [px + ox, py + oy];
   };
 
   const unproject = (px: number, py: number, planeY = placeHeightY): { x: number; z: number } => {
     const w = canvas.width;
     const h = canvas.height;
-    if (viewMode === 'iso') return isoCanvasToWorld(px, py, w, h, planeY, snapStep);
-    return topCanvasToWorld(px, py, w, h, snapStep);
+    const { ox, oy, size } = fieldFrame(w, h);
+    if (viewMode === 'iso') return isoCanvasToWorld(px - ox, py - oy, size, size, planeY, snapStep);
+    return topCanvasToWorld(px - ox, py - oy, size, size, snapStep);
   };
 
   const objectPlaneY = (sel: Selection): number => {
@@ -346,8 +354,10 @@ export function openLevelEditor(
     return 0;
   };
 
-  const ringPxRadius = (diam: number): number =>
-    (diam / WORLD) * canvas.width * 0.5 + 2;
+  const ringPxRadius = (diam: number): number => {
+    const { size } = fieldFrame(canvas.width, canvas.height);
+    return (diam / WORLD) * size * 0.5 + 2;
+  };
 
   const syncPlaceHeightReadout = (): void => {
     q<HTMLElement>('#le-readout-place-y').textContent = `${placeHeightY.toFixed(1)} m`;
@@ -381,15 +391,18 @@ export function openLevelEditor(
     }
   };
 
-  const drawIsoStem = (x: number, z: number, y: number, w: number, h: number): void => {
+  const drawIsoStem = (x: number, z: number, y: number): void => {
     if (y <= 0.05) return;
-    const [gx, gy] = isoGroundToCanvas(x, z, w, h);
-    const [ox, oy] = project(x, z, y);
+    const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
+    const [gx0, gy0] = isoGroundToCanvas(x, z, size, size);
+    const gx = gx0 + ox;
+    const gy = gy0 + oy;
+    const [tx, ty] = project(x, z, y);
     ctx.strokeStyle = heightHueColor(y, 0.75);
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(gx, gy);
-    ctx.lineTo(ox, oy);
+    ctx.lineTo(tx, ty);
     ctx.stroke();
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
     ctx.beginPath();
@@ -397,9 +410,14 @@ export function openLevelEditor(
     ctx.fill();
   };
 
-  const drawIsoFloor = (w: number, h: number): void => {
+  const drawIsoFloor = (): void => {
+    const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
     const gridStep = snapStep >= 1 ? 5 : 2.5;
-    const { cx, cy } = isoLayout(w, h);
+    const { cx, cy } = isoLayout(size, size);
+    const ground = (x: number, z: number): [number, number] => {
+      const [px, py] = isoGroundToCanvas(x, z, size, size);
+      return [px + ox, py + oy];
+    };
 
     // 場地菱形外框
     const corners: [number, number][] = [
@@ -411,7 +429,7 @@ export function openLevelEditor(
     ctx.fillStyle = 'rgba(30,45,65,0.55)';
     ctx.beginPath();
     corners.forEach(([x, z], i) => {
-      const [px, py] = isoGroundToCanvas(x, z, w, h);
+      const [px, py] = ground(x, z);
       if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     });
@@ -425,14 +443,14 @@ export function openLevelEditor(
     ctx.strokeStyle = 'rgba(255,255,255,0.07)';
     ctx.lineWidth = 1;
     for (let m = -HALF; m <= HALF; m += gridStep) {
-      const [x1, y1] = isoGroundToCanvas(m, -HALF, w, h);
-      const [x2, y2] = isoGroundToCanvas(m, HALF, w, h);
+      const [x1, y1] = ground(m, -HALF);
+      const [x2, y2] = ground(m, HALF);
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
-      const [x3, y3] = isoGroundToCanvas(-HALF, m, w, h);
-      const [x4, y4] = isoGroundToCanvas(HALF, m, w, h);
+      const [x3, y3] = ground(-HALF, m);
+      const [x4, y4] = ground(HALF, m);
       ctx.beginPath();
       ctx.moveTo(x3, y3);
       ctx.lineTo(x4, y4);
@@ -441,8 +459,8 @@ export function openLevelEditor(
 
     // 軸向標示（業界常見：+X 右、-Z 前）
     const drawAxis = (x: number, z: number, label: string, color: string): void => {
-      const [ax, ay] = isoGroundToCanvas(0, 0, w, h);
-      const [bx, by] = isoGroundToCanvas(x, z, w, h);
+      const [ax, ay] = ground(0, 0);
+      const [bx, by] = ground(x, z);
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -458,7 +476,7 @@ export function openLevelEditor(
 
     ctx.fillStyle = 'rgba(148,163,184,0.7)';
     ctx.font = '9px monospace';
-    ctx.fillText('原點', cx - 8, cy + 14);
+    ctx.fillText('原點', cx + ox - 8, cy + oy + 14);
   };
 
   const updateEmptyBanner = (): void => {
@@ -537,20 +555,27 @@ export function openLevelEditor(
     const h = canvas.height;
     ctx.fillStyle = viewMode === 'iso' ? '#152030' : '#1a2332';
     ctx.fillRect(0, 0, w, h);
+    const frame = fieldFrame(w, h);
     if (viewMode === 'top' && floorImg && floorImg.naturalWidth > 0) {
-      ctx.drawImage(floorImg, 0, 0, w, h);
+      ctx.drawImage(floorImg, frame.ox, frame.oy, frame.size, frame.size);
     }
 
     if (viewMode === 'top') {
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 1;
-      for (let m = -15; m <= 15; m += snapStep >= 1 ? 5 : 2.5) {
+      const step = snapStep >= 1 ? 5 : 2.5;
+      const meterX = (px: number) => ((px - frame.ox) / frame.size) * WORLD - HALF;
+      const meterZ = (py: number) => ((py - frame.oy) / frame.size) * WORLD - HALF;
+      const from = (v: number) => Math.floor(v / step) * step;
+      for (let m = from(meterX(0)); m <= meterX(w) + step; m += step) {
         const [gx] = project(m, 0);
-        const [, gz] = project(0, m);
         ctx.beginPath();
         ctx.moveTo(gx, 0);
         ctx.lineTo(gx, h);
         ctx.stroke();
+      }
+      for (let m = from(meterZ(0)); m <= meterZ(h) + step; m += step) {
+        const [, gz] = project(0, m);
         ctx.beginPath();
         ctx.moveTo(0, gz);
         ctx.lineTo(w, gz);
@@ -566,7 +591,7 @@ export function openLevelEditor(
         ctx.fillText(String(m), 4, gz - 2);
       }
     } else if (viewMode === 'iso') {
-      drawIsoFloor(w, h);
+      drawIsoFloor();
     }
 
     type IsoDrawItem = { depth: number; draw: () => void };
@@ -577,9 +602,9 @@ export function openLevelEditor(
     };
 
     if (viewMode === 'iso') {
-      (level.obstacles ?? []).forEach((obs) => drawIsoStem(obs.x, obs.z, obs.y, w, h));
-      (level.balloons ?? []).forEach((b) => drawIsoStem(b.x, b.z, b.y, w, h));
-      (level.rings ?? []).forEach((ring) => drawIsoStem(ring.x, ring.z, ring.y, w, h));
+      (level.obstacles ?? []).forEach((obs) => drawIsoStem(obs.x, obs.z, obs.y));
+      (level.balloons ?? []).forEach((b) => drawIsoStem(b.x, b.z, b.y));
+      (level.rings ?? []).forEach((ring) => drawIsoStem(ring.x, ring.z, ring.y));
     }
 
     const [hx, hz] = project(0, 0, 0);
@@ -613,7 +638,7 @@ export function openLevelEditor(
     (level.obstacles ?? []).forEach((obs, i) => {
       const drawObs = (): void => {
         const [ox, oz] = project(obs.x, obs.z, obs.y);
-        const r = ((obs.size ?? 1) / WORLD) * w * 0.5;
+        const r = ((obs.size ?? 1) / WORLD) * frame.size * 0.5;
         const sel = isSelected('obstacle', i);
         const fill = parseLevelColor(obs.color, obstacleDefaultColor(!!obs.solid));
         ctx.globalAlpha = obs.solid ? 0.85 : 0.6;
@@ -793,7 +818,6 @@ export function openLevelEditor(
     syncPlaceHeightReadout();
     syncViewHint();
     syncActionButtons();
-    syncInspectorChrome();
     loadFloorPreview();
     loadMyKits();
     backdrop.focus();
@@ -851,37 +875,20 @@ export function openLevelEditor(
 
   const fitCanvas = (): void => {
     const box = q<HTMLElement>('#le-canvas-box');
-    const size = Math.floor(Math.min(box.clientWidth, box.clientHeight));
-    if (size < 64) return;
-    const px = Math.min(1600, Math.floor(size * Math.min(window.devicePixelRatio || 1, 2)));
-    if (canvas.width !== px || canvas.height !== px) {
-      canvas.width = px;
-      canvas.height = px;
+    if (box.clientWidth < 64 || box.clientHeight < 64) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const pxW = Math.min(2400, Math.floor(box.clientWidth * dpr));
+    const pxH = Math.min(2400, Math.floor(box.clientHeight * dpr));
+    if (canvas.width !== pxW || canvas.height !== pxH) {
+      canvas.width = pxW;
+      canvas.height = pxH;
     }
     draw();
   };
 
-  const syncInspectorChrome = (): void => {
-    const open = inspectorOpen && selection != null;
-    q<HTMLElement>('#le-inspector').hidden = !open;
-    q<HTMLElement>('#le-studio-body').classList.toggle('inspector-open', open);
-    const btn = q<HTMLButtonElement>('#le-inspector-toggle');
-    btn.disabled = selection == null;
-    btn.setAttribute('aria-pressed', open ? 'true' : 'false');
-    btn.textContent = open ? '隱藏細節' : '開啟細節';
-  };
-
-  const setInspectorOpen = (open: boolean): void => {
-    inspectorOpen = open && selection != null;
-    syncInspectorChrome();
-    requestAnimationFrame(() => fitCanvas());
-  };
-
   const setSelection = (sel: Selection | null): void => {
     selection = sel;
-    if (sel == null) inspectorOpen = false;
     propsCtrl.sync();
-    syncInspectorChrome();
     draw();
   };
 
@@ -997,7 +1004,7 @@ export function openLevelEditor(
           kind === 'ring'
             ? ringPxRadius(ringDiameter(it))
             : kind === 'obstacle'
-              ? ((it.size ?? 1) / WORLD) * canvas.width * 0.5 + 4
+              ? ((it.size ?? 1) / WORLD) * fieldFrame(canvas.width, canvas.height).size * 0.5 + 4
               : kind === 'balloon'
                 ? Math.max(10, ringPxRadius(balloonDiameter(it)) * 0.45)
                 : 14;
@@ -1633,8 +1640,6 @@ export function openLevelEditor(
     backdrop.remove();
   };
   q<HTMLButtonElement>('#le-close').addEventListener('click', close);
-  q<HTMLButtonElement>('#le-inspector-toggle').addEventListener('click', () => setInspectorOpen(!inspectorOpen));
-  q<HTMLButtonElement>('#le-inspector-hide').addEventListener('click', () => setInspectorOpen(false));
   q<HTMLButtonElement>('#le-floor-pick').addEventListener('click', () => {
     q<HTMLInputElement>('#le-floor-file').click();
   });
