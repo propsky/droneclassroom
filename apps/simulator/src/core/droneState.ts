@@ -74,6 +74,14 @@ export interface DroneState {
   frozen: boolean;
   /** 一鍵回家 / 自動降落中（鎖手動輸入） */
   returning: boolean;
+  /**
+   * 足球手感姿態（弧度）。正 pitch = 機頭下壓。
+   * null = 視覺改由速度推算（關卡／大亂鬥）。不進重播 hash。
+   */
+  attitudePitch: number | null;
+  attitudeRoll: number | null;
+  /** 本 tick 以較大下降速度撞地。足球讀完即清，不進重播 hash。 */
+  hardLanding: boolean;
 }
 
 export const droneState: DroneState = {
@@ -85,6 +93,9 @@ export const droneState: DroneState = {
   isGrounded: true,
   frozen: false,
   returning: false,
+  attitudePitch: null,
+  attitudeRoll: null,
+  hardLanding: false,
 };
 
 /** 把 drone 放回起飛墊（不含關卡任務狀態；那由 level.resetMission 處理） */
@@ -96,6 +107,9 @@ export function resetDroneState(): void {
   droneState.isGrounded = true;
   droneState.frozen = false;
   droneState.returning = false;
+  droneState.attitudePitch = null;
+  droneState.attitudeRoll = null;
+  droneState.hardLanding = false;
 }
 
 // ---- 共享旗標（core 各模組共用，避免循環 import） ----

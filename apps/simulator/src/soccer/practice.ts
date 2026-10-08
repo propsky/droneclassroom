@@ -8,11 +8,14 @@ import { clearLevel } from '../core/level';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { SOCCER_FIELD, SOCCER_BALL_R } from './constants';
+import { shieldPassesRing } from './crossing';
+import { bounceSoccerWalls } from './contact';
 import { resetSoccerField } from './field';
 import {
   showSoccerPracticeHud,
   renderDrillButtons,
   setPracticeStatus,
+  showSoccerFeel,
 } from '../ui/soccerHud';
 
 // ---- Drill 清單（與 legacy SOCCER_DRILLS 相同）----
@@ -61,7 +64,9 @@ export const practiceState = {
   /** shuttle：已退回過中線、可再計下一趟 */
   shuttleReturned: true,
   startTime: 0,
-  /** 上一 tick 的 z（穿門 = prevZ 在門前、本 tick 在門後的「跨越」） */
+  /** 上一 tick 的位置（穿環看護罩後緣與行進方向） */
+  prevX: 0,
+  prevY: 0.4,
   prevZ: 0,
 };
 
@@ -89,9 +94,16 @@ export function initSoccerPractice(): void {
   bus.on('mode-takeover', ({ mode }) => {
     if (mode !== 'soccer-practice' && practiceState.active) exitSoccerPractice();
   });
-  // 開發後門：?soccer=1 自動進練習場（headless 驗收 / demo 用；對齊 ?arena=1）
+  // 開發後門：?soccer=1 自動進練習場（headless 驗收 / demo 用；對齊 ?arena=1）。
+  // 等關卡清單載完再進場，避免預設關卡晚到把練習場蓋回教室。
   if (new URLSearchParams(location.search).get('soccer') === '1') {
-    setTimeout(() => enterSoccerPractice(), 800);
+    const offReady = bus.on('levels-ready', () => {
+      offReady();
+      const offLoaded = bus.on('level-loaded', () => {
+        offLoaded();
+        setTimeout(() => enterSoccerPractice(), 200);
+      });
+    });
   }
 }
 
@@ -113,6 +125,7 @@ export function enterSoccerPractice(): void {
   resetPracticeDronePos();
 
   showSoccerPracticeHud(true);
+  showSoccerFeel(true);
   renderDrillButtons(SOCCER_DRILLS, soccerBest, startDrill);
   setPracticeStatus('選一個練習開始');
   stateHud('⚽ 選一個練習開始 👇');
@@ -129,6 +142,7 @@ export function exitSoccerPractice(): void {
   bus.emit('soccer-view-changed', { sign: null });
   bus.emit('soccer-exited', {}); // render 清場地 / 碰撞、還原機體大小與地面
   showSoccerPracticeHud(false);
+  showSoccerFeel(false);
   resetDroneState();
   bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
   stateHud('待命');
@@ -144,6 +158,8 @@ function resetPracticeDronePos(): void {
   droneState.yaw = 0;
   droneState.isFlying = false;
   droneState.isGrounded = true;
+  practiceState.prevX = droneState.position.x;
+  practiceState.prevY = droneState.position.y;
   practiceState.prevZ = droneState.position.z;
 }
 
@@ -184,6 +200,8 @@ export function startDrill(idx: number): void {
       sound('go');
       practiceState.status = 'running';
       practiceState.startTime = Date.now();
+      practiceState.prevX = droneState.position.x;
+      practiceState.prevY = droneState.position.y;
       practiceState.prevZ = droneState.position.z;
       stateHud(`⚽ ${d.name}：開始！`);
     }
@@ -203,12 +221,18 @@ export function tickSoccerPractice(): void {
   }
   const p = droneState.position;
   const z = p.z;
-  // 穿過遠端門：z 由門前跨到門後，且在門環半徑內（圓形判定與門環同形；
-  // 舊方形判定的角落會落在門框實體外緣之外，能從門框旁的空氣中得分）
-  const crossedFar =
-    practiceState.prevZ > -SOCCER_FIELD.goalZ &&
-    z <= -SOCCER_FIELD.goalZ &&
-    Math.hypot(p.x, p.y - SOCCER_FIELD.goalY) < SOCCER_FIELD.goalR;
+  // 遠端門在 -z。整顆護罩沿行進方向穿過才算，不看機頭、不只看球心。
+  const crossedFar = shieldPassesRing(
+    { x: practiceState.prevX, y: practiceState.prevY, z: practiceState.prevZ },
+    p,
+    {
+      goalZ: -SOCCER_FIELD.goalZ,
+      goalY: SOCCER_FIELD.goalY,
+      goalR: SOCCER_FIELD.goalR,
+      shieldR: SOCCER_BALL_R,
+      attackSign: -1,
+    },
+  );
 
   if (d.type === 'pass' && crossedFar) {
     practiceState.count++;
@@ -239,20 +263,20 @@ export function tickSoccerPractice(): void {
   ) {
     drillDone(true);
   }
+  practiceState.prevX = p.x;
+  practiceState.prevY = p.y;
   practiceState.prevZ = z;
   updatePracticeHud();
 }
 
-/** 場地邊界 clamp：以球形保護框半徑內縮（球框不穿牆；地板由 integrate 的 ground clamp 處理） */
+/** 場地邊界：護罩貼牆後輕微反彈（地板仍由 integrate 落地） */
 function clampSoccerBounds(): void {
-  const p = droneState.position;
-  const v = droneState.velocity;
-  const m = SOCCER_BALL_R;
-  if (p.x > SOCCER_FIELD.halfX - m) { p.x = SOCCER_FIELD.halfX - m; if (v.x > 0) v.x = 0; }
-  else if (p.x < -SOCCER_FIELD.halfX + m) { p.x = -SOCCER_FIELD.halfX + m; if (v.x < 0) v.x = 0; }
-  if (p.z > SOCCER_FIELD.halfZ - m) { p.z = SOCCER_FIELD.halfZ - m; if (v.z > 0) v.z = 0; }
-  else if (p.z < -SOCCER_FIELD.halfZ + m) { p.z = -SOCCER_FIELD.halfZ + m; if (v.z < 0) v.z = 0; }
-  if (p.y > SOCCER_FIELD.top - m) { p.y = SOCCER_FIELD.top - m; if (v.y > 0) v.y = 0; }
+  bounceSoccerWalls(
+    droneState.position,
+    droneState.velocity,
+    { halfX: SOCCER_FIELD.halfX, halfZ: SOCCER_FIELD.halfZ, top: SOCCER_FIELD.top },
+    SOCCER_BALL_R,
+  );
 }
 
 function drillDone(timeUp: boolean): void {

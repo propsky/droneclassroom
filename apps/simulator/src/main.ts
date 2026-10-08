@@ -82,9 +82,11 @@ import {
   tickSoccerMatch,
   enterSoccerMatch,
   exitSoccerMatch,
+  soccerControlsLocked,
 } from './multiplayer/soccer';
 import { SoccerFieldVisuals } from './render/soccerField';
 import { initSoccerHud } from './ui/soccerHud';
+import { applySoccerFeel, initSoccerFeelFromUrl } from './soccer/flightFeel';
 import { initFpsMeter } from './ui/fpsMeter';
 import { initPwa } from './pwa';
 
@@ -116,6 +118,7 @@ if (!isPreviewMode()) {
   initWs();
 }
 initArena(); // 大亂鬥：訊息分派 + 右下進場按鈕（在 initWs 之後掛 bus）
+initSoccerFeelFromUrl();
 initSoccerPractice(); // ⚽ 足球單人練習（?soccer=1 後門）
 initSoccerMatch(); // ⚽ 多人足球對戰（?soccermp=1 後門）
 initSoccerHud(
@@ -277,22 +280,28 @@ function fixedTick(nowMs: number): void {
   tickInputDevices(isManualLocked());
 
   const controlFrame = collectControlFrame();
+  // 足球三檔傾角只改這條水平推力；關卡與大亂鬥仍用原本的控制幀。
+  const soccerOn = soccerState.active || practiceState.active;
+  const feltFrame = applySoccerFeel(controlFrame, {
+    enabled: soccerOn,
+    locked: isManualLocked() || (soccerState.active && soccerControlsLocked()),
+  });
 
   // 模式分派：大亂鬥 / 足球 tick 接管 ↔ 一般關卡（與伺服器重播共用 core/simTick）。
   // 各模式自己管邊界/判定/HUD，分身視覺在 arenaClones / soccerVisuals
   if (arenaState.active) {
     // 大亂鬥鬼抓人：我是鬼 → 推力 ×GHOST_SPEED（非鬼時恆為 1）
-    tickFlightPhysics(controlFrame, arenaThrustScale());
+    tickFlightPhysics(feltFrame, arenaThrustScale());
     tickArena();
     arenaClones.tick();
   } else if (soccerState.active) {
     // ⚽ 多人足球：邊界 / 分身內插 / 機對機碰撞 / 進球偵測 / 計分 HUD
-    tickFlightPhysics(controlFrame, arenaThrustScale());
+    tickFlightPhysics(feltFrame, arenaThrustScale());
     tickSoccerMatch();
     soccerVisuals.tick();
   } else if (practiceState.active) {
     // ⚽ 單人練習：邊界 / 穿門判定 / drill 進度
-    tickFlightPhysics(controlFrame, arenaThrustScale());
+    tickFlightPhysics(feltFrame, arenaThrustScale());
     tickSoccerPractice();
     soccerVisuals.tick();
   } else {

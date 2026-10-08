@@ -46,7 +46,7 @@ export const SOCCER_START_DEPTH = 1;
 /**
  * 機體外的球形保護框半徑（約 20cm 級：直徑 24cm）。
  * 必須小於圓環內半徑，中心才過得了 70cm 的洞；擦到框仍會被擋，所以穿環有難度。
- * 階段一不做「整顆護罩都要過洞」的判定，計分仍看機體中心。
+ * 階段二穿環：整顆護罩的後緣都要過洞，淨空 = 內半徑 − 這個半徑。
  */
 export const SOCCER_BALL_R = 0.12;
 
@@ -98,10 +98,10 @@ export function soccerGoalTorusThickness(tubeR: number = SOCCER_FIELD.goalTube):
   return soccerGoalThickness(tubeR);
 }
 
-// ---- 機對機碰撞（既有；本階段不改推擠手感）----
-/** 縮放後機身的碰撞半徑（兩機最小間距 = 2×此值） */
-export const SOCCER_CONTACT_R = 0.7;
-/** 碰撞推出後的速度衰減 */
+// ---- 機對機碰撞（對齊視覺護罩；互推與牆面反彈在 soccer/contact.ts）----
+/** 護罩碰撞半徑（兩機最小間距 = 2×此值，與 SOCCER_BALL_R 相同才不會視覺穿模） */
+export const SOCCER_CONTACT_R = SOCCER_BALL_R;
+/** 舊版推出後的速度衰減。階段二改走彈性反彈，常數留著避免外部還引用時壞掉。 */
 export const SOCCER_CONTACT_DAMP = 0.55;
 
 /** 多人：窄邊隊伍視角的 z 端符號（紅站 +z 看 -z、藍站 -z 看 +z） */

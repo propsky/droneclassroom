@@ -830,8 +830,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const renderSoccerScore = (): void => {
     const { armed, status, endTime } = soccer;
     gameState.soccer = status;
-    const live = status === 'running' || status === 'countdown' || status === 'break' || status === 'golden' || status === 'pk';
-    const timed = status === 'running' || status === 'break' || status === 'golden' || status === 'pk';
+    const live = status === 'running' || status === 'countdown' || status === 'break' || status === 'golden' || status === 'pk' || status === 'penalty';
+    const timed = status === 'running' || status === 'break' || status === 'golden' || status === 'pk' || status === 'penalty';
     setTabLive('soccer', live);
     soccerStopBtn.hidden = !live; // 停止鈕在卡頭，賽事進行（含休息／黃金／PK）才顯示
     soccerStartBtn.disabled = live; // 開始鈕 disabled 不隱藏（版面不跳）
@@ -848,6 +848,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               ? '黃金進球'
               : status === 'pk'
                 ? 'PK'
+                : status === 'penalty'
+                  ? '罰球'
                 : status === 'done'
                   ? '已結束'
                   : '';
@@ -1335,8 +1337,27 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           applySoccerMatch(msg.match);
           renderSoccerScore();
           break;
-        case 'soccer_foul':
-          toast(`犯規：${msg.byName || '?'} 進入自家圓環`, 'error');
+        case 'soccer_foul': {
+          const why =
+            msg.reason === 'false_start'
+              ? '搶跑'
+              : msg.reason === 'no_return'
+                ? '得分後未回半場'
+                : '進入自家圓環';
+          toast(`犯規：${msg.byName || '?'} ${why}`, 'error');
+          break;
+        }
+        case 'soccer_penalty':
+          soccer.status = 'penalty';
+          soccer.endTime = msg.endTime;
+          renderSoccerScore();
+          toast(`罰球 10 秒（${msg.byName || '?'}）`, 'error');
+          break;
+        case 'soccer_card':
+          toast(
+            `${msg.card === 'red' ? '紅牌' : '黃牌'}：${msg.byName || '?'}${msg.reason === 'crash' ? '（墜機）' : ''}`,
+            'error',
+          );
           break;
         case 'soccer_goal_ok': {
           soccer.scores = msg.scores;

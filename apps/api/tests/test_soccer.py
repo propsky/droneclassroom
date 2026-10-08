@@ -133,9 +133,12 @@ def test_striker模式進球驗證與半場重置與勝負(
             settle(client)
             assert soccer.scores["blue"] == 0
 
-            # 藍隊前鋒飛到對方圓環（attackGoalZ=+5、goalY=3.25）→ 進球
+            # 整顆護罩沿 +z 穿過：後緣過門面、球心在淨空半徑內才算
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 4.80, "yaw": 0})
+            settle(client)
+            clock.advance(400)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5.16, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["scores"] == {"blue": 1, "red": 0}
@@ -268,9 +271,12 @@ def test_與大亂鬥互斥(client: TestClient, teacher_ticket: str) -> None:
 
 
 def _blue_goal(client: TestClient, clock: FakeClock, ws) -> None:
-    """藍隊前鋒放到對方圓環並宣告進球（先拉開回報間隔，避免超速）。"""
+    """藍隊前鋒整顆護罩沿 +z 穿過對方圓環再宣告（兩筆位置，避免超速）。"""
     clock.advance(3000)
-    ws.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 3.14})
+    ws.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 4.80, "yaw": 3.14})
+    settle(client)
+    clock.advance(400)
+    ws.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5.16, "yaw": 3.14})
     ws.send_json({"type": "soccer_goal"})
     settle(client)
 
@@ -309,13 +315,14 @@ def test_非攻擊手進自家圓環犯規(
             t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
             _countdown_to_go(client, clock, s1)
 
-            # 防守進入藍隊自家門（z=-5）
+            # 防守進入藍隊自家門（z=-5）→ 公告並改判 10 秒罰球
             s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
             tick(client)
             foul = recv_until(s3, "soccer_foul")
             assert foul["reason"] == "own_ring" and foul["by"] == "s2"
             assert foul["team"] == "blue"
             assert soccer.foul_count == 1
+            assert soccer.status == "penalty"
             assert soccer.scores == {"blue": 0, "red": 0}
             # 還在裡面 → 不重複
             tick(client)
@@ -327,7 +334,12 @@ def test_非攻擊手進自家圓環犯規(
             tick(client)
             assert soccer.foul_count == 1
 
-            # 防守離開再進入 → 再記一次
+            # 罰球時間到，回到進行中（節時鐘有暫停）
+            clock.advance(10_000)
+            tick(client)
+            assert soccer.status == "running"
+
+            # 防守離開再進入 → 再記一次，並再開一次罰球
             clock.advance(3000)
             s3.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0, "yaw": 0})
             tick(client)
@@ -336,6 +348,7 @@ def test_非攻擊手進自家圓環犯規(
             s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
             tick(client)
             assert soccer.foul_count == 2
+            assert soccer.status == "penalty"
 
 
 def test_三局兩勝與局間休息(
@@ -448,7 +461,10 @@ def test_黃金進球再平手進PK(
             for rnd in range(1, SOCCER_PK_MIN_ROUNDS + 1):
                 assert soccer.pk_turn == "blue"
                 clock.advance(3000)
-                s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
+                s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 4.80, "yaw": 0})
+                settle(client)
+                clock.advance(400)
+                s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5.16, "yaw": 0})
                 s1.send_json({"type": "soccer_goal"})
                 settle(client)
                 assert soccer.pk_scores["blue"] == rnd
