@@ -28,6 +28,8 @@ export class DroneVisual {
   /** 全機材質 + 原始 alpha（大亂鬥暈眩變暗 / 無敵閃爍用；還原時乘回 1） */
   private fadeMats: { mat: StandardMaterial; baseAlpha: number }[] = [];
   private opacityFactor = 1;
+  /** 足球模式改畫護罩機時，主迴圈的 setVisible 不能把教室機叫回來 */
+  private forceHidden = false;
 
   constructor(scene: Scene, shadowGenerator: ShadowGenerator) {
     this.root = new TransformNode('drone', scene);
@@ -242,6 +244,13 @@ export class DroneVisual {
   }
 
   setVisible(v: boolean): void {
-    if (this.root.isEnabled() !== v) this.root.setEnabled(v);
+    const show = v && !this.forceHidden;
+    if (this.root.isEnabled() !== show) this.root.setEnabled(show);
+  }
+
+  /** 足球場改用護罩機。關掉時還原教室機，縮放由呼叫端自己設回 1 */
+  setForceHidden(on: boolean): void {
+    this.forceHidden = on;
+    if (on) this.root.setEnabled(false);
   }
 }

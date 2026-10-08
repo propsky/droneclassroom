@@ -210,3 +210,47 @@ export function soccerFeelButtonLabel(id: SoccerFeelId): string {
   const p = SOCCER_FEELS[id];
   return `${p.label} ${p.maxTiltDeg}°`;
 }
+
+// =============================================================================
+// 攻擊手旗號＋比賽結束畫面（階段三視覺；不改計分列文案）
+// =============================================================================
+let flagCache = '\0';
+let endCache = '';
+let endDismissed = false;
+
+/** 可得分 / 請返場。空字串收起 */
+export function setSoccerFlag(text: '' | '可得分' | '請返場'): void {
+  if (text === flagCache) return;
+  flagCache = text;
+  const el = $('soccer-flag');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('is-return', text === '請返場');
+  el.classList.toggle('is-ready', text === '可得分');
+  el.hidden = text === '';
+}
+
+/** 比賽結束蓋板。show=false 時收起；選手按「繼續觀看」只藏這一輪 */
+export function setSoccerEndScreen(view: { show: boolean; title: string; detail: string }): void {
+  const key = view.show ? `${view.title}|${view.detail}` : '';
+  if (!view.show) endDismissed = false;
+  if (key === endCache) return;
+  endCache = key;
+  const el = $('soccer-end');
+  if (!el) return;
+  const title = $('soccer-end-title');
+  const detail = $('soccer-end-detail');
+  if (title) title.textContent = view.title;
+  if (detail) detail.textContent = view.detail;
+  el.hidden = !view.show || endDismissed;
+  if (!endWired) {
+    endWired = true;
+    $('soccer-end-close')?.addEventListener('click', () => {
+      endDismissed = true;
+      const panel = $('soccer-end');
+      if (panel) panel.hidden = true;
+    });
+  }
+}
+
+let endWired = false;

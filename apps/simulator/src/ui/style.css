@@ -1620,6 +1620,71 @@ body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   color: var(--accent);
   font-weight: 700;
 }
+
+/* 攻擊手旗號：頂部置中，不擋球門 */
+.soccer-flag {
+  position: fixed;
+  top: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 6px 18px;
+  border-radius: 999px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-size: 18px;
+  color: #07140c;
+  background: #3dde7a;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.soccer-flag.is-return {
+  color: #2a1600;
+  background: #ffb020;
+}
+.soccer-flag[hidden] {
+  display: none;
+}
+
+/* 比賽結束蓋板 */
+.soccer-end {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 6, 10, 0.62);
+}
+.soccer-end[hidden] {
+  display: none;
+}
+.soccer-end-card {
+  width: min(420px, calc(100% - 32px));
+  padding: 28px 24px 22px;
+  border-radius: 16px;
+  background: #12161e;
+  color: #f4f7fb;
+  text-align: center;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+.soccer-end-kicker {
+  margin: 0 0 8px;
+  color: #9aa4b2;
+  letter-spacing: 0.14em;
+  font-size: 13px;
+}
+.soccer-end-card h2 {
+  margin: 0 0 8px;
+  font-size: 32px;
+}
+.soccer-end-card p {
+  margin: 0 0 18px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 16px;
+}
+.soccer-end-card .modal-btn {
+  min-width: 140px;
+}
 .hud-fixed .hud-title .mono {
   color: var(--warn);
 }
