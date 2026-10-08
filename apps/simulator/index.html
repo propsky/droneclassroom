@@ -71,6 +71,7 @@
                     <button id="player-rename" title="改名"><span class="btn-ic" data-icon="pencil"></span><span>改名</span></button>
                     <button id="player-guide" title="重看新手引導"><span class="btn-ic" data-icon="map"></span><span>新手引導</span></button>
                     <!-- 有學生帳號 token 時才顯示（ui/overlays.ts syncAccountUi） -->
+                    <button id="player-classes" title="加入或離開班級、切換進度" style="display:none;"><span>我的班級</span></button>
                     <button id="player-logout" title="登出學生帳號，回訪客模式" style="display:none;"><span class="btn-ic" data-icon="log-out"></span><span>登出帳號</span></button>
                 </div>
             </div>
@@ -314,10 +315,26 @@
                         <input id="acct-email-pw" type="password" maxlength="64" autocomplete="current-password">
                     </div>
                 </div>
+                <div id="acct-register-fields" class="acct-fields" hidden>
+                    <div class="login-field">
+                        <label class="login-label" for="acct-reg-name">你的名字</label>
+                        <input id="acct-reg-name" type="text" maxlength="20" autocomplete="nickname">
+                    </div>
+                    <div class="login-field">
+                        <label class="login-label" for="acct-reg-email">Email</label>
+                        <input id="acct-reg-email" type="email" autocomplete="email">
+                    </div>
+                    <div class="login-field">
+                        <label class="login-label" for="acct-reg-pw">密碼（至少 8 碼）</label>
+                        <input id="acct-reg-pw" type="password" maxlength="64" autocomplete="new-password">
+                    </div>
+                    <div class="login-hint">註冊後你是獨立帳號，可以自己飛，也可以之後加入老師的班級。</div>
+                </div>
                 <div id="acct-error" class="login-error" role="alert" hidden></div>
             </div>
             <div class="login-actions">
                 <button id="acct-mode-switch" class="login-link" type="button">用 email 登入</button>
+                <button id="acct-register-switch" class="login-link" type="button">建立學生帳號</button>
                 <button id="acct-login-btn" class="modal-btn">登入</button>
             </div>
         </div>

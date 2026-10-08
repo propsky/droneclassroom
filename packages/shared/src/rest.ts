@@ -70,7 +70,7 @@ export interface StudentEntry {
   studentCode: string;
   email: string | null;
   inviteStatus: 'none' | 'sent' | 'accepted';
-  status: 'active' | 'removed';
+  status: 'active' | 'disabled' | 'removed';
   createdAt: number;
   lastSeenAt: number | null;
 }
@@ -100,10 +100,12 @@ export interface StudentMe {
   id: number;
   name: string;
   emoji: string;
-  teamId: number;
+  teamId: number | null;
   teamName: string;
   teamCode: string;
   studentCode: string;
+  /** personal = 自己的進度；class = 目前班級的進度 */
+  progressMode?: 'personal' | 'class';
 }
 
 /** POST /auth/student/login — 兩種擇一：{teamCode, studentCode} 或 {email, password} */

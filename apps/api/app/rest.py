@@ -43,6 +43,7 @@ from .config import Settings
 from .db.audit import record_event
 from .db.models import Organization, Teacher
 from .db.models import Session as SessionRow
+from .licensing import license_expired
 from .mailer import Mailer
 
 logger = logging.getLogger("creafly.api.rest")
@@ -468,6 +469,8 @@ async def teacher_account_login(
             logger.info("[AUTH] 老師登入失敗（IP：%s）", ip)
             raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
         assert teacher is not None
+        if license_expired(teacher.licensed_until):
+            raise HTTPException(status_code=403, detail="帳號授權已到期")
     teacher.last_login_at = datetime.now(UTC)
     result = await _issue_login(request, session, teacher)
     await record_event(

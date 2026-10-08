@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     static_dir: Path = Field(default_factory=lambda: _APPS_DIR / "simulator" / "dist")
     teacher_html: Path = Field(default_factory=lambda: _API_DIR / "static" / "teacher.html")
     teacher_dist: Path = Field(default_factory=lambda: _APPS_DIR / "teacher" / "dist")
+    admin_dist: Path = Field(default_factory=lambda: _APPS_DIR / "admin" / "dist")
     teacher_password: str | None = None
     # 免登入模式（測試用）：無 DB 時後台不需 PIN；有 DB 時 /auth/teacher/login 任意帳密
     # 皆登入預設老師 dev@local。正式環境務必維持 False
@@ -100,6 +101,10 @@ class Settings(BaseSettings):
     public_student_url: str = "https://droneclassroom.pages.dev"
     entitlement_mode: Literal["open", "enforce", "demo_only"] = "open"
     demo_level_ids: str = "1-0,1-1,1-2"
+    # 平台管理員：啟動時若帳號不存在且有設密碼，建立一筆（已存在不覆寫密碼）
+    platform_admin_username: str = "admin"
+    platform_admin_password: str | None = None
+    platform_admin_name: str = "管理員"
     # 重播驗證器（J-02）：simulator `pnpm build:replay-verifier` 產出的單檔 bundle；
     # Docker 映像內建於 /app/replay/verify-recording.mjs（REPLAY_VERIFIER_BUNDLE 覆寫）。
     # 檔案不存在 → 開發 fallback tsx → 都沒有則跳過驗證

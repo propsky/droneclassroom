@@ -51,6 +51,17 @@ def register_static_routes(app: FastAPI, settings: Settings) -> None:
     else:
         logger.info("[HTTP] 找不到 %s，/teacher 使用 legacy teacher.html", settings.teacher_dist)
 
+    admin_index = settings.admin_dist / "index.html"
+    if settings.admin_dist.is_dir():
+        app.mount("/admin-assets", StaticFiles(directory=settings.admin_dist), name="admin-assets")
+
+    @app.get("/admin", include_in_schema=False)
+    @app.get("/admin/", include_in_schema=False)
+    async def admin_page() -> Response:
+        if admin_index.is_file():
+            return FileResponse(admin_index, media_type="text/html; charset=utf-8")
+        return PlainTextResponse("404 Not Found: /admin", status_code=404)
+
     @app.get("/teacher", include_in_schema=False)
     @app.get("/teacher/", include_in_schema=False)
     async def teacher_page() -> Response:

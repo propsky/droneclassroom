@@ -266,6 +266,9 @@ async def student_curriculum(request: Request, session: DbSession) -> Curriculum
     if account is None:
         raise HTTPException(status_code=401, detail="登入已失效")
     _, _student, team = account
+    if team is None:
+        await session.commit()
+        return CurriculumResponse(groups=[])
     groups = await build_team_curriculum(session, team.id, for_student=True)
     await session.commit()
     return _groups_to_response(groups)

@@ -25,7 +25,8 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .config import Settings
-from .db.models import Session, Student, Teacher, Team
+from .db.models import PlatformAdmin, Session, Student, Teacher, Team
+from .licensing import license_expired
 
 _hasher = PasswordHasher()
 
@@ -126,10 +127,11 @@ async def resolve_student_session(
     *,
     settings: Settings,
     now: datetime | None = None,
-) -> tuple[Session, Student, Team] | None:
-    """學生 auth token → (session 列, 學生, 班級)；REST /auth/student/me 與 WS register 共用。
+) -> tuple[Session, Student, Team | None] | None:
+    """學生 auth token → (session 列, 學生, 進房班級或 None)。
 
-    無效 token / 非學生 session / 學生 removed / 班級已封存 → None。
+    無效 token / 非學生 session / 停用或移除 / 授權到期 → None。
+    沒有班級的學生（自行註冊、尚未加入）仍有效，team 為 None。
     命中即依 student_session_ttl_sec 滑動延長（節流同老師）。不 commit。
     """
     row = await resolve_session(
@@ -144,9 +146,14 @@ async def resolve_student_session(
     student = await session.get(Student, row.principal_id)
     if student is None or student.status != "active":
         return None
-    team = await session.get(Team, student.team_id)
-    if team is None or team.archived_at is not None:
+    if license_expired(student.licensed_until, now):
         return None
+    team: Team | None = None
+    room_team_id = student.active_team_id or student.team_id
+    if room_team_id is not None:
+        found = await session.get(Team, room_team_id)
+        if found is not None and found.archived_at is None:
+            team = found
     return row, student, team
 
 
@@ -250,3 +257,24 @@ async def get_current_student_session(request: Request, session: DbSession) -> S
 
 
 CurrentStudentSession = Annotated[Session, Depends(get_current_student_session)]
+
+
+async def get_current_admin(request: Request, session: DbSession) -> PlatformAdmin:
+    """Bearer → 有效的平台管理員；停用帳號 401。"""
+    settings: Settings = request.app.state.settings
+    row = await resolve_session(
+        session,
+        bearer_token(request),
+        ttl=settings.session_ttl_sec,
+        touch_interval=settings.session_touch_interval_sec,
+    )
+    if row is None or row.principal_type != "admin":
+        raise HTTPException(status_code=401, detail="請先登入管理員")
+    admin = await session.get(PlatformAdmin, row.principal_id)
+    if admin is None or admin.status != "active":
+        raise HTTPException(status_code=401, detail="管理員不存在或已停用")
+    await session.commit()
+    return admin
+
+
+CurrentAdmin = Annotated[PlatformAdmin, Depends(get_current_admin)]

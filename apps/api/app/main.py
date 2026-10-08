@@ -17,6 +17,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from .admin_api import ensure_platform_admin
+from .admin_api import router as admin_router
 from .auth import TeacherAuth, generate_pin
 from .config import Settings
 from .db.session import create_engine, create_sessionmaker
@@ -89,6 +91,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         logger.info("官方關卡已同步至 levels 表（%d 筆）", n)
                     known = await fetch_known_level_ids(session, json_known)
                 await ensure_all_teams_catalog(app.state.db_sessionmaker)
+                async with app.state.db_sessionmaker() as session:
+                    await ensure_platform_admin(session, cfg)
             except Exception:  # noqa: BLE001 — 見上方註解
                 logger.exception("資料庫連線失敗（伺服器照常啟動，資料庫功能暫不可用）")
         else:
@@ -179,6 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rest_router)
     app.include_router(levels_router)
     app.include_router(students_router)
+    app.include_router(admin_router)
     app.include_router(replay_logs_router)
     register_static_routes(app, cfg)
     return app

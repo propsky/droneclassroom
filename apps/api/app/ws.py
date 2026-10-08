@@ -358,17 +358,25 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     if valid.studentToken
                     else None
                 )
+                progress_mode = "personal"
+                progress_team_id: int | None = None
                 if account is not None:
                     student, team = account
                     name, emoji, student_id = student.name, student.emoji, student.id
-                    team_id = team.id
-                    skip_password = True  # token 已驗明身分（本來就是這班的學生），免房間密碼
-                    # 進房路由：老師有指派分房且該分房開著 → 分房；否則主房
-                    target = rooms.route_room_for(team.id, student.id)
-                    if target is None:
-                        # 班級的房沒開：老師開房學生才進得來（跟實體課一致）
-                        await _send_rejected(ws, "closed")
-                        continue
+                    progress_mode = student.progress_mode
+                    progress_team_id = student.active_team_id
+                    if team is None:
+                        # 尚未加入班級：帶著學生身分，進房方式與訪客相同
+                        target = rooms.get(valid.roomCode or url_room)
+                    else:
+                        team_id = team.id
+                        skip_password = True  # token 已驗明身分，免房間密碼
+                        # 進房路由：老師有指派分房且該分房開著 → 分房；否則主房
+                        target = rooms.route_room_for(team.id, student.id)
+                        if target is None:
+                            # 班級的房沒開：老師開房學生才進得來（跟實體課一致）
+                            await _send_rejected(ws, "closed")
+                            continue
                 else:
                     target = rooms.get(valid.roomCode or url_room)
                 # ----- 進房門檢 → 進房 / 換房 → 報到 -----
@@ -395,7 +403,12 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 #       名冊初始 level / time 帶最近完成的關卡（老師看到延續的進度），
                 #       register 後下行 progress_sync（跨裝置成績同步）-----
                 progress_rows = (
-                    await load_progress(ws.app.state.db_sessionmaker, student_id)
+                    await load_progress(
+                        ws.app.state.db_sessionmaker,
+                        student_id,
+                        mode=progress_mode,
+                        team_id=progress_team_id,
+                    )
                     if student_id is not None
                     else []
                 )

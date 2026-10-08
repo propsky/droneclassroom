@@ -135,6 +135,42 @@ export function studentLogin(req: StudentLoginRequest): Promise<AuthResult<Stude
   return request<StudentLoginResponse>('/auth/student/login', postJson(req));
 }
 
+export function studentRegister(body: {
+  name: string;
+  email: string;
+  password: string;
+}): Promise<AuthResult<StudentLoginResponse>> {
+  return request<StudentLoginResponse>('/auth/student/register', postJson(body));
+}
+
+function authPost<T>(token: string, path: string, body: unknown): Promise<AuthResult<T>> {
+  return request<T>(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+}
+
+export function joinTeam(
+  token: string,
+  teamCode: string,
+  password?: string,
+): Promise<AuthResult<StudentMeResponse>> {
+  return authPost(token, '/auth/student/teams/join', { teamCode, password });
+}
+
+export function leaveTeam(token: string, teamId: number): Promise<AuthResult<StudentMeResponse>> {
+  return authPost(token, '/auth/student/teams/leave', { teamId });
+}
+
+export function setProgressContext(
+  token: string,
+  mode: 'personal' | 'class',
+  teamId?: number,
+): Promise<AuthResult<StudentMeResponse>> {
+  return authPost(token, '/auth/student/progress-context', { mode, teamId });
+}
+
 /** 驗 token 是否仍有效 + 取最新身分（伺服器同時滑動延長） */
 export function fetchStudentMe(token: string): Promise<AuthResult<StudentMeResponse>> {
   return request<StudentMeResponse>('/auth/student/me', {

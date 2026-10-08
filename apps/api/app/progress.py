@@ -24,7 +24,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .db.audit import record_event
-from .db.models import Progress, Team
+from .db.models import ClassProgress, Progress, Student, Team
 from .protocol import CompleteLevelMsg, ProgressEntry, ProgressSyncMsg
 
 logger = logging.getLogger("creafly.api.progress")
@@ -71,8 +71,19 @@ async def save_completion(
                 },
             )
             if event_id is not None:
-                # 新事件才 upsert；dedupe 命中代表同一筆已入庫，attempts 不重複加
-                await _upsert_progress(session, student_id, msg.levelId, time_ms, suspect)
+                # 新事件才 upsert；dedupe 命中代表同一筆已入庫，attempts 不重複加。
+                # progress_mode=class 且有目前班級 → 寫該班帳本，否則寫個人帳本。
+                student = await session.get(Student, student_id)
+                if (
+                    student is not None
+                    and student.progress_mode == "class"
+                    and student.active_team_id is not None
+                ):
+                    await _upsert_class_progress(
+                        session, student_id, student.active_team_id, msg.levelId, time_ms, suspect
+                    )
+                else:
+                    await _upsert_progress(session, student_id, msg.levelId, time_ms, suspect)
             await session.commit()
         return True
     except Exception:  # noqa: BLE001 — DB 掛了不能擋上課；不回 ack 讓 client 重試
@@ -115,15 +126,66 @@ async def _upsert_progress(
     await session.execute(stmt)
 
 
+async def _upsert_class_progress(
+    session: AsyncSession,
+    student_id: int,
+    team_id: int,
+    level_id: str,
+    time_ms: int,
+    suspect: bool,
+) -> None:
+    stmt = pg_insert(ClassProgress).values(
+        student_id=student_id,
+        team_id=team_id,
+        level_id=level_id,
+        best_time_ms=time_ms,
+        attempts=1,
+        first_completed_at=func.now(),
+        last_completed_at=func.now(),
+        suspect=suspect,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[ClassProgress.student_id, ClassProgress.team_id, ClassProgress.level_id],
+        set_={
+            "best_time_ms": func.least(
+                func.coalesce(ClassProgress.best_time_ms, stmt.excluded.best_time_ms),
+                stmt.excluded.best_time_ms,
+            ),
+            "attempts": ClassProgress.attempts + 1,
+            "first_completed_at": func.coalesce(ClassProgress.first_completed_at, func.now()),
+            "last_completed_at": func.now(),
+            "suspect": or_(ClassProgress.suspect, stmt.excluded.suspect),
+            "updated_at": func.now(),
+        },
+    )
+    await session.execute(stmt)
+
+
 async def load_progress(
-    maker: async_sessionmaker[AsyncSession], student_id: int
-) -> list[Progress]:
-    """該生 progress 全列（一班 ≤30 人、每人 16 關，直接全撈）；DB 出錯回空列只 log。"""
+    maker: async_sessionmaker[AsyncSession],
+    student_id: int,
+    *,
+    mode: str = "personal",
+    team_id: int | None = None,
+) -> list[Progress] | list[ClassProgress]:
+    """該生進度。class 且有班級 → 該班帳本；否則個人帳本。DB 出錯回空列只 log。"""
     try:
         async with maker() as session:
-            rows = (
-                await session.execute(select(Progress).where(Progress.student_id == student_id))
-            ).scalars()
+            if mode == "class" and team_id is not None:
+                rows = (
+                    await session.execute(
+                        select(ClassProgress).where(
+                            ClassProgress.student_id == student_id,
+                            ClassProgress.team_id == team_id,
+                        )
+                    )
+                ).scalars()
+            else:
+                rows = (
+                    await session.execute(
+                        select(Progress).where(Progress.student_id == student_id)
+                    )
+                ).scalars()
             return list(rows.all())
     except Exception:  # noqa: BLE001 — 歷史進度撈不到不能讓學生連不上課
         logger.exception("[Progress] 讀取學生 #%d 歷史進度失敗（本次以空進度進場）", student_id)

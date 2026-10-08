@@ -213,6 +213,9 @@ class Teacher(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False, server_default="teacher")
     # 停權不刪帳
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    # 授權到期；NULL = 不限期
+    licensed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -265,7 +268,8 @@ class Student(Base):
         # 隊內學生碼唯一；無 email 學生用 team_code + student_code 登入
         UniqueConstraint("team_id", "student_code"),
         CheckConstraint("invite_status IN ('none', 'sent', 'accepted')", name="invite_status"),
-        CheckConstraint("status IN ('active', 'removed')", name="status"),
+        CheckConstraint("status IN ('active', 'disabled', 'removed')", name="status"),
+        CheckConstraint("progress_mode IN ('personal', 'class')", name="progress_mode"),
         # 有 email 者隊內唯一（大小寫不敏感）：部分唯一索引
         Index(
             "uq_students_team_id_lower_email",
@@ -277,9 +281,8 @@ class Student(Base):
     )
 
     id: Mapped[int] = _id_column()
-    team_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("teams.id"), nullable=False, index=True
-    )
+    # 老師建立時的原班級；自行註冊可為空
+    team_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("teams.id"), index=True)
     # 顯示名
     name: Mapped[str] = mapped_column(Text, nullable=False)
     # 學生端頭像（沿用現有產品語言）
@@ -288,18 +291,77 @@ class Student(Base):
     email: Mapped[str | None] = mapped_column(Text)
     # 設過密碼才有
     password_hash: Mapped[str | None] = mapped_column(Text)
-    # 隊內學生碼（如 "03"）
-    student_code: Mapped[str] = mapped_column(Text, nullable=False)
+    # 原班級學生碼；自行註冊、尚未加入班級時為空
+    student_code: Mapped[str | None] = mapped_column(Text)
     # 邀請信狀態
     invite_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="none")
     # 老師移除學生 → removed（進度保留可查）
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    licensed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 目前進房用的班級；NULL = 不自動進班
+    active_team_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("teams.id"))
+    # personal = 自己的進度帳本；class = active_team 的班級帳本
+    progress_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default="personal")
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-# ---------- progress — 關卡進度（一生一關一列，upsert）----------
+class StudentMembership(Base):
+    """學生加入的班級（可多班）；退出只改 status，不刪列。"""
+
+    __tablename__ = "student_memberships"
+    __table_args__ = (
+        UniqueConstraint("student_id", "team_id"),
+        CheckConstraint("status IN ('active', 'left')", name="status"),
+        Index("ix_student_memberships_team_id", "team_id"),
+    )
+
+    id: Mapped[int] = _id_column()
+    student_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("students.id"), nullable=False)
+    team_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("teams.id"), nullable=False
+    )
+    student_code: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    joined_at: Mapped[datetime] = _created_at()
+    left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ClassProgress(Base):
+    """班級進度帳本：同一學生在不同班的同一關各自一列。"""
+
+    __tablename__ = "class_progress"
+    __table_args__ = (PrimaryKeyConstraint("student_id", "team_id", "level_id"),)
+
+    student_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("students.id"), nullable=False)
+    team_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("teams.id"), nullable=False)
+    level_id: Mapped[str] = mapped_column(Text, nullable=False)
+    best_time_ms: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    first_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    suspect: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class PlatformAdmin(Base):
+    """平台管理員（不在 teachers 表）。"""
+
+    __tablename__ = "platform_admins"
+    __table_args__ = (CheckConstraint("status IN ('active', 'disabled')", name="status"),)
+
+    id: Mapped[int] = _id_column()
+    username: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    created_at: Mapped[datetime] = _created_at()
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ---------- progress — 個人進度（一生一關一列，upsert）----------
 
 
 class Progress(Base):
@@ -332,7 +394,9 @@ class Progress(Base):
 class Session(Base):
     __tablename__ = "sessions"
     __table_args__ = (
-        CheckConstraint("principal_type IN ('teacher', 'student')", name="principal_type"),
+        CheckConstraint(
+            "principal_type IN ('teacher', 'student', 'admin')", name="principal_type"
+        ),
         CheckConstraint("purpose IN ('auth', 'invite', 'reset')", name="purpose"),
         # 多型關聯（teachers.id / students.id），用 CHECK 不用 FK
         Index("ix_sessions_principal_type_principal_id", "principal_type", "principal_id"),

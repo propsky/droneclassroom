@@ -51,7 +51,8 @@ from .accounts import (
 from .config import Settings
 from .db.audit import record_event
 from .db.models import Session as SessionRow
-from .db.models import Student, Teacher, Team
+from .db.models import Student, StudentMembership, Teacher, Team
+from .licensing import license_expired
 from .mailer import Mailer
 
 # 登入類端點共用前置（Origin 白名單 + 同 IP 限流）與 email 正規化沿用 rest.py
@@ -94,7 +95,7 @@ class StudentEntry(BaseModel):
     studentCode: str  # noqa: N815
     email: str | None
     inviteStatus: Literal["none", "sent", "accepted"]  # noqa: N815
-    status: Literal["active", "removed"]
+    status: Literal["active", "disabled", "removed"]
     createdAt: float  # noqa: N815 — epoch 毫秒（與 Date.now() 同制）
     lastSeenAt: float | None  # noqa: N815
 
@@ -120,10 +121,11 @@ class StudentMe(BaseModel):
     id: int
     name: str
     emoji: str
-    teamId: int  # noqa: N815
-    teamName: str  # noqa: N815
-    teamCode: str  # noqa: N815
-    studentCode: str  # noqa: N815
+    teamId: int | None = None  # noqa: N815
+    teamName: str = ""  # noqa: N815
+    teamCode: str = ""  # noqa: N815
+    studentCode: str = ""  # noqa: N815
+    progressMode: Literal["personal", "class"] = "personal"  # noqa: N815
 
 
 class StudentLoginRequest(BaseModel):
@@ -174,7 +176,7 @@ def _entry(s: Student) -> StudentEntry:
         id=s.id,
         name=s.name,
         emoji=s.emoji,
-        studentCode=s.student_code,
+        studentCode=s.student_code or "",
         email=s.email,
         inviteStatus=s.invite_status,  # type: ignore[arg-type] — DB CHECK 已限定
         status=s.status,  # type: ignore[arg-type]
@@ -183,15 +185,16 @@ def _entry(s: Student) -> StudentEntry:
     )
 
 
-def _me(student: Student, team: Team) -> StudentMe:
+def _me(student: Student, team: Team | None) -> StudentMe:
     return StudentMe(
         id=student.id,
         name=student.name,
         emoji=student.emoji,
-        teamId=team.id,
-        teamName=team.name,
-        teamCode=team.team_code,
-        studentCode=student.student_code,
+        teamId=team.id if team is not None else None,
+        teamName=team.name if team is not None else "",
+        teamCode=team.team_code if team is not None else "",
+        studentCode=student.student_code or "",
+        progressMode=student.progress_mode,  # type: ignore[arg-type]
     )
 
 
@@ -372,6 +375,16 @@ async def students_create(
         session.add(student)
         created.append(student)
     await session.flush()
+    for student in created:
+        if student.team_id is not None and student.student_code:
+            session.add(
+                StudentMembership(
+                    student_id=student.id,
+                    team_id=student.team_id,
+                    student_code=student.student_code,
+                )
+            )
+            student.active_team_id = student.team_id
     await record_event(
         session,
         event_type="student.created",
@@ -510,7 +523,21 @@ async def _login_by_code(
         )
     ).scalar_one_or_none()
     if student is None:
+        mem = (
+            await session.execute(
+                select(StudentMembership).where(
+                    StudentMembership.team_id == team.id,
+                    StudentMembership.student_code == code,
+                    StudentMembership.status == "active",
+                )
+            )
+        ).scalar_one_or_none()
+        if mem is not None:
+            student = await session.get(Student, mem.student_id)
+    if student is None or student.status != "active":
         return None, team, False
+    if license_expired(student.licensed_until):
+        raise HTTPException(status_code=403, detail="帳號授權已到期")
     if student.password_hash is not None:
         if password is None:
             raise HTTPException(status_code=401, detail="password_required")
@@ -536,8 +563,8 @@ async def _login_by_email(
         .all()
     )
     for student in candidates:
-        team = await session.get(Team, student.team_id)
-        if team is None or team.archived_at is not None:
+        team = await session.get(Team, student.team_id) if student.team_id else None
+        if team is not None and team.archived_at is not None:
             continue
         assert student.password_hash is not None
         if verify_password(student.password_hash, password):
@@ -546,7 +573,7 @@ async def _login_by_email(
 
 
 async def _issue_student_login(
-    request: Request, session: AsyncSession, student: Student, team: Team
+    request: Request, session: AsyncSession, student: Student, team: Team | None
 ) -> StudentLoginResponse:
     """發學生 auth session + 組回應（登入 / 邀請 accept 共用）。不 commit。"""
     settings: Settings = request.app.state.settings
@@ -586,7 +613,9 @@ async def student_login(
         raise HTTPException(
             status_code=422, detail="請帶 teamCode + studentCode 或 email + password"
         )
-    if not ok or student is None or team is None:
+    if ok and student is not None and license_expired(student.licensed_until):
+        raise HTTPException(status_code=403, detail="帳號授權已到期")
+    if not ok or student is None or (method == "code" and team is None):
         await record_event(
             session,
             event_type="student.login_failed",
@@ -709,7 +738,11 @@ async def student_logout(
 ) -> StudentLogoutResponse:
     """撤銷目前學生 session（與老師 logout 對齊）。"""
     student = await session.get(Student, current.principal_id)
-    team = await session.get(Team, student.team_id) if student is not None else None
+    team = (
+        await session.get(Team, student.team_id)
+        if student is not None and student.team_id is not None
+        else None
+    )
     await revoke_session(session, current)
     if student is not None and team is not None:
         await record_event(
@@ -724,3 +757,186 @@ async def student_logout(
         )
     await session.commit()
     return StudentLogoutResponse()
+
+
+class StudentRegisterRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=8, max_length=1024)
+    emoji: str = Field(default="🙂", max_length=16)
+
+
+class JoinTeamRequest(BaseModel):
+    teamCode: str = Field(min_length=4, max_length=12)  # noqa: N815
+    password: str | None = Field(default=None, max_length=100)
+
+
+class LeaveTeamRequest(BaseModel):
+    teamId: int  # noqa: N815
+
+
+class ProgressContextRequest(BaseModel):
+    """personal = 自己的進度；class = 目前加入的那個班。"""
+
+    mode: Literal["personal", "class"]
+    teamId: int | None = None  # noqa: N815
+
+
+@router.post("/auth/student/register", status_code=201)
+async def student_register(
+    request: Request, body: StudentRegisterRequest, session: DbSession
+) -> StudentLoginResponse:
+    """學生自行註冊：獨立帳號，不屬於任何班級，進度先記在自己名下。"""
+    ip = _login_guard(request)
+    email = _normalize_email(body.email)
+    if "@" not in email:
+        raise HTTPException(status_code=422, detail="email 格式不正確")
+    if len(body.password) < request.app.state.settings.password_min_length:
+        raise HTTPException(status_code=422, detail="密碼至少 8 個字元")
+    taken = (
+        await session.execute(select(Student.id).where(func.lower(Student.email) == email))
+    ).first()
+    if taken is not None:
+        raise HTTPException(status_code=409, detail="這個 email 已經註冊過")
+    student = Student(
+        name=body.name.strip(),
+        email=email,
+        emoji=body.emoji or "🙂",
+        password_hash=hash_password(body.password),
+        invite_status="accepted",
+        progress_mode="personal",
+    )
+    session.add(student)
+    await session.flush()
+    result = await _issue_student_login(request, session, student, None)
+    await record_event(
+        session,
+        event_type="student.created",
+        actor_type="student",
+        actor_id=student.id,
+        student_id=student.id,
+        payload={"ip": ip, "via": "self"},
+    )
+    await session.commit()
+    return result
+
+
+async def _next_code(session: AsyncSession, team_id: int) -> str:
+    rows = (
+        await session.execute(
+            select(StudentMembership.student_code).where(StudentMembership.team_id == team_id)
+        )
+    ).scalars()
+    n = max((int(c) for c in rows if c.isdigit()), default=0) + 1
+    return f"{n:02d}"
+
+
+@router.post("/auth/student/teams/join")
+async def student_join_team(
+    request: Request, body: JoinTeamRequest, current: CurrentStudentSession, session: DbSession
+) -> StudentMe:
+    student = await session.get(Student, current.principal_id)
+    if student is None or student.status != "active":
+        raise HTTPException(status_code=401, detail="請先登入")
+    code = body.teamCode.strip().upper()
+    team = (
+        await session.execute(
+            select(Team).where(Team.team_code == code, Team.archived_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if team is None:
+        raise HTTPException(status_code=404, detail="找不到這個班級")
+    if team.locked:
+        raise HTTPException(status_code=403, detail="這個班級已鎖定，不能加入")
+    if team.join_password_hash is not None:
+        from .accounts import verify_password
+
+        if not body.password or not verify_password(team.join_password_hash, body.password):
+            raise HTTPException(status_code=401, detail="班級密碼不正確")
+    mem = (
+        await session.execute(
+            select(StudentMembership).where(
+                StudentMembership.student_id == student.id,
+                StudentMembership.team_id == team.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if mem is not None and mem.status == "active":
+        raise HTTPException(status_code=409, detail="已經在這個班級裡")
+    roster_code = mem.student_code if mem is not None else await _next_code(session, team.id)
+    if mem is None:
+        mem = StudentMembership(
+            student_id=student.id, team_id=team.id, student_code=roster_code
+        )
+        session.add(mem)
+    else:
+        mem.status = "active"
+        mem.left_at = None
+    if student.team_id is None:
+        student.team_id = team.id
+        student.student_code = roster_code
+    student.active_team_id = team.id
+    await session.commit()
+    return _me(student, team)
+
+
+@router.post("/auth/student/teams/leave")
+async def student_leave_team(
+    body: LeaveTeamRequest, current: CurrentStudentSession, session: DbSession
+) -> StudentMe:
+    student = await session.get(Student, current.principal_id)
+    if student is None:
+        raise HTTPException(status_code=401, detail="請先登入")
+    mem = (
+        await session.execute(
+            select(StudentMembership).where(
+                StudentMembership.student_id == student.id,
+                StudentMembership.team_id == body.teamId,
+                StudentMembership.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if mem is None:
+        raise HTTPException(status_code=404, detail="不在這個班級裡")
+    mem.status = "left"
+    mem.left_at = _now()
+    if student.active_team_id == body.teamId:
+        student.active_team_id = None
+        student.progress_mode = "personal"
+    team = await session.get(Team, student.active_team_id) if student.active_team_id else None
+    await session.commit()
+    return _me(student, team)
+
+
+@router.post("/auth/student/progress-context")
+async def student_progress_context(
+    body: ProgressContextRequest, current: CurrentStudentSession, session: DbSession
+) -> StudentMe:
+    """切換進度記在自己名下，或記在某個已加入的班級。"""
+    student = await session.get(Student, current.principal_id)
+    if student is None:
+        raise HTTPException(status_code=401, detail="請先登入")
+    team: Team | None = None
+    if body.mode == "class":
+        if body.teamId is None:
+            raise HTTPException(status_code=422, detail="請指定班級")
+        mem = (
+            await session.execute(
+                select(StudentMembership).where(
+                    StudentMembership.student_id == student.id,
+                    StudentMembership.team_id == body.teamId,
+                    StudentMembership.status == "active",
+                )
+            )
+        ).scalar_one_or_none()
+        if mem is None:
+            raise HTTPException(status_code=404, detail="尚未加入這個班級")
+        student.progress_mode = "class"
+        student.active_team_id = body.teamId
+        team = await session.get(Team, body.teamId)
+    else:
+        student.progress_mode = "personal"
+    await session.commit()
+    if team is None and student.active_team_id:
+        team = await session.get(Team, student.active_team_id)
+    return _me(student, team)

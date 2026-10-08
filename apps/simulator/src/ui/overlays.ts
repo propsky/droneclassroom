@@ -10,7 +10,11 @@ import {
   fetchStudentMe,
   loadStudentSession,
   saveStudentSession,
+  joinTeam,
+  leaveTeam,
+  setProgressContext,
   studentLogin,
+  studentRegister,
   studentLogout,
   touchStudentSession,
   type StudentSession,
@@ -116,6 +120,8 @@ let studentSession: StudentSession | null = null;
 function syncAccountUi(): void {
   const btn = $('player-logout');
   if (btn) btn.style.display = studentSession ? '' : 'none';
+  const classes = $('player-classes');
+  if (classes) classes.style.display = studentSession ? '' : 'none';
 }
 
 // ---- 登入 modal 分頁（快速進場｜我有學生帳號）----
@@ -133,17 +139,21 @@ function setLoginTab(tab: 'guest' | 'account'): void {
 }
 
 // ---- 帳號分頁狀態：碼登入 ↔ email 登入；密碼欄預設隱藏（伺服器說需要才展開）----
-let acctMode: 'code' | 'email' = 'code';
+let acctMode: 'code' | 'email' | 'register' = 'code';
 let acctPwShown = false;
 
-function setAcctMode(mode: 'code' | 'email'): void {
+function setAcctMode(mode: 'code' | 'email' | 'register'): void {
   acctMode = mode;
   const codeFields = $('acct-code-fields');
   const emailFields = $('acct-email-fields');
+  const regFields = $('acct-register-fields');
   if (codeFields) codeFields.hidden = mode !== 'code';
   if (emailFields) emailFields.hidden = mode !== 'email';
+  if (regFields) regFields.hidden = mode !== 'register';
   const link = $('acct-mode-switch');
   if (link) link.textContent = mode === 'code' ? '用 email 登入' : '用班級碼登入';
+  const btn = $('acct-login-btn');
+  if (btn) btn.textContent = mode === 'register' ? '建立帳號' : '登入';
   setAcctError(null);
 }
 
@@ -238,6 +248,33 @@ async function submitAccountLogin(finishLogin: () => void, onJoin: () => void): 
     req.password = pw;
   }
 
+  if (acctMode === 'register') {
+    const name = (($('acct-reg-name') as HTMLInputElement | null)?.value ?? '').trim();
+    const email = (($('acct-reg-email') as HTMLInputElement | null)?.value ?? '').trim();
+    const password = ($('acct-reg-pw') as HTMLInputElement | null)?.value ?? '';
+    if (!name) {
+      setAcctError('請輸入名字');
+      return;
+    }
+    if (!email.includes('@')) {
+      setAcctError('請輸入 email');
+      return;
+    }
+    if (password.length < 8) {
+      setAcctError('密碼至少 8 碼');
+      return;
+    }
+    setAcctPending(true);
+    const created = await studentRegister({ name, email, password });
+    setAcctPending(false);
+    if (created.ok) {
+      onStudentLoggedIn(created.data, finishLogin, onJoin);
+      return;
+    }
+    setAcctError(created.code === 'network' ? '連不上伺服器' : '註冊失敗：email 可能已被使用，或密碼太短');
+    return;
+  }
+
   setAcctPending(true);
   const res = await studentLogin(req);
   setAcctPending(false);
@@ -267,6 +304,9 @@ function initAccountLogin(finishLogin: () => void, onJoin: () => void): void {
   $('login-tab-account')?.addEventListener('click', () => setLoginTab('account'));
   $('acct-mode-switch')?.addEventListener('click', () =>
     setAcctMode(acctMode === 'code' ? 'email' : 'code'),
+  );
+  $('acct-register-switch')?.addEventListener('click', () =>
+    setAcctMode(acctMode === 'register' ? 'code' : 'register'),
   );
 
   // 碼欄位：自動大寫 / 只留英數；任何輸入清錯誤
@@ -298,6 +338,48 @@ function initAccountLogin(finishLogin: () => void, onJoin: () => void): void {
 /** 頭像下拉「登出帳號」：清 token、斷線回訪客、回登入 modal（快速進場分頁） */
 function initLogout(): void {
   syncAccountUi();
+  $('player-classes')?.addEventListener('click', () => {
+    $('player-hud')?.classList.remove('open');
+    const token = studentSession?.token;
+    const me = studentSession?.me;
+    if (!token || !me) return;
+    const code = window.prompt('加入班級：輸入 4 碼班級碼。若班級有密碼，下一格再填。留空則跳過。', '');
+    const run = async (): Promise<void> => {
+      if (code && code.trim()) {
+        const pw = window.prompt('班級密碼（沒有就留空）', '') ?? '';
+        const joined = await joinTeam(token, code.trim().toUpperCase(), pw || undefined);
+        if (!joined.ok) {
+          toast('加入失敗：班級碼、鎖定或密碼不對', 'warning');
+          return;
+        }
+        saveStudentSession(token, joined.data, studentSession?.expiresInSec ?? 0);
+        studentSession = loadStudentSession();
+        toast(`已加入 ${joined.data.teamName || '班級'}`, 'success');
+      }
+      const current = loadStudentSession()?.me;
+      if (current?.teamId && window.confirm('要離開目前這個班級嗎？')) {
+        const left = await leaveTeam(token, current.teamId);
+        if (left.ok) {
+          saveStudentSession(token, left.data, studentSession?.expiresInSec ?? 0);
+          studentSession = loadStudentSession();
+          toast('已離開班級，進度改記在自己名下', 'success');
+        }
+      }
+      const useClass = window.confirm('進度要記在目前班級嗎？\n按「取消」則記在自己名下。');
+      const who = loadStudentSession()?.me;
+      const switched = await setProgressContext(
+        token,
+        useClass && who?.teamId ? 'class' : 'personal',
+        who?.teamId ?? undefined,
+      );
+      if (switched.ok) {
+        saveStudentSession(token, switched.data, studentSession?.expiresInSec ?? 0);
+        studentSession = loadStudentSession();
+        toast(switched.data.progressMode === 'class' ? '之後的成績記入班級' : '之後的成績記入自己', 'success');
+      }
+    };
+    void run();
+  });
   $('player-logout')?.addEventListener('click', () => {
     $('player-hud')?.classList.remove('open');
     const token = studentSession?.token;

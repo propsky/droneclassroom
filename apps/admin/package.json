@@ -1,0 +1,15 @@
+{
+  "name": "@creafly/admin",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CREAFLY 平台管理員面板",
+  "scripts": {
+    "dev": "vite --port 5175 --strictPort",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

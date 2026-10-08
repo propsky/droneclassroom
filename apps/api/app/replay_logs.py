@@ -90,7 +90,7 @@ async def upload_replay_log(
     student = await db.get(Student, current.principal_id)
     if student is None:
         raise HTTPException(status_code=401, detail="學生不存在")
-    team = await db.get(Team, student.team_id)
+    team = await db.get(Team, student.team_id) if student.team_id is not None else None
     event_id = await record_event(
         db,
         event_type="replay.input_log",
