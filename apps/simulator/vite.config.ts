@@ -72,7 +72,7 @@ export default defineConfig(({ mode }) => {
             '**/*.{js,css,html,json,svg,png,gif,cur,ico,webmanifest}',
             'blockly-media/*.{mp3,ogg,wav}', // Blockly 點擊音效（極小）
           ],
-          globIgnores: ['**/node_modules/**', 'teacher/**', 'assets/**/*.wasm'],
+          globIgnores: ['**/node_modules/**', 'teacher/**', 'admin/**', 'assets/**/*.wasm'],
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           // 舊版 SW 的過期快取隨新版清掉
           cleanupOutdatedCaches: true,
@@ -80,15 +80,15 @@ export default defineConfig(({ mode }) => {
           // clientsClaim 只在「啟用」當下生效：首次安裝後立刻接管本頁（runtime cache 才能開始收 HDRI 等資產）
           skipWaiting: false,
           clientsClaim: true,
-          // SPA 導覽離線時回 index.html；老師後台（同 Pages 專案 /teacher/）與後端路徑不接管
+          // SPA 導覽離線時回 index.html；老師後台、管理員面板與後端路徑不接管
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/teacher/, /^\/api\//, /^\/auth/, /^\/ws/],
+          navigateFallbackDenylist: [/^\/teacher/, /^\/admin/, /^\/api\//, /^\/auth/, /^\/ws/],
           runtimeCaching: [
             // 後端 API / 登入 / 老師後台：一律不快取（同網域路徑）。
             // WebSocket 握手不經 Service Worker，/ws 天生不受影響。
             {
               urlPattern: ({ url, sameOrigin }) =>
-                sameOrigin && /^\/(api|auth|teacher)(\/|$)/.test(url.pathname),
+                sameOrigin && /^\/(api|auth|teacher|admin)(\/|$)/.test(url.pathname),
               handler: 'NetworkOnly',
             },
             // 後端 API：一律不快取（VITE_API_URL 指定的獨立網域）
