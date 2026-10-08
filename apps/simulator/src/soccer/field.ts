@@ -5,7 +5,7 @@
 // 之後老師調場地大小，客戶端零改動。
 // 單人練習：沒有伺服器 → 進場時 resetSoccerField() 回 constants.ts 的 fallback。
 import type { SoccerFieldDef } from '@creafly/shared';
-import { SOCCER_FIELD, SOCCER_GOAL_INSET } from './constants';
+import { SOCCER_FIELD, SOCCER_GOAL_INSET, SOCCER_START_DEPTH } from './constants';
 
 /** 生效場地：協定 SoccerFieldDef + 客戶端衍生欄位（goalZ / goalTube / startZ） */
 export interface ActiveSoccerField {
@@ -21,18 +21,18 @@ export interface ActiveSoccerField {
   goalY: number;
   /** 球門環半徑 */
   goalR: number;
-  /** 球門環管徑（視覺；隨 goalR 比例衍生） */
+  /** 球門環管半徑（視覺；伺服器有帶 goalTube 就用，否則按舊比例衍生） */
   goalTube: number;
-  /** 起始區中心 z（= halfZ / 2 衍生；單人練習用） */
+  /** 起飛區中心 |z|（貼底線內側 = halfZ - 進深/2） */
   startZ: number;
 }
 
-/** 舊版伺服器線上格式可能帶 top / goalZ（新協定是 ceil、goalZ 由客戶端衍生）→ 都吃 */
-type LooseFieldDef = SoccerFieldDef & { top?: number; goalZ?: number };
+/** 舊版伺服器可能帶 top / goalZ / goalTube（新協定 goalZ、goalTube 由伺服器下發）→ 都吃 */
+type LooseFieldDef = SoccerFieldDef & { top?: number; goalZ?: number; goalTube?: number };
 
-/** 門環管徑：隨半徑比例（goalR 1.2 → 0.11 對齊 legacy；下限防過細） */
+/** 舊伺服器沒帶管半徑時的衍生（下限防過細）；F9A 預設會直接下發 0.1 */
 function goalTubeOf(goalR: number): number {
-  return Math.max(0.11, +(goalR * 0.09).toFixed(2));
+  return Math.max(0.08, +(goalR * 0.09).toFixed(2));
 }
 
 function fromFallback(): ActiveSoccerField {
@@ -77,8 +77,8 @@ export function setSoccerFieldFromServer(def: SoccerFieldDef | null | undefined)
     goalZ: typeof loose.goalZ === 'number' ? loose.goalZ : def.halfZ - SOCCER_GOAL_INSET,
     goalY: def.goalY,
     goalR: def.goalR,
-    goalTube: goalTubeOf(def.goalR),
-    startZ: def.halfZ / 2,
+    goalTube: typeof loose.goalTube === 'number' ? loose.goalTube : goalTubeOf(def.goalR),
+    startZ: def.halfZ - SOCCER_START_DEPTH / 2,
   };
   const changed =
     next.halfX !== current.halfX ||
@@ -86,7 +86,8 @@ export function setSoccerFieldFromServer(def: SoccerFieldDef | null | undefined)
     next.top !== current.top ||
     next.goalZ !== current.goalZ ||
     next.goalY !== current.goalY ||
-    next.goalR !== current.goalR;
+    next.goalR !== current.goalR ||
+    next.goalTube !== current.goalTube;
   current = next;
   return changed;
 }

@@ -5,6 +5,7 @@ tick 相關流程全部用假時鐘（conftest.clock）＋ 手動 tick（conftes
 
 from fastapi.testclient import TestClient
 
+from app.games.soccer import SOCCER_BREAK_SEC, SOCCER_PK_MIN_ROUNDS, SOCCER_PK_SHOT_SEC
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
@@ -83,8 +84,8 @@ def test_老師手動分隊與指定前鋒(client: TestClient, teacher_ticket: s
 def test_striker模式進球驗證與半場重置與勝負(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """striker 模式（回歸保護）：前鋒 + armed + 位置在門環內才得分；
-    進球後回自家半場恢復 armed；時間到判勝。場地常數依新設定換算（20×40、門高 4.5）。"""
+    """striker 模式：前鋒 + 尚未鎖回場 + 位置在圓環內才得分；
+    得分的那台回己方半場才解鎖；防守回半場不算。一節結束先進局間休息。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -101,76 +102,86 @@ def test_striker模式進球驗證與半場重置與勝負(
             go = _countdown_to_go(client, clock, s1)
             assert go["mode"] == "striker"
             assert go["ball"] is None  # striker 模式沒有共用球
-            # 場地資料驅動下發（新常數：halfX=10、halfZ=20、goalY=4.5、goalR=3、ceil=15；
-            # goalZ = halfZ - 內縮 4 = 門面位置，與 client 門環視覺一致）
+            assert go["match"]["phase"] == "period" and go["match"]["period"] == 1
+            # F9A 階段一：14×7×5、內半徑 0.35、管半徑 0.1、門面離底線 2m（goalZ=5）
             assert go["field"] == {
-                "halfX": 10.0,
-                "halfZ": 20.0,
-                "goalY": 4.5,
-                "goalR": 3.0,
-                "ceil": 15.0,
-                "goalZ": 16.0,
+                "halfX": 3.5,
+                "halfZ": 7.0,
+                "goalY": 3.25,
+                "goalR": 0.35,
+                "ceil": 5.0,
+                "goalTube": 0.1,
+                "goalZ": 5.0,
             }
-            # 出生點：前鋒居中 x≈0、z = 站位端（±halfZ）× 0.85
+            # 出生點：起飛窄帶貼底線（|z| = halfZ - 0.5），前鋒居中，防守在帶內
             spawns = {sp["id"]: sp for sp in go["spawns"]}
-            assert spawns["s1"] == {"id": "s1", "x": 0.0, "z": -17.0}  # 藍前鋒
-            assert spawns["s2"] == {"id": "s2", "x": 0.0, "z": 17.0}  # 紅前鋒
-            assert spawns["s3"]["x"] == -5.0  # 藍防守沿 x 排開（halfX×0.5）
+            assert spawns["s1"] == {"id": "s1", "x": 0.0, "z": -6.5}  # 藍前鋒
+            assert spawns["s2"] == {"id": "s2", "x": 0.0, "z": 6.5}  # 紅前鋒
+            assert spawns["s3"]["x"] == -0.35  # 藍防守在 1m 窄帶內
+            assert spawns["s3"]["z"] == -6.5
             assert go["endTime"] == int(clock.ms + 40_000)
 
-            # 迴歸驗證（門面錯位 bug）：在邊界牆 z=20（距門面 4 > 容差 1）宣告 → 不算
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 20, "yaw": 0})
+            # 底線 z=7 距門面 2m（容差 1）→ 不算
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 7, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 0
-            # 迴歸驗證（方形判定漏洞）：門面上但門環外的「角落」（hypot≈3.4 > goalR=3）→ 不算
+            # 門面上但在環外（hypot≈0.42 > 內半徑 0.35）→ 不算
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 2.4, "y": 6.9, "z": 16, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0.3, "y": 3.55, "z": 5, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 0
 
-            # 藍隊前鋒飛到對方門環（attackGoalZ=+16 門面、goalY=4.5）→ 進球
-            # （門面在端牆內縮 4，不是 z=20 邊界牆 — 之前判定跑到牆上是回歸 bug）
+            # 藍隊前鋒飛到對方圓環（attackGoalZ=+5、goalY=3.25）→ 進球
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 16, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["scores"] == {"blue": 1, "red": 0}
             assert soccer.armed["blue"] is False
+            assert soccer.players[_gkey("小明")].needs_return is True
             # 消化進球後的 soccer_scores（armed=False），下面才能等到恢復 armed 的那則
             assert recv_until(s1, "soccer_scores")["armed"]["blue"] is False
 
-            # 未 armed 再宣告 → 不算
+            # 未回半場再宣告 → 不算
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 1
 
             # 非前鋒在門環內宣告 → 不算
             clock.advance(3000)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 16, "yaw": 0})
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
             s3.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 1
+
+            # 防守回到藍隊半場，不能替攻擊手解鎖
+            clock.advance(3000)
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": -1, "yaw": 0})
+            tick(client)
+            assert soccer.armed["blue"] is False
 
             # 位置不在門環 → 不算（紅隊前鋒 armed 但人在原點）
             s2.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["red"] == 0
 
-            # 半場重置：藍前鋒回自家半場（z<0）→ tick 恢復 armed
-            clock.advance(3000)  # 拉開回報間隔，位移 ~21 單位不觸發超速（≈7 單位/秒）
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 2, "z": -5, "yaw": 0})
+            # 半場重置：得分的那台（藍前鋒）回自家半場（z<0）→ tick 恢復 armed
+            clock.advance(3000)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 2, "z": -1, "yaw": 0})
             tick(client)
             assert soccer.armed["blue"] is True
+            assert soccer.players[_gkey("小明")].needs_return is False
             assert recv_until(s1, "soccer_scores")["armed"]["blue"] is True
 
-            # 時間到 → 藍勝（老師端也收到）
+            # 時間到：藍贏下第 1 局，尚未兩勝 → 局間休息，本場還沒結束
             clock.advance(40_000)
             tick(client)
-            end = recv_until(t, "soccer_end")
-            assert end["winner"] == "blue" and end["scores"] == {"blue": 1, "red": 0}
-            assert soccer.status == "done"  # 線上值沿用 legacy 'done'
+            assert soccer.status == "break"
+            assert soccer.sets == {"blue": 1, "red": 0}
+            assert soccer.phase == "break"
+            assert soccer.winner is None
 
 
 def test_倒數中soccer_reset取消與重新分隊(
@@ -254,3 +265,198 @@ def test_與大亂鬥互斥(client: TestClient, teacher_ticket: str) -> None:
             recv_until(s, "arena_state")
             assert soccer.players[_gkey("小明")].active is False
             assert arena.players[_gkey("小明")].active is True
+
+
+def _blue_goal(client: TestClient, clock: FakeClock, ws) -> None:
+    """藍隊前鋒放到對方圓環並宣告進球（先拉開回報間隔，避免超速）。"""
+    clock.advance(3000)
+    ws.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 3.14})
+    ws.send_json({"type": "soccer_goal"})
+    settle(client)
+
+
+def test_未帶mode預設striker(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
+    """soccer_start 不帶 mode → 前鋒穿門，沒有共用球。"""
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1:
+            _register(s1, t, "小明")
+            _join_soccer(s1)
+            t.send_json({"type": "soccer_start", "durationSec": 30})
+            go = _countdown_to_go(client, clock, s1)
+            assert go["mode"] == "striker"
+            assert go["ball"] is None
+            assert go["match"]["sets"] == {"blue": 0, "red": 0}
+
+
+def test_非攻擊手進自家圓環犯規(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    """防守飛進自家圓環記犯規；攻擊手進自家圓環不算；人還在裡面不重複記。"""
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s3:
+            _register(s1, t, "小明")  # 藍前鋒
+            _register(s3, t, "小美")  # 先加入會是紅？兩人：s1 藍、s3 紅
+            _join_soccer(s1)
+            _join_soccer(s3)
+            # 把小美換到藍隊當防守
+            t.send_json({"type": "soccer_set_team", "studentId": "s2", "team": "blue"})
+            settle(client)
+            assert soccer.players[_gkey("小美")].team == "blue"
+            assert soccer.players[_gkey("小美")].striker is False
+            t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+
+            # 防守進入藍隊自家門（z=-5）
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
+            tick(client)
+            foul = recv_until(s3, "soccer_foul")
+            assert foul["reason"] == "own_ring" and foul["by"] == "s2"
+            assert foul["team"] == "blue"
+            assert soccer.foul_count == 1
+            assert soccer.scores == {"blue": 0, "red": 0}
+            # 還在裡面 → 不重複
+            tick(client)
+            assert soccer.foul_count == 1
+
+            # 攻擊手進自家圓環不是犯規
+            clock.advance(3000)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
+            tick(client)
+            assert soccer.foul_count == 1
+
+            # 防守離開再進入 → 再記一次
+            clock.advance(3000)
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0, "yaw": 0})
+            tick(client)
+            assert soccer.players[_gkey("小美")].in_own_ring is False
+            clock.advance(3000)
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
+            tick(client)
+            assert soccer.foul_count == 2
+
+
+def test_三局兩勝與局間休息(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    """連贏兩局就結束，中間有局間休息；休息中進球不算。"""
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join_soccer(s1)
+            _join_soccer(s2)
+            t.send_json({"type": "soccer_start", "durationSec": 5, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+
+            _blue_goal(client, clock, s1)
+            assert soccer.scores["blue"] == 1
+            clock.advance(5_000)
+            tick(client)
+            assert soccer.status == "break" and soccer.sets == {"blue": 1, "red": 0}
+
+            # 休息中穿環不算
+            s1.send_json({"type": "soccer_goal"})
+            settle(client)
+            assert soccer.scores["blue"] == 1
+
+            clock.advance(int(SOCCER_BREAK_SEC * 1000))
+            tick(client)
+            assert soccer.status == "running" and soccer.period == 2
+            assert soccer.scores == {"blue": 0, "red": 0}
+            assert soccer.players[_gkey("小明")].needs_return is False
+
+            _blue_goal(client, clock, s1)
+            clock.advance(5_000)
+            tick(client)
+            end = recv_until(t, "soccer_end")
+            assert end["reason"] == "sets"
+            assert end["winner"] == "blue"
+            assert end["match"]["sets"] == {"blue": 2, "red": 0}
+            assert soccer.status == "done"
+            assert soccer.period == 2  # 兩勝即止，不打第三局
+
+
+def _play_scoreless_period(client: TestClient, clock: FakeClock) -> None:
+    clock.advance(5_000)
+    tick(client)
+
+
+def test_平手黃金進球(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    """三節都沒人進球 → 黃金進球；先進球的隊直接贏。"""
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join_soccer(s1)
+            _join_soccer(s2)
+            t.send_json({"type": "soccer_start", "durationSec": 5, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+
+            _play_scoreless_period(client, clock)
+            assert soccer.status == "break"
+            clock.advance(int(SOCCER_BREAK_SEC * 1000))
+            tick(client)
+            _play_scoreless_period(client, clock)
+            assert soccer.status == "break" and soccer.sets == {"blue": 0, "red": 0}
+            clock.advance(int(SOCCER_BREAK_SEC * 1000))
+            tick(client)
+            assert soccer.period == 3
+            _play_scoreless_period(client, clock)
+            assert soccer.status == "golden"
+            assert soccer.scores == {"blue": 0, "red": 0}
+
+            _blue_goal(client, clock, s1)
+            end = recv_until(s1, "soccer_end")
+            assert end["reason"] == "golden" and end["winner"] == "blue"
+            assert soccer.status == "done"
+
+
+def test_黃金進球再平手進PK(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    """黃金進球時間到仍 0:0 → PK。藍隊三輪都進、紅隊沒進 → 藍勝。"""
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")  # 藍前鋒
+            _register(s2, t, "小華")  # 紅前鋒
+            _join_soccer(s1)
+            _join_soccer(s2)
+            t.send_json({"type": "soccer_start", "durationSec": 5, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+            for i in range(3):
+                _play_scoreless_period(client, clock)
+                if i < 2:
+                    clock.advance(int(SOCCER_BREAK_SEC * 1000))
+                    tick(client)
+            assert soccer.status == "golden"
+            clock.advance(5_000)
+            tick(client)
+            assert soccer.status == "pk"
+            assert soccer.pk_turn == "blue" and soccer.pk_round == 1
+
+            for rnd in range(1, SOCCER_PK_MIN_ROUNDS + 1):
+                assert soccer.pk_turn == "blue"
+                clock.advance(3000)
+                s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
+                s1.send_json({"type": "soccer_goal"})
+                settle(client)
+                assert soccer.pk_scores["blue"] == rnd
+                assert soccer.pk_turn == "red"
+                # 紅隊這記不進，時間到換邊
+                clock.advance(int(SOCCER_PK_SHOT_SEC * 1000))
+                tick(client)
+            end = recv_until(t, "soccer_end")
+            assert end["reason"] == "pk" and end["winner"] == "blue"
+            assert end["match"]["pkScores"] == {"blue": 3, "red": 0}
+            assert soccer.status == "done"

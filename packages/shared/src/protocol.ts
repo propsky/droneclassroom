@@ -99,7 +99,11 @@ export interface ArenaStateReqMsg { type: 'arena_state_req' }
 /** 老師手動停止大亂鬥（倒數中或進行中皆可；伺服器廣播 arena_end reason:'teacher_stop'） */
 export interface ArenaStopMsg { type: 'arena_stop' }
 
-/** 足球玩法：'ball' 推球進門（預設，共用球由伺服器模擬）；'striker' FAI 前鋒穿門（進階） */
+/**
+ * 足球玩法。
+ * 'striker' = FAI 前鋒穿門（預設）。
+ * 'ball' = 推球進門（隱藏選配：預設流程不提供，僅明確指定 mode 時啟用）。
+ */
 export type SoccerMode = 'ball' | 'striker';
 export interface SoccerStartMsg { type: 'soccer_start'; durationSec: number; mode?: SoccerMode }
 export interface SoccerStateReqMsg { type: 'soccer_state_req' }
@@ -342,7 +346,8 @@ export interface SoccerSpawn { id: string; x: number; z: number }
 
 /**
  * 場地尺寸 — 由伺服器下發、客戶端據此渲染（資料驅動：調整大小只改伺服器設定）。
- * halfX/halfZ = 場地半寬/半長；goalY = 門環中心高；goalR = 門環半徑；ceil = 天花板高
+ * halfX/halfZ = 場地半寬/半長；goalY = 門環中心高；goalR = 門環內半徑；ceil = 天花板高。
+ * goalTube = 環管半徑（選用；沒帶時客戶端自行衍生）。goalZ 由伺服器一併下發（舊客戶端可忽略）。
  */
 export interface SoccerFieldDef {
   halfX: number;
@@ -350,6 +355,28 @@ export interface SoccerFieldDef {
   goalY: number;
   goalR: number;
   ceil: number;
+  /** 環管半徑（m）。內徑 = goalR×2，厚度 = goalTube×2，外徑 = 內徑 + 2×厚度 */
+  goalTube?: number;
+  /** 門面 |z|（離底線往場內） */
+  goalZ?: number;
+}
+
+/** 賽制階段。正規局進行中 status 仍是 'running'；休息／黃金／PK 用同名 status */
+export type SoccerPhase = 'idle' | 'period' | 'break' | 'golden' | 'pk';
+
+/** 三局兩勝的局數與 PK 進度（soccer_state / soccer_go / soccer_scores / soccer_end 附帶） */
+export interface SoccerMatchMeta {
+  phase: SoccerPhase;
+  /** 正規局序（1–3）；尚未開賽為 0 */
+  period: number;
+  /** 已贏局數 */
+  sets: Record<SoccerTeam, number>;
+  /** PK 點球比分 */
+  pkScores: Record<SoccerTeam, number>;
+  /** PK 輪到哪一隊；非 PK 為 null */
+  pkTurn: SoccerTeam | null;
+  /** PK 輪次（1 起）；非 PK 為 0 */
+  pkRound: number;
 }
 
 /** 推球模式的球狀態（伺服器模擬，~12.5Hz 廣播；客戶端內插渲染） */
@@ -361,9 +388,9 @@ export interface SoccerBallState {
 
 export interface SoccerStateMsg {
   type: 'soccer_state';
-  /** 線上值以 legacy 為準：結束是 'done'（不是 'ended'） */
-  status: 'idle' | 'countdown' | 'running' | 'done';
-  /** 玩法（缺省視為 'striker' = legacy 相容） */
+  /** 結束是 'done'。break / golden / pk 是階段一的賽制階段 */
+  status: 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'done';
+  /** 玩法（缺省視為 'striker'） */
   mode?: SoccerMode;
   endTime: number; durationSec: number;
   scores: Record<SoccerTeam, number>;
@@ -373,6 +400,8 @@ export interface SoccerStateMsg {
   spawns?: SoccerSpawn[];
   field?: SoccerFieldDef;
   ball?: SoccerBallState | null;
+  /** 三局兩勝／黃金進球／PK。舊伺服器可能不帶 */
+  match?: SoccerMatchMeta;
 }
 export interface SoccerCountdownMsg { type: 'soccer_countdown'; n: number }
 export interface SoccerGoMsg {
@@ -381,6 +410,7 @@ export interface SoccerGoMsg {
   field?: SoccerFieldDef;
   mode?: SoccerMode;
   ball?: SoccerBallState | null;
+  match?: SoccerMatchMeta;
 }
 /** 推球模式：球位置廣播（每 tick，僅 running 期間） */
 export interface SoccerBallMsg { type: 'soccer_ball'; ball: SoccerBallState }
@@ -391,12 +421,25 @@ export interface SoccerGoalOkMsg {
   scores: Record<SoccerTeam, number>;
   /** 推球模式：烏龍球（把球推進自家門，得分歸對隊；by = 最後觸球者） */
   own?: boolean;
+  /** PK 罰球命中（比分在 match.pkScores，不計入正規局） */
+  pk?: boolean;
 }
 export interface SoccerScoresMsg {
   type: 'soccer_scores';
   scores: Record<SoccerTeam, number>;
   armed: Record<SoccerTeam, boolean>;
   status: string; endTime: number;
+  match?: SoccerMatchMeta;
+  /** PK 換人時附帶，客戶端把輪到的人送到罰球點 */
+  spawns?: SoccerSpawn[];
+}
+/** 非攻擊手進入自家圓環（階段一只公告，不發牌） */
+export interface SoccerFoulMsg {
+  type: 'soccer_foul';
+  team: SoccerTeam;
+  by: string;
+  byName: string;
+  reason: 'own_ring';
 }
 export interface SoccerEndMsg {
   type: 'soccer_end';
@@ -404,6 +447,7 @@ export interface SoccerEndMsg {
   winner: SoccerTeam | 'draw';
   scores: Record<SoccerTeam, number>;
   players: SoccerPlayerState[];
+  match?: SoccerMatchMeta;
 }
 /** 足球斷線恢復：伺服器下發斷線前最後位置 */
 export interface SoccerResumeMsg {
@@ -414,7 +458,7 @@ export interface SoccerResumeMsg {
 /** 學生端會收到的所有 soccer_* 訊息（ws 分派 → multiplayer/soccer 用） */
 export type SoccerServerMsg =
   | SoccerStateMsg | SoccerCountdownMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerEndMsg
   | SoccerResumeMsg;
 
 export type ServerToClient =
@@ -426,7 +470,7 @@ export type ServerToClient =
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
   | ArenaResumeMsg
   | SoccerStateMsg | SoccerCountdownMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerEndMsg
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerEndMsg
   | SoccerResumeMsg;
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */

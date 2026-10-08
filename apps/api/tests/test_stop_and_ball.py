@@ -241,12 +241,12 @@ def test_智能停止_賽局idle時不發end(client: TestClient, teacher_ticket:
             assert "soccer_end" not in seen
 
 
-# ---------- 推球模式（mode:'ball'，soccer_start 缺省）----------
+# ---------- 推球模式（mode:'ball'，須明確指定；缺省已改 striker）----------
 
 
 def _start_ball_game(client: TestClient, teacher_ticket_ws, clock: FakeClock, s1, s2) -> dict:
-    """開一場 ball 模式（缺省 mode）並吃完倒數，回傳 soccer_go。"""
-    teacher_ticket_ws.send_json({"type": "soccer_start", "durationSec": 60})
+    """開一場 ball 模式（隱藏選配，明確帶 mode）並吃完倒數，回傳 soccer_go。"""
+    teacher_ticket_ws.send_json({"type": "soccer_start", "durationSec": 60, "mode": "ball"})
     go = _countdown_to_go(client, clock, s1, "soccer")
     return go
 
@@ -254,7 +254,7 @@ def _start_ball_game(client: TestClient, teacher_ticket_ws, clock: FakeClock, s1
 def test_ball模式_開賽下發場地與球_推球位移與廣播(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """soccer_start 未帶 mode → 預設 ball；GO 下發 field/ball；貼近球 → 推球位移 + soccer_ball。"""
+    """明確 mode=ball 才推球；GO 下發 field/ball；貼近球 → 推球位移 + soccer_ball。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -265,11 +265,11 @@ def test_ball模式_開賽下發場地與球_推球位移與廣播(
             _join(s2, "soccer")
             go = _start_ball_game(client, t, clock, s1, s2)
             assert go["mode"] == "ball"
-            assert go["ball"] == {"x": 0.0, "y": 4.5, "z": 0.0, "r": BALL_RADIUS}
-            assert go["field"]["halfZ"] == 20.0
+            assert go["ball"] == {"x": 0.0, "y": 3.25, "z": 0.0, "r": BALL_RADIUS}
+            assert go["field"]["halfZ"] == 7.0
 
-            # 藍隊員從球後方貼近（距 1.0 < 球 1.2 + 機 0.65）→ 沿法線（+z）推
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": -1.0, "yaw": 0})
+            # 藍隊員從球後方貼近（距 1.0 < 球 1.2 + 機 0.8）→ 沿法線（+z）推
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -1.0, "yaw": 0})
             tick(client)
             assert soccer.ball.z > 0  # 球被往 +z（紅隊門）推
             assert soccer.ball.last_touch is soccer.players["g:小明"]
@@ -291,9 +291,9 @@ def test_ball模式_牆反彈(client: TestClient, teacher_ticket: str, clock: Fa
             _join(s2, "soccer")
             _start_ball_game(client, t, clock, s1, s2)
 
-            soccer.ball.x, soccer.ball.vx = -8.5, -10.0  # 直衝 -x 牆
-            tick(client)  # x: -8.5 - 0.8 = -9.3 → 超出 -(10 - 1.2) → 反彈
-            assert soccer.ball.x == -(10.0 - BALL_RADIUS)
+            soccer.ball.x, soccer.ball.vx = -2.2, -10.0  # 直衝 -x 牆
+            tick(client)  # x: -2.2 - 0.8 = -3.0 → 超出 -(3.5 - 1.2) → 反彈
+            assert soccer.ball.x == -(3.5 - BALL_RADIUS)
             assert soccer.ball.vx > 0  # 反向且衰減
 
 
@@ -312,24 +312,24 @@ def test_ball模式_進球烏龍與重置(
             _join(s2, "soccer")
             _start_ball_game(client, t, clock, s1, s2)
 
-            # 藍隊員最後觸球、球由場內穿越 +z 門面（goal_z=16，藍隊攻門）→ 藍得分、非烏龍
+            # 藍隊員最後觸球、球由場內穿越 +z 門面（goal_z=5，藍隊攻門）→ 藍得分、非烏龍
             ball = soccer.ball
             ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 0.0, 4.5, 15.5, 10.0
-            tick(client)  # z: 15.5 + 0.8 = 16.3，跨越門面 16 且在門環內
+            ball.x, ball.y, ball.z, ball.vz = 0.0, 3.25, 4.6, 10.0
+            tick(client)  # z: 4.6 + 0.8 = 5.4，跨越門面 5 且在門環內
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["own"] is False
             assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 0}
             assert soccer.armed["blue"] is False  # 進球隊退回（過中線恢復）
             # 球重置中場（懸浮高度）、速度歸零、清最後觸球者
             b = soccer.ball
-            assert (b.x, b.y, b.z) == (0.0, 4.5, 0.0)
+            assert (b.x, b.y, b.z) == (0.0, 3.25, 0.0)
             assert (b.vx, b.vy, b.vz) == (0.0, 0.0, 0.0)
             assert b.last_touch is None
 
             # 藍隊員把球推進自家（-z）門 → 烏龍球：得分歸紅隊、own=true、by=觸球者
             b.last_touch = soccer.players["g:小明"]
-            b.x, b.y, b.z, b.vz = 0.0, 4.5, -15.5, -10.0
+            b.x, b.y, b.z, b.vz = 0.0, 3.25, -4.6, -10.0
             tick(client)
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "red" and ok["own"] is True
@@ -352,10 +352,10 @@ def test_ball模式_門環外撞端牆反彈不進球(
 
             ball = soccer.ball
             ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 8.0, 4.5, 19.5, 10.0  # x=8 在門環（r=3）外
+            ball.x, ball.y, ball.z, ball.vz = 2.0, 3.25, 6.3, 15.0  # x=2 在內半徑 0.35 外
             tick(client)
             assert soccer.scores == {"blue": 0, "red": 0}  # 沒進球
-            assert soccer.ball.z == 20.0 - BALL_RADIUS  # 端牆反彈
+            assert soccer.ball.z == 7.0 - BALL_RADIUS  # 端牆反彈
             assert soccer.ball.vz < 0
 
 
@@ -374,7 +374,7 @@ def test_ball模式_client進球上報忽略(
             _start_ball_game(client, t, clock, s1, s2)
 
             # 藍前鋒人在對方門環內宣告進球（striker 模式會算）→ ball 模式忽略
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 4.5, "z": 20, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores == {"blue": 0, "red": 0}

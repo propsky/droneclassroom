@@ -23,7 +23,11 @@ import { setMeshCollisionBackend } from '../core/physics';
 import {
   SOCCER_BALL_R,
   SOCCER_DRONE_SCALE,
+  SOCCER_START_DEPTH,
+  SOCCER_START_WIDTH,
   SOCCER_TEAM_COLORS,
+  soccerGoalTorusDiameter,
+  soccerGoalTorusThickness,
   soccerTeamColorHex,
 } from '../soccer/constants';
 import { activeSoccerField } from '../soccer/field';
@@ -34,10 +38,12 @@ import { makeNameLabel, makeCloneDrone } from './clones';
 import { hex } from './scene';
 import type { DroneVisual } from './drone';
 
-/** 分身位置 / 彩帶擺動的視覺常數 */
-const RIBBON_SCALE = 2.4; // 彩帶整組放大（對齊 legacy makeSoccerDrone）
+/** 分身位置 / 彩帶擺動的視覺常數（對齊 20cm 級機身，不要比圓環還大） */
+const RIBBON_SCALE = 0.22;
 const RIBBON_SWING = 0.25; // 彩帶擺動幅度（rad）
-const CLONE_LABEL_Y = 1.9; // 名牌高度（分身比一般 clone 大 → 名牌抬高）
+const CLONE_LABEL_Y = 0.45;
+/** 分身縮放：機臂長約 1.56×此值，對齊縮小後的自機 */
+const CLONE_SCALE = 0.16;
 
 /** 推球模式共用球的視覺常數（亮黃 + emissive → 綠地板上好追） */
 const BALL_COLOR = 0xffd60a; // 亮黃
@@ -189,10 +195,28 @@ export class SoccerFieldVisuals {
     mid.isPickable = false;
     this.fieldMeshes.push(mid);
 
-    // ---- 起始區（單人：對應規則圖，藍 +z / 紅 -z 各一個）----
-    if (variant === 'practice') {
-      this.buildStartZone(F.startZ, SOCCER_TEAM_COLORS.blue);
-      this.buildStartZone(-F.startZ, SOCCER_TEAM_COLORS.red);
+    // ---- 中心點（中線正中央的圓點）----
+    const spot = MeshBuilder.CreateCylinder(
+      'soccerCenterSpot',
+      { diameter: 0.7, height: 0.02, tessellation: 24 },
+      scene,
+    );
+    spot.position.set(0, 0.06, 0);
+    const spotMat = new StandardMaterial('soccerCenterSpotMat', scene);
+    spotMat.emissiveColor = hex(0xffe066);
+    spotMat.disableLighting = true;
+    spot.material = spotMat;
+    spot.isPickable = false;
+    this.fieldMeshes.push(spot);
+
+    // ---- 起飛區：底線中段、寬約 1m 的窄帶，兩隊各一 ----
+    // 多人：藍守 -z、紅守 +z。單人練習鏡頭在 +z，近端藍、遠端紅。
+    if (variant === 'match') {
+      this.buildStartZone(-1, SOCCER_TEAM_COLORS.blue);
+      this.buildStartZone(1, SOCCER_TEAM_COLORS.red);
+    } else {
+      this.buildStartZone(1, SOCCER_TEAM_COLORS.blue);
+      this.buildStartZone(-1, SOCCER_TEAM_COLORS.red);
     }
 
     // ---- 兩端 torus 球門 ----
@@ -222,10 +246,15 @@ export class SoccerFieldVisuals {
     this.ballCage.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
   }
 
-  /** 起始區：地面填色長方形 + 邊框線（對齊 legacy makeStartZone；w=8 d=5） */
-  private buildStartZone(centerZ: number, color: number): void {
-    const w = 8;
-    const d = 5;
+  /**
+   * 起飛區：貼底線內側的窄帶（寬 SOCCER_START_WIDTH、進深 SOCCER_START_DEPTH）。
+   * sign = 底線的 z 符號（+1 貼 +z 底線）。
+   */
+  private buildStartZone(sign: number, color: number): void {
+    const F = activeSoccerField();
+    const w = SOCCER_START_WIDTH;
+    const d = SOCCER_START_DEPTH;
+    const centerZ = sign * (F.halfZ - d / 2);
     const fill = MeshBuilder.CreateGround(`soccerStart-${centerZ}`, { width: w, height: d }, this.scene);
     fill.position.set(0, 0.05, centerZ);
     const mat = new StandardMaterial(`soccerStartMat-${centerZ}`, this.scene);
@@ -257,12 +286,20 @@ export class SoccerFieldVisuals {
     this.fieldMeshes.push(border);
   }
 
-  /** 球門環：torus 孔朝 z → 沿長軸穿過（Babylon torus 預設孔朝 y，轉 90°）；尺寸依生效場地 */
+  /**
+   * 球門環：torus 孔朝 z → 沿長軸穿過（Babylon torus 預設孔朝 y，轉 90°）。
+   * goalR 是內半徑（穿環判定），goalTube 是管半徑；環心直徑要加上管半徑，
+   * 洞才會是內徑 70cm、外徑 110cm、厚度 20cm。
+   */
   private makeGoalRing(z: number, color: number): Mesh {
     const F = activeSoccerField();
     const ring = MeshBuilder.CreateTorus(
       `soccerGoal-${z}`,
-      { diameter: F.goalR * 2, thickness: F.goalTube * 2, tessellation: 32 },
+      {
+        diameter: soccerGoalTorusDiameter(F.goalR, F.goalTube),
+        thickness: soccerGoalTorusThickness(F.goalTube),
+        tessellation: 32,
+      },
       this.scene,
     );
     ring.rotation.x = Math.PI / 2;
@@ -439,8 +476,8 @@ export class SoccerFieldVisuals {
   private makeClone(id: string, o: SoccerOther): SoccerCloneVisual {
     const scene = this.scene;
     const col = hex(soccerTeamColorHex(o.team));
-    // 尺寸對齊縮放後的自機（約 1.5m 寬）→ 與場地同比例、不會像小點
-    const { root, bodyMat } = makeCloneDrone(scene, `soccer-${id}`, col, 1.05);
+    // 尺寸對齊縮小後的自機（約 20cm 級）→ 與 70cm 圓環同比例
+    const { root, bodyMat } = makeCloneDrone(scene, `soccer-${id}`, col, CLONE_SCALE);
     bodyMat.emissiveColor = col.scale(0.3); // 隊色亮一點（與舊盒身相同）
 
     const label = makeNameLabel(scene, `${o.emoji || ''}${o.name || '?'}`);
