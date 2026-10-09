@@ -33,8 +33,12 @@ export interface SoccerClassPreset {
   innerBottom: number;
   /** 圓心離地 */
   goalY: number;
-  /** 護罩半徑 */
+  /** 護罩半徑（球半徑。起飛區間距用這個） */
   shieldR: number;
+  /** 起飛區進深（沿 z、往場內）。F9A.2.2：A 約 1.5 m，B 不超過 1 m */
+  startDepth: number;
+  /** 每隊同時上場人數上限。WDSC 2.1：A 為 5、B 為 3 */
+  maxPlayers: number;
   /**
    * F9A.3.1 標的最大厚度 T。
    * A 的 T 等於徑向跨距；B 的建議外徑／內徑跨距是 15 cm，T 上限 10 cm。
@@ -65,6 +69,8 @@ export const F9A_A: SoccerClassPreset = preset({
   innerBottom: 3,
   shieldR: 0.2,
   thicknessMax: 0.2,
+  startDepth: 1.5,
+  maxPlayers: 5,
 });
 
 /** F9A-B：場地 6×3×3、內半徑 0.20、外半徑 0.35、T 上限 0.10、離底線 1 m、內圈底 2 m、護罩半徑 0.10。 */
@@ -79,6 +85,8 @@ export const F9A_B: SoccerClassPreset = preset({
   innerBottom: 2,
   shieldR: 0.1,
   thicknessMax: 0.1,
+  startDepth: 1,
+  maxPlayers: 3,
 });
 
 export const SOCCER_PRESETS: Record<SoccerClassCode, SoccerClassPreset> = {
@@ -88,10 +96,16 @@ export const SOCCER_PRESETS: Record<SoccerClassCode, SoccerClassPreset> = {
 
 export const DEFAULT_SOCCER_CLASS: SoccerClassCode = 'F9A-A';
 
-/** 起飛區進深（沿 z）。兩子類目前共用；人數與假人不在這次改。 */
-export const SOCCER_START_DEPTH = 1;
-/** 起飛區寬（沿 x） */
-export const SOCCER_START_WIDTH = 1;
+/**
+ * 起飛區進深（沿 z、往場內）。F9A-A 為 1.5 m（F9A.2.2）。
+ * 多人若伺服器下發 startDepth，以 field.ts 的生效值為準。
+ */
+export const SOCCER_START_DEPTH = F9A_A.startDepth;
+/**
+ * 單人練習的起飛區長度（沿 x）= 1 人 × 球徑。
+ * 多人長度 = 人數 × 球徑，由伺服器依上場人數下發 startWidth。
+ */
+export const SOCCER_START_WIDTH = F9A_A.shieldR * 2;
 
 /**
  * 生效 fallback／單人練習場地：預設 F9A-A。

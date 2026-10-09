@@ -10,15 +10,27 @@ from .soccer_presets import F9A_A
 
 # 沒帶 shield_r 時的預設（F9A-A，直徑 40 cm）。賽局應傳場地上的 shield_r。
 DEFAULT_SHIELD_R = F9A_A.shield_r
-# 罰球 10 秒（攻擊手對一名防守）
+# 罰球 10 秒（攻擊手對一名防守）。PK 每一記也用這一個，不再另設 20 秒。
 PENALTY_SEC = 10.0
-# 倒數期間離起飛點超過這個距離，且已經在起飛點報到過 → 搶跑
-FALSE_START_RADIUS = 0.45
+
+
+def false_start_radius(ball_r: float) -> float:
+    """搶跑半徑 = 球半徑。
+
+    出生點沿底線的間距是一顆球徑（2 × 球半徑）。半徑取球半徑，
+    每個人的圓才剛好接到隔壁的點、不會把隔壁的出生點也算成自己的。
+    ball_r 是 F9A 護罩半徑（與 client SOCCER_BALL_R 同一份），不是推球模式的大球。
+    """
+    return ball_r
+
+
+# F9A-A 的搶跑半徑。賽局請改呼 false_start_radius(場地.shield_r)，B 組會更小。
+FALSE_START_RADIUS = false_start_radius(F9A_A.shield_r)
 # 穿越授權的有效時間：逾時的 soccer_goal 不能拿舊軌跡兌換
 CROSS_GRANT_MS = 1500.0
 # 教學選項：空中機對機沿法線的接近速度（m/s）。
 # 2026 F9A.9 沒有「飛在空中互相接近太快就發牌」；預設關閉，見 SoccerGame.air_contact_cards。
-# 地面墜機紅牌（soccer_crash）與這條無關，不要混在一起關。
+# 墜機是安全事件（soccer_safety，本局少一人），不是這條，也不發紅牌。
 YELLOW_CLOSING_MPS = 2.2
 RED_CLOSING_MPS = 5.5
 

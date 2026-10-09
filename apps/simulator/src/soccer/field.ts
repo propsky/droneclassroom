@@ -25,6 +25,10 @@ export interface ActiveSoccerField {
   goalTube: number;
   /** 護罩半徑（伺服器有帶 shieldR 就用，否則 F9A-A fallback） */
   shieldR: number;
+  /** 起飛區進深（沿 z） */
+  startDepth: number;
+  /** 起飛區長度（沿 x）= 人數 × 球徑 */
+  startWidth: number;
   /** 起飛區中心 |z|（貼底線內側 = halfZ - 進深/2） */
   startZ: number;
 }
@@ -35,6 +39,8 @@ type LooseFieldDef = SoccerFieldDef & {
   goalZ?: number;
   goalTube?: number;
   shieldR?: number;
+  startDepth?: number;
+  startWidth?: number;
 };
 
 /** 舊伺服器沒帶管半徑時的衍生（下限防過細）；F9A 預設會直接下發 0.1 */
@@ -52,6 +58,8 @@ function fromFallback(): ActiveSoccerField {
     goalR: SOCCER_FIELD.goalR,
     goalTube: SOCCER_FIELD.goalTube,
     shieldR: SOCCER_FIELD.shieldR,
+    startDepth: SOCCER_START_DEPTH,
+    startWidth: SOCCER_BALL_R * 2,
     startZ: SOCCER_FIELD.startZ,
   };
 }
@@ -87,7 +95,9 @@ export function setSoccerFieldFromServer(def: SoccerFieldDef | null | undefined)
     goalR: def.goalR,
     goalTube: typeof loose.goalTube === 'number' ? loose.goalTube : goalTubeOf(def.goalR),
     shieldR: typeof loose.shieldR === 'number' ? loose.shieldR : SOCCER_BALL_R,
-    startZ: def.halfZ - SOCCER_START_DEPTH / 2,
+    startDepth: typeof loose.startDepth === 'number' ? loose.startDepth : SOCCER_START_DEPTH,
+    startWidth: typeof loose.startWidth === 'number' ? loose.startWidth : SOCCER_BALL_R * 2,
+    startZ: def.halfZ - (typeof loose.startDepth === 'number' ? loose.startDepth : SOCCER_START_DEPTH) / 2,
   };
   const changed =
     next.halfX !== current.halfX ||
@@ -97,7 +107,10 @@ export function setSoccerFieldFromServer(def: SoccerFieldDef | null | undefined)
     next.goalY !== current.goalY ||
     next.goalR !== current.goalR ||
     next.goalTube !== current.goalTube ||
-    next.shieldR !== current.shieldR;
+    next.shieldR !== current.shieldR ||
+    next.startDepth !== current.startDepth ||
+    next.startWidth !== current.startWidth ||
+    next.startZ !== current.startZ;
   current = next;
   return changed;
 }

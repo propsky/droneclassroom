@@ -102,8 +102,10 @@ export interface SoccerHudInput {
   now: number;
   myTeam: 'blue' | 'red' | null;
   myStriker: boolean;
-  /** 自己是剛得分、還沒回己方半場的攻擊手 */
+  /** 自己這隊剛得分，還沒全員回己方半場 */
   needReturn: boolean;
+  /** PK 這一記輪到自己主罰（可以不是開賽時的前鋒） */
+  pkMine?: boolean;
   pkScores: { blue: number; red: number };
   pkTurn: 'blue' | 'red' | null;
   pkRound: number;
@@ -126,10 +128,9 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   const who = `我：${me}${role}`;
   const back =
     s.mode === 'striker' &&
-    s.myStriker &&
     s.needReturn &&
     (s.status === 'running' || s.status === 'golden')
-      ? '｜先退回半場'
+      ? '｜全隊先退回半場'
       : '';
   const foul = s.foul
     ? s.foulReason === 'false_start'
@@ -138,7 +139,14 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
         ? '｜犯規：未回半場'
         : '｜犯規：進了自家圓環'
     : '';
-  const card = s.disabled ? '｜本局排除' : s.card === 'red' ? '｜紅牌' : s.card === 'yellow' ? '｜黃牌' : '';
+  const card =
+    s.card === 'red'
+      ? '｜紅牌・整場出場'
+      : s.card === 'yellow'
+        ? '｜黃牌・本局出場'
+        : s.disabled
+          ? '｜本局少一人'
+          : '';
   const feel = s.feelLabel ? `｜手感${s.feelLabel}` : '';
 
   if (s.mode === 'ball') {
@@ -169,7 +177,8 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   if (s.status === 'pk') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
     const side = s.pkTurn === 'red' ? '紅方罰球' : '藍方罰球';
-    const mine = s.pkTurn && s.pkTurn === s.myTeam && s.myStriker ? '｜輪到你' : '';
+    const mine =
+      s.pkTurn && s.pkTurn === s.myTeam && (s.pkMine ?? s.myStriker) ? '｜輪到你' : '';
     return `PK 第${s.pkRound || 1}輪｜${side}｜點球 ${s.pkScores.blue}:${s.pkScores.red}｜${t}｜${who}${mine}${foul}`;
   }
   if (s.status === 'running') {

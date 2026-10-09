@@ -82,6 +82,7 @@ from .protocol import (
     SoccerGoalMsg,
     SoccerJoinMsg,
     SoccerLeaveMsg,
+    SoccerPkClaimMsg,
     SoccerPosMsg,
     SoccerResetMsg,
     SoccerSetStrikerMsg,
@@ -89,6 +90,8 @@ from .protocol import (
     SoccerStartMsg,
     SoccerStateReqMsg,
     SoccerStopMsg,
+    SoccerTimeoutMsg,
+    SoccerWarnMsg,
     TeacherBroadcastMsg,
     TeacherBroadcastPayload,
 )
@@ -529,6 +532,10 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     await soccer.goal(record)
                 case SoccerCrashMsg():
                     await soccer.crash(record)
+                case SoccerTimeoutMsg():
+                    await soccer.striker_timeout(record, valid.strikerId)
+                case SoccerPkClaimMsg():
+                    await soccer.claim_pk(record)
     except WebSocketDisconnect:
         pass
     finally:
@@ -748,7 +755,7 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     await arena.stop()
                 # ----- 足球 -----
                 case SoccerStartMsg():
-                    await soccer.start(valid.durationSec, valid.mode)
+                    await soccer.start(valid.durationSec, valid.mode, tie_break=valid.tieBreak)
                     await _notify_not_in_game(
                         room,
                         set(soccer.players),
@@ -764,6 +771,8 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     await soccer.set_team(valid.studentId, valid.team)
                 case SoccerResetMsg():
                     await soccer.reset(valid.clearTeams)
+                case SoccerWarnMsg():
+                    await soccer.warn(valid.studentId, valid.reason)
             rooms.notify()  # 賽局狀態 / 設定可能變了 → 房間列表（沒變不推）
     except WebSocketDisconnect:
         pass

@@ -280,6 +280,7 @@ class RoomManager:
                 roster,
                 field=self._soccer_field,
                 air_contact_cards=self._cfg.soccer_air_contact_cards,
+                tie_break=self._cfg.soccer_tiebreak,
             ),
             created_at=self.now_ms() if created_at is None else created_at,
             team_id=team_id,

@@ -139,6 +139,9 @@ describe('F9A 階段二 HUD', () => {
     expect(pen).toContain('罰球 10 秒');
     expect(pen).toContain('搶跑');
     expect(formatSoccerMatchLine(hud({ card: 'yellow' }))).toContain('黃牌');
-    expect(formatSoccerMatchLine(hud({ disabled: true, card: 'red' }))).toContain('本局排除');
+    expect(formatSoccerMatchLine(hud({ card: 'yellow' }))).toContain('本局出場');
+    expect(formatSoccerMatchLine(hud({ disabled: true, card: 'red' }))).toContain('整場出場');
+    expect(formatSoccerMatchLine(hud({ disabled: true, card: null }))).toContain('本局少一人');
+    expect(formatSoccerMatchLine(hud({ myStriker: false, needReturn: true }))).toContain('全隊先退回半場');
   });
 });

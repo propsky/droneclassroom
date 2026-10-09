@@ -1,7 +1,8 @@
-// ⚽ 多人足球對戰（3v3；伺服器權威 — apps/api/app/games/soccer.py）。
+// ⚽ 多人足球對戰（伺服器權威 — apps/api/app/games/soccer.py）。
+// 每隊人數上限：F9A-A 5 人、F9A-B 3 人。
 // 兩種玩法（伺服器下發 mode）：
 // - 'striker' 前鋒穿門：客戶端用護罩後緣 + 行進方向偵測後送 soccer_goal（1.5s 去抖）。
-//   伺服器依位置軌跡重算，沒有整顆穿過就不計分。得分後須回己方半場。
+//   伺服器依位置軌跡重算，沒有整顆穿過就不計分。得分後該隊全員先回己方半場。
 // - 'ball' 推球進門（新）：共用球由伺服器模擬（soccer_ball ~12.5Hz 廣播 → 60Hz 內插渲染），
 //   進球由伺服器判定（client 不偵測不上報）、誰都能得分、烏龍球 own=true。
 // 場地資料驅動：尺寸由 soccer_go / soccer_state 的 field 下發（soccer/field.ts 生效值），
@@ -117,6 +118,8 @@ export const soccerState = {
   pkScores: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
   pkTurn: null as SoccerTeam | null,
   pkRound: 0,
+  pkShooterId: null as string | null,
+  pkDefenderId: null as string | null,
   /** 最近一次犯規還沒被下一則比分清掉 */
   foulNote: false,
   foulReason: null as SoccerFoulReason | null,
@@ -149,6 +152,12 @@ export function initSoccerMatch(): void {
   });
   soccerState.contactEnabled =
     new URLSearchParams(location.search).get('nocontact') !== '1';
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'k' && e.key !== 'K') return;
+    if (!soccerState.active || soccerState.status !== 'pk') return;
+    if (soccerState.disabled || soccerState.pkTurn !== soccerState.myTeam) return;
+    sendToServer({ type: 'soccer_pk_claim' });
+  });
   // 開發後門：?soccermp=1 自動進對戰（headless 驗收 / demo 用；對齊 ?arena=1）
   const params = new URLSearchParams(location.search);
   if (params.get('soccermp') === '1') {
@@ -198,7 +207,7 @@ function previewPhase2(kind: 'arm' | 'penalty' | 'card'): void {
     soccerState.status = 'running';
     soccerState.endTime = Date.now() + 180_000;
     soccerState.myCard = 'yellow';
-    stateHud('黃牌：再撞一次會變紅牌並排除');
+    stateHud('黃牌：本局出場');
   }
   updateMatchHud();
 }
@@ -222,6 +231,8 @@ export function enterSoccerMatch(): void {
   soccerState.pkScores = { blue: 0, red: 0 };
   soccerState.pkTurn = null;
   soccerState.pkRound = 0;
+  soccerState.pkShooterId = null;
+  soccerState.pkDefenderId = null;
   soccerState.foulNote = false;
   soccerState.foulReason = null;
   soccerState.motorsArmed = false;
@@ -354,9 +365,9 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
           ? '⚽ 把球推進「對方」的門！推進自家門是烏龍球喔'
           : (msg.match?.period ?? 1) > 1
             ? `⚽ 第 ${msg.match?.period} 局開始`
-            : soccerState.myStriker
-              ? '🎀 你是前鋒！穿過對方的圓環得分，得分後先回己方半場'
-              : '🛡 你是防守！別飛進自家圓環',
+              : soccerState.myStriker
+              ? '🎀 你是前鋒！穿過對方的圓環得分，得分後全隊先回己方半場'
+              : '🛡 你是防守！別飛進自家圓環。得分後也要跟全隊回半場',
       );
       syncSoccerLock();
       updateMatchHud();
@@ -372,7 +383,9 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       if (msg.scores) soccerState.scores = msg.scores;
       if (msg.armed) soccerState.armed = msg.armed;
       applyMatch(msg.match);
-      if (msg.spawns && soccerState.status === 'pk') applyMySpawn(msg.spawns);
+      if (msg.spawns && (soccerState.status === 'pk' || soccerState.status === 'penalty')) {
+        applyMySpawn(msg.spawns);
+      }
       notePhase(prev);
       syncSoccerLock();
       updateMatchHud();
@@ -407,22 +420,41 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       updateMatchHud();
       break;
     case 'soccer_card': {
-      const label = msg.card === 'red' ? '紅牌' : '黃牌';
-      const why = msg.reason === 'crash' ? '墜機' : '碰撞';
-      toast(`${label}：${msg.byName || ''}（${why}）`, 'error');
+      const label = msg.card === 'red' ? '紅牌・整場出場' : '黃牌・本局出場';
+      toast(`${label}：${msg.byName || ''}`, 'error');
       if (msg.by === wsState.myId) {
         soccerState.myCard = msg.card;
-        if (msg.card === 'red') {
-          soccerState.disabled = true;
-          stateHud('紅牌／墜機：本局排除');
-        } else {
-          stateHud('黃牌：再撞一次會變紅牌並排除');
-        }
+        soccerState.disabled = true;
+        stateHud(msg.card === 'red' ? '紅牌：整場出場' : '黃牌：本局出場');
       }
       syncSoccerLock();
       updateMatchHud();
       break;
     }
+    case 'soccer_warning':
+      toast(`警告：${msg.byName || ''}（第 ${msg.count} 次）`, 'error');
+      if (msg.by === wsState.myId) stateHud('警告：同理由再一次會變黃牌');
+      updateMatchHud();
+      break;
+    case 'soccer_safety':
+      toast(`安全事件：${msg.byName || ''} 本局少一人`, 'error');
+      if (msg.by === wsState.myId) {
+        soccerState.myCard = null;
+        soccerState.disabled = true;
+        stateHud('安全事件：本局少一人');
+      }
+      syncSoccerLock();
+      updateMatchHud();
+      break;
+    case 'soccer_timeout':
+      toast(`暫停換前鋒：${msg.byName || ''}`, 'success');
+      if (msg.spawns) applyMySpawn(msg.spawns);
+      if (msg.strikerId === wsState.myId) {
+        soccerState.myStriker = true;
+        stateHud('你換上前鋒了');
+      }
+      updateMatchHud();
+      break;
     case 'soccer_goal_ok':
       if (msg.scores) soccerState.scores = msg.scores;
       soccerState.foulNote = false;
@@ -441,8 +473,8 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       } else if (msg.team === soccerState.myTeam) {
         toast(`⚽ 進球！${msg.byName || ''}`, 'success');
         // 半場重置提示只有 striker 模式有（ball 模式伺服器重擺球即可）
-        if (soccerState.mode === 'striker' && soccerState.myStriker) {
-          stateHud('⚽ 進球！先退回中線（過半場）才能再得分');
+        if (soccerState.mode === 'striker') {
+          stateHud('⚽ 進球！全隊先退回己方半場才能再攻');
         }
       } else {
         toast(`😮 對方進球（${msg.byName || ''}）`);
@@ -471,6 +503,8 @@ function applyMatch(match: SoccerMatchMeta | undefined): void {
   if (match.pkScores) soccerState.pkScores = match.pkScores;
   soccerState.pkTurn = match.pkTurn ?? null;
   soccerState.pkRound = match.pkRound || 0;
+  soccerState.pkShooterId = match.pkShooterId ?? null;
+  soccerState.pkDefenderId = match.pkDefenderId ?? null;
 }
 
 function notePhase(prev: SoccerMatchStatus): void {
@@ -478,7 +512,7 @@ function notePhase(prev: SoccerMatchStatus): void {
   if (s === prev) return;
   if (s === 'break') stateHud('⏸ 局間休息');
   else if (s === 'golden') stateHud('⚡ 平手！黃金進球，先進球者勝');
-  else if (s === 'pk') stateHud('🎯 點球大戰：輪到的攻擊手穿對方圓環');
+  else if (s === 'pk') stateHud('🎯 點球：每球 10 秒，按 K 可以換人來罰');
 }
 
 /** 玩法（伺服器權威；缺省 'striker' = legacy 相容）。彩帶開關由 render 逐 tick 依 mode 套用 */
@@ -584,7 +618,7 @@ function foulText(reason: SoccerFoulReason, name: string): string {
   return `${who}進入自家圓環`;
 }
 
-/** 倒數鎖控、紅牌／墜機排除、罰球時不是上場的那兩台 */
+/** 倒數鎖控、出場／安全事件、罰球時不是上場的那兩台 */
 export function soccerControlsLocked(): boolean {
   if (!soccerState.active) return false;
   if (soccerState.disabled || soccerState.status === 'countdown') return true;
@@ -741,12 +775,14 @@ function detectGoal(): void {
   const pen = soccerState.penalty;
   const penaltyStriker =
     soccerState.status === 'penalty' && pen?.strikerId === wsState.myId;
-  if (!soccerState.myStriker && !penaltyStriker) return;
+  const pkShooter =
+    soccerState.status === 'pk' && soccerState.pkShooterId === wsState.myId;
+  if (!soccerState.myStriker && !penaltyStriker && !pkShooter) return;
   const live =
     soccerState.status === 'running' ||
     soccerState.status === 'golden' ||
     penaltyStriker ||
-    (soccerState.status === 'pk' && soccerState.pkTurn === soccerState.myTeam);
+    pkShooter;
   if (!live) return;
   const F = activeSoccerField();
   const team = soccerState.myTeam;
@@ -795,6 +831,7 @@ function updateMatchHud(): void {
       pkScores: soccerState.pkScores,
       pkTurn: soccerState.pkTurn,
       pkRound: soccerState.pkRound,
+      pkMine: !!soccerState.pkShooterId && soccerState.pkShooterId === wsState.myId,
       foul: soccerState.foulNote,
       foulReason: soccerState.foulReason,
       card: soccerState.myCard,

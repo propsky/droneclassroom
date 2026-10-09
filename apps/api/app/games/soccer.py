@@ -1,4 +1,6 @@
-"""games/soccer.py — 無人機足球 3v3（多人連線對戰），伺服器權威。
+"""games/soccer.py — 無人機足球多人連線對戰（伺服器權威）。
+
+每隊人數上限看子類：F9A-A 5 人、F9A-B 3 人（WDSC 2.1）。教室人數可以少於上限。
 
 行為對齊 legacy/server.js 的 SOCCER 區塊：自動平均分隊、每隊恰一前鋒（離線遞補）、
 進球伺服器驗證、半場重置、tick 判勝與位置廣播。
@@ -10,12 +12,13 @@
 - 場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
   完整 SoccerFieldDef（含護罩半徑），client 據此渲染。SOCCER_CLASS 選子類
 - 兩種玩法（SoccerStartMsg.mode）：
-  'striker'（預設）= FAI 前鋒穿門：只有攻擊手穿對方圓環得分；得分的那一台
-    須先回己方半場才能再得分。階段二：穿環看整顆護罩與行進方向，伺服器不單信
-    soccer_goal；搶跑、未返場、非攻擊手進自家圓環改判 10 秒罰球；碰撞黃紅牌、
-    墜機本局排除。開賽先起槳再 3-2-1，倒數鎖控。
-    賽制：一節 durationSec（預設 3 分鐘）、三局兩勝、局間休息、平手黃金進球、
-    再平手 PK 罰球。
+  'striker'（預設）= FAI 前鋒穿門：只有攻擊手穿對方圓環得分；得分後該隊
+    全員先回己方半場才能再攻（F9A.8.4）。穿環看整顆護罩與行進方向，伺服器不單信
+    soccer_goal；搶跑、未返場、非攻擊手進自家圓環改判 10 秒罰球。
+    警告／黃牌／紅牌按隊伍計（F9A.9）。墜機是安全事件，本局少一人，不發紅牌（F9A.8.5）。
+    開賽先起槳再 3-2-1，倒數鎖控。
+    賽制：一節 durationSec（預設 3 分鐘）、三局兩勝、局間休息。
+    平手順序可設定，預設照 WDSC：先各罰 3 球 PK，仍平手再黃金進球。
   'ball'（隱藏選配，須明確指定）= 推球進門：一顆共用球由伺服器 80ms tick 模擬
     （積分 + 輕阻力 + 弱重力向懸浮高度回歸 + 牆面反彈），無人機貼近即沿法線推球，
     球心過門面且在門環半徑內 → 伺服器判進球（推進自家門 = 烏龍球，得分歸對隊）；
@@ -24,8 +27,9 @@
 
 import logging
 import math
+import random
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import WebSocket
 
@@ -36,10 +40,10 @@ from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
 from .soccer_presets import F9A_A, SoccerClassSpec, preset_for
 from .soccer_rules import (
     CROSS_GRANT_MS,
-    FALSE_START_RADIUS,
     PENALTY_SEC,
     RED_CLOSING_MPS,
     YELLOW_CLOSING_MPS,
+    false_start_radius,
     shield_overlaps_opening,
     shield_passes_ring,
 )
@@ -54,11 +58,11 @@ SOCCER_TEAM_NAMES = ("blue", "red")
 SOCCER_SETS_TO_WIN = 2
 SOCCER_MAX_PERIODS = 3
 SOCCER_BREAK_SEC = 15  # 局間休息
-SOCCER_PK_SHOT_SEC = 20  # 每次罰球限時
-SOCCER_PK_MIN_ROUNDS = 3  # 至少各罰三輪，之後仍平手改驟死
-# 起飛區：底線中段窄帶（與 client SOCCER_START_WIDTH / DEPTH 一致）
-SOCCER_START_DEPTH = 1.0
-SOCCER_START_HALF_W = 0.5
+# PK 每一記的秒數跟罰球共用 PENALTY_SEC（F9A.9.1 的 10 秒），不另寫一份。
+SOCCER_PK_MIN_ROUNDS = 3  # WDSC 8.7：先各罰 3 球
+# 平手順序。預設 pk_then_golden = WDSC 8.7；golden_then_pk 把黃金進球放前面。
+TieBreak = Literal["pk_then_golden", "golden_then_pk"]
+TIE_BREAKS = ("pk_then_golden", "golden_then_pk")
 
 # ---------- 推球模式（ball）物理常數 ----------
 # 伺服器 80ms tick 模擬；數值以「單位/秒」為主，每 tick 的量以 BALL_TICK_DT 換算
@@ -94,6 +98,8 @@ class SoccerField:
     goal_tube: float
     goal_inset: float
     shield_r: float
+    start_depth: float
+    max_players: int
 
     @property
     def goal_z(self) -> float:
@@ -113,6 +119,8 @@ class SoccerField:
             goal_tube=chosen.goal_tube,
             goal_inset=chosen.goal_inset,
             shield_r=chosen.shield_r,
+            start_depth=chosen.start_depth,
+            max_players=chosen.max_players,
         )
 
     @classmethod
@@ -120,8 +128,13 @@ class SoccerField:
         """由 SOCCER_CLASS 選 F9A-A 或 F9A-B（見 soccer_presets）。"""
         return cls.from_spec(preset_for(cfg.soccer_class))
 
-    def payload(self) -> dict[str, float]:
+    def start_width(self, players: int) -> float:
+        """起飛區長度（沿底線）= 人數 × 球徑。兩隊畫一樣大，取人數較多的那隊。"""
+        return max(1, players) * (self.shield_r * 2)
+
+    def payload(self, start_width: float | None = None) -> dict[str, float]:
         """線上格式（SoccerFieldDef，欄位名 camelCase）。"""
+        width = self.shield_r * 2 if start_width is None else start_width
         return {
             "halfX": self.half_x,
             "halfZ": self.half_z,
@@ -132,6 +145,8 @@ class SoccerField:
             # 門面 z、護罩半徑一併下發（client 有帶就用，沒帶才 fallback）
             "goalZ": self.goal_z,
             "shieldR": self.shield_r,
+            "startDepth": self.start_depth,
+            "startWidth": width,
         }
 
 
@@ -169,15 +184,15 @@ class SoccerPlayer:
     strikes: int = 0
     # 推球模式：由相鄰兩次位置回報估計的速度（單位/秒），決定推球力度
     est_speed: float = 0.0
-    # 前鋒穿門：這台剛得分，須先回到己方半場（z 與自家站位同側）才能再得分
+    # 剛得分的那一隊：這台還沒回到己方半場（z 與自家站位同側）
     needs_return: bool = False
     # 非攻擊手是否正處於自家圓環內（邊緣觸發犯規，避免每 tick 重播）
     in_own_ring: bool = False
-    # 階段二：黃牌張數、牌面、本局排除、新局要不要把前鋒還給他
-    yellow: int = 0
+    # 牌面、本局不能飛、新局要不要把前鋒還給他、紅牌整場不能回來
     card: str | None = None
     disabled: bool = False
     restore_striker: bool = False
+    ejected_match: bool = False
     # 伺服器自己看到的整顆穿越，soccer_goal 只能兌現這一段
     pending_cross: bool = False
     pending_cross_ms: float = 0.0
@@ -197,17 +212,24 @@ class SoccerGame(BaseGame):
         field: SoccerField | None = None,
         *,
         air_contact_cards: bool = False,
+        tie_break: str = "pk_then_golden",
     ) -> None:
         super().__init__(roster)
         self.field = field or SoccerField.from_spec(F9A_A)
         # 空中機對機接近速度罰牌。預設關（2026 F9A.9 沒有這條）；教學可打開。
+        # 打開時走警告 → 黃牌 → 紅牌，不是直接發牌。
         self.air_contact_cards = air_contact_cards
+        self.tie_break_default: TieBreak = (
+            tie_break if tie_break in TIE_BREAKS else "pk_then_golden"  # type: ignore[assignment]
+        )
+        self.tie_break: TieBreak = self.tie_break_default
+        self._rng = random.Random()
         # 玩法：'striker' FAI 前鋒穿門（預設）/ 'ball' 推球進門（隱藏選配）
         self.mode = "striker"
         self.end_time = 0
         self.duration_sec: float = SOCCER_DURATION_DEFAULT
         self.scores: dict[str, int] = {"blue": 0, "red": 0}
-        self.armed: dict[str, bool] = {"blue": True, "red": True}  # 得分機回半場前為 False
+        self.armed: dict[str, bool] = {"blue": True, "red": True}  # 得分隊全員回半場前為 False
         self.winner: str | None = None
         self.players: dict[str, SoccerPlayer] = {}
         self.ball: SoccerBall | None = None  # 推球模式開賽（GO）才生成
@@ -219,7 +241,18 @@ class SoccerGame(BaseGame):
         self.pk_taken: dict[str, int] = {"blue": 0, "red": 0}
         self.pk_turn: str | None = None
         self.pk_round = 0
+        self.pk_first: str | None = None
+        self.pk_shooter_id: str | None = None
+        self.pk_defender_id: str | None = None
+        self.pk_started = False
         self.foul_count = 0
+        # 同理由警告次數、隊伍黃牌張數（整場累計，不跨場）
+        self.warnings: dict[str, dict[str, int]] = {"blue": {}, "red": {}}
+        self.team_yellows: dict[str, int] = {"blue": 0, "red": 0}
+        # 違規之後的下一顆進球不算（F9A.8.4）
+        self.annul_goal: dict[str, bool] = {"blue": False, "red": False}
+        # 前鋒失能後的暫停換人，每局一次（F9A.8.5）
+        self.timeout_used: dict[str, bool] = {"blue": False, "red": False}
         self.penalty_attack: str | None = None
         self.penalty_defend: str | None = None
         self.penalty_striker_id: str | None = None
@@ -272,11 +305,20 @@ class SoccerGame(BaseGame):
         return next((p for p in self._team(team) if p.striker), None)
 
     def _auto_assign_team(self, p: SoccerPlayer) -> None:
-        """自動平均分隊：新加入者補進人少的隊（藍 / 紅人數差 ≤ 1）。"""
+        """自動平均分隊。每隊不超過子類上限（F9A-A 5、F9A-B 3）；兩邊都滿就先不編隊。"""
+        cap = self.field.max_players
         others = [q for q in self._active() if q is not p]
         blue = sum(1 for q in others if q.team == "blue")
         red = sum(1 for q in others if q.team == "red")
-        p.team = "blue" if blue <= red else "red"
+        if blue >= cap and red >= cap:
+            p.team = None
+            return
+        if blue >= cap:
+            p.team = "red"
+        elif red >= cap:
+            p.team = "blue"
+        else:
+            p.team = "blue" if blue <= red else "red"
 
     def _ensure_striker(self, team: str | None) -> None:
         """確保某隊恰 1 名前鋒：0 名 → 補第一人；>1 名 → 只留第一個。"""
@@ -292,27 +334,55 @@ class SoccerGame(BaseGame):
         for p in members:
             p.striker = p is keep
 
+    def _flying(self, team: str) -> list[SoccerPlayer]:
+        """還能飛的隊員（本局排除、整場出場的不算進起飛區）。"""
+        return [p for p in self._team(team) if not p.disabled and not p.ejected_match]
+
+    def _lineup(self, members: list[SoccerPlayer]) -> list[SoccerPlayer]:
+        """前鋒放中間那一格，其餘由中間往外排。"""
+        if not members:
+            return []
+        strikers = [p for p in members if p.striker]
+        others = [p for p in members if not p.striker]
+        n = len(members)
+        mid = (n - 1) // 2
+        line: list[SoccerPlayer | None] = [None] * n
+        rest = others
+        if strikers:
+            line[mid] = strikers[0]
+            rest = others + strikers[1:]
+        slots = [i for i in range(n) if line[i] is None]
+        slots.sort(key=lambda i: (abs(i - mid), i))
+        for slot, p in zip(slots, rest, strict=True):
+            line[slot] = p
+        return [p for p in line if p is not None]
+
+    def _start_player_count(self) -> int:
+        """兩隊起飛區一樣大，長度跟人數較多的那隊走（至少 1 人）。"""
+        n = 1
+        for team in SOCCER_TEAM_NAMES:
+            n = max(n, len(self._flying(team)))
+        return n
+
+    def field_payload(self) -> dict[str, float]:
+        return self.field.payload(self.field.start_width(self._start_player_count()))
+
     def _assign_spawns(self) -> None:
-        """出生點：底線中段、寬約 1m 的起飛窄帶。前鋒居中，其餘排在帶內。"""
-        depth = SOCCER_START_DEPTH
-        half_w = SOCCER_START_HALF_W
+        """出生點排在起飛區中線。間距 = 球徑 = 2 × 球半徑，前鋒居中。"""
+        depth = self.field.start_depth
+        ball_r = self.field.shield_r
+        spacing = ball_r * 2
         for _team, cfg in self._teams.items():
-            members = self._team(_team)
+            members = self._lineup(self._flying(_team))
+            n = len(members)
+            if n == 0:
+                continue
             sign = -1.0 if cfg["stationZ"] < 0 else 1.0
             z = round(sign * (self.field.half_z - depth / 2), 2)
-            striker = next((p for p in members if p.striker), None)
-            defenders = [p for p in members if not p.striker]
-            if striker is not None:
-                striker.spawn_x = 0.0
-                striker.spawn_z = z
-            for i, p in enumerate(defenders):
-                side = -1 if i % 2 == 0 else 1
-                x = side * min(0.35, half_w - 0.1)
-                # 超過兩人時在窄帶內往場內錯開，仍不超出進深
-                slot = i // 2
-                z_off = -sign * min(0.25, depth / 2 - 0.15) * slot
+            for i, p in enumerate(members):
+                x = (i - (n - 1) / 2.0) * spacing
                 p.spawn_x = round(x, 2)
-                p.spawn_z = round(z + z_off, 2)
+                p.spawn_z = z
 
     def _reset_ball(self) -> SoccerBall:
         """球重置中場：懸浮高度（goalY）、速度歸零、清最後觸球者。"""
@@ -358,7 +428,7 @@ class SoccerGame(BaseGame):
             "winner": self.winner,
             "players": [self._player_info(p) for p in self._present()],
             "spawns": self._spawns(),
-            "field": self.field.payload(),
+            "field": self.field_payload(),
             "ball": self._ball_payload(),
             "match": self._match_payload(),
         }
@@ -378,6 +448,10 @@ class SoccerGame(BaseGame):
             "pkScores": dict(self.pk_scores),
             "pkTurn": self.pk_turn,
             "pkRound": self.pk_round,
+            "pkFirst": self.pk_first,
+            "pkShooterId": self.pk_shooter_id,
+            "pkDefenderId": self.pk_defender_id,
+            "tieBreak": self.tie_break,
         }
 
     def _clear_return_flags(self) -> None:
@@ -387,10 +461,16 @@ class SoccerGame(BaseGame):
         self.armed = {"blue": True, "red": True}
 
     def _sync_armed(self) -> None:
-        """攻擊手若剛得分還沒回半場，該隊 armed=false（只鎖那一台，不是整隊）。"""
+        """得分隊還有人沒回己方半場 → armed=false（整隊都不能再攻）。"""
         for team in SOCCER_TEAM_NAMES:
-            st = self._striker_of(team)
-            self.armed[team] = st is None or not st.needs_return
+            pending = any(p.needs_return for p in self._flying(team))
+            self.armed[team] = not pending
+
+    def _mark_team_return(self, team: str) -> None:
+        """進球後，還能飛的隊員全都要回自己半場。"""
+        for p in self._flying(team):
+            p.needs_return = True
+        self._sync_armed()
 
     def _winner_now(self) -> str:
         """依局數、當前節比分、PK 點球決定勝者；都平手才是 draw。"""
@@ -535,6 +615,7 @@ class SoccerGame(BaseGame):
             p.vz = (p.z - prev[2]) / dt_sec
             p.est_speed = math.dist((p.x, p.y, p.z), prev) / dt_sec
             await self._on_segment(p, prev)
+            await self._guard_reentry(p, prev[2])
         else:
             p.vx = p.vy = p.vz = 0.0
             p.est_speed = 0.0
@@ -567,8 +648,13 @@ class SoccerGame(BaseGame):
             self.status not in ("running", "golden")
             or not p.striker
             or p.team not in SOCCER_TEAM_NAMES
-            or p.needs_return
+            or not self.armed.get(p.team, True)
         ):
+            return
+        if self.annul_goal.get(p.team):
+            # F9A.8.4：違規之後的這一球不算
+            self.annul_goal[p.team] = False
+            logger.info("[Soccer] %s 的進球不算（先前未返場）", p.team)
             return
         self.scores[p.team] += 1
         ok = {
@@ -590,9 +676,8 @@ class SoccerGame(BaseGame):
             )
             await self._end("golden")
             return
-        # 正規局：這台須先回己方半場才能再得分
-        p.needs_return = True
-        self._sync_armed()
+        # 正規局：得分隊全員回己方半場才能再攻（F9A.8.4）
+        self._mark_team_return(p.team)
         await self._broadcast(self._active(), ok)
         await self._broadcast_teachers(ok)
         await self.broadcast_scores()
@@ -606,9 +691,13 @@ class SoccerGame(BaseGame):
 
     # ---------- 老師訊息 ----------
 
-    async def start(self, duration_sec: float, mode: str = "striker") -> None:
+    async def start(
+        self, duration_sec: float, mode: str = "striker", tie_break: str | None = None
+    ) -> None:
         """開始比賽：預設前鋒穿門。比分與局數歸零、補齊前鋒、進入既有 3 秒倒數。"""
         self.mode = mode if mode in ("ball", "striker") else "striker"
+        chosen = tie_break if tie_break in TIE_BREAKS else self.tie_break_default
+        self.tie_break = chosen  # type: ignore[assignment]
         self.duration_sec = max(5, duration_sec or SOCCER_DURATION_DEFAULT)
         self.scores = {"blue": 0, "red": 0}
         self.sets = {"blue": 0, "red": 0}
@@ -616,12 +705,16 @@ class SoccerGame(BaseGame):
         self.pk_taken = {"blue": 0, "red": 0}
         self.pk_turn = None
         self.pk_round = 0
+        self.pk_first = None
+        self.pk_shooter_id = None
+        self.pk_defender_id = None
+        self.pk_started = False
         self.foul_count = 0
         self.period = 1
         self.phase = "period"
         self._clear_return_flags()
         self._clear_penalty()
-        self._clear_discipline(restore=True)
+        self._clear_discipline(restore=True, match=True)
         self.winner = None
         self.ball = None  # GO 才把球放到中場（僅 ball 模式）
         self._ensure_striker("blue")  # 開賽前未指定的隊 → 自動補第一人
@@ -671,7 +764,9 @@ class SoccerGame(BaseGame):
     async def set_team(self, student_id: str, team: str) -> None:
         """老師指定隊伍：換隊時原隊 / 新隊都重新確保前鋒恰 1 名。"""
         p = next((q for q in self._active() if q.record.id == student_id), None)
-        if p is None or p.team == team:
+        if p is None or p.team == team or team not in SOCCER_TEAM_NAMES:
+            return
+        if sum(1 for q in self._team(team) if q is not p) >= self.field.max_players:
             return
         old_team = p.team
         p.team = team
@@ -695,10 +790,14 @@ class SoccerGame(BaseGame):
         self.pk_taken = {"blue": 0, "red": 0}
         self.pk_turn = None
         self.pk_round = 0
+        self.pk_first = None
+        self.pk_shooter_id = None
+        self.pk_defender_id = None
+        self.pk_started = False
         self.foul_count = 0
         self._clear_return_flags()
         self._clear_penalty()
-        self._clear_discipline(restore=True)
+        self._clear_discipline(restore=True, match=True)
         self.winner = None
         self.end_time = 0
         self.ball = None
@@ -710,8 +809,17 @@ class SoccerGame(BaseGame):
             if clear_teams:
                 p.team = None
         if clear_teams:
-            for i, p in enumerate(players):
-                p.team = "blue" if i % 2 == 0 else "red"
+            cap = self.field.max_players
+            blue_n = red_n = 0
+            for p in players:
+                if blue_n <= red_n and blue_n < cap:
+                    p.team = "blue"
+                    blue_n += 1
+                elif red_n < cap:
+                    p.team = "red"
+                    red_n += 1
+                else:
+                    p.team = None
         await self.broadcast_state()
         logger.info(
             "[Soccer] 重設%s，在場 %d 人", "（重新分隊）" if clear_teams else "", len(players)
@@ -734,7 +842,7 @@ class SoccerGame(BaseGame):
         self._clear_return_flags()
         self._clear_penalty()
         if self.mode != "ball":
-            self._clear_discipline(restore=True)
+            self._clear_discipline(restore=True, match=False)
             self._ensure_striker("blue")
             self._ensure_striker("red")
         if not first and self.mode != "ball":
@@ -758,7 +866,7 @@ class SoccerGame(BaseGame):
                 "endTime": self.end_time,
                 "spawns": self._spawns(),
                 "players": [self._player_info(p) for p in players],
-                "field": self.field.payload(),
+                "field": self.field_payload(),
                 "mode": self.mode,
                 "ball": self._ball_payload(),
                 "match": self._match_payload(),
@@ -909,7 +1017,7 @@ class SoccerGame(BaseGame):
         return p.z < 0 if cfg["stationZ"] < 0 else p.z > 0
 
     async def _tick_returns(self) -> None:
-        """得分的那一台回到己方半場 → 解除 needs_return。"""
+        """回到己方半場的隊員解除 needs_return。全員到齊才恢復可攻。"""
         changed = False
         for p in self._active():
             if p.needs_return and self._on_own_half(p):
@@ -920,7 +1028,7 @@ class SoccerGame(BaseGame):
             await self.broadcast_scores()
 
     async def _resolve_period(self) -> None:
-        """一節時間到：進球多者贏下該局。先搶兩局結束；三局打完仍平手進黃金進球。"""
+        """一節時間到：進球多者贏下該局。先搶兩局結束；三局打完仍平手走平手順序。"""
         if self.scores["blue"] > self.scores["red"]:
             self.sets["blue"] += 1
         elif self.scores["red"] > self.scores["blue"]:
@@ -934,7 +1042,7 @@ class SoccerGame(BaseGame):
         if self.sets["blue"] != self.sets["red"]:
             await self._end("sets")
             return
-        await self._begin_golden()
+        await self._begin_tiebreak()
 
     async def _begin_break(self) -> None:
         self.phase = "break"
@@ -949,7 +1057,10 @@ class SoccerGame(BaseGame):
         )
 
     async def _begin_golden(self) -> None:
-        """黃金進球：時限與一節相同，先進球者勝；時間到仍 0:0 則 PK。"""
+        """黃金進球：時限與一節相同，先進球者勝。
+
+        時間到仍 0:0，而且順序是先黃金、PK 還沒打過，才接著進 PK。
+        """
         self.phase = "golden"
         self.status = "golden"
         self.scores = {"blue": 0, "red": 0}
@@ -968,38 +1079,103 @@ class SoccerGame(BaseGame):
         z = round(cfg["attackGoalZ"] - sign * 2.5, 2)
         return 0.0, z
 
-    async def _arm_pk_clock(self) -> None:
-        """開始（或換）一次罰球：限時，並把輪到的攻擊手出生點改到罰球點。"""
-        self.end_time = int(self.now_ms() + SOCCER_PK_SHOT_SEC * 1000)
+    def _eligible(self, team: str) -> list[SoccerPlayer]:
+        return [p for p in self._team(team) if not p.disabled and not p.ejected_match]
+
+    def _place_pk_actors(self) -> None:
+        """這一記的主罰與一名守方。主罰預設是前鋒，守方用罰球同一套挑選。"""
         turn = self.pk_turn
-        if turn:
-            shooter = self._striker_of(turn)
-            if shooter is not None:
-                x, z = self._pk_spot(turn)
-                shooter.spawn_x = x
-                shooter.spawn_z = z
-                shooter.last_pos_ms = None
+        if turn not in SOCCER_TEAM_NAMES:
+            return
+        shooter = next(
+            (p for p in self._eligible(turn) if p.record.id == self.pk_shooter_id), None
+        )
+        if shooter is None:
+            named = self._striker_of(turn)
+            if named is not None and named.disabled:
+                named = None
+            if named is None:
+                members = self._eligible(turn)
+                named = members[0] if members else None
+            shooter = named
+        self.pk_shooter_id = shooter.record.id if shooter else None
+        if shooter is not None:
+            x, z = self._pk_spot(turn)
+            shooter.spawn_x, shooter.spawn_z = x, z
+            shooter.x, shooter.y, shooter.z = x, 0.4, z
+            shooter.last_pos_ms = None
+            shooter.needs_return = False
+            shooter.pending_cross = False
+            shooter.vx = shooter.vy = shooter.vz = 0.0
+        defender = self._pick_defender(self._other_team(turn))
+        if defender is not None and shooter is not None and defender is shooter:
+            defender = None
+        self.pk_defender_id = defender.record.id if defender else None
+        if defender is not None:
+            z_def = self._defender_spot(turn)
+            defender.spawn_x, defender.spawn_z = 0.0, z_def
+            defender.x, defender.y, defender.z = 0.0, 0.4, z_def
+            defender.last_pos_ms = None
+            defender.vx = defender.vy = defender.vz = 0.0
+
+    async def _arm_pk_clock(self) -> None:
+        """開始（或換）一次 PK：10 秒，與罰球共用，並把主罰、守方送到點上。"""
+        self.end_time = int(self.now_ms() + PENALTY_SEC * 1000)
+        self._place_pk_actors()
         await self.broadcast_scores(include_spawns=True)
+
+    async def _begin_tiebreak(self) -> None:
+        """三局打完局數相同。預設先 PK，另一種順序先打黃金進球。"""
+        if self.tie_break == "pk_then_golden":
+            await self._begin_pk()
+        else:
+            await self._begin_golden()
 
     async def _begin_pk(self) -> None:
         self.phase = "pk"
         self.status = "pk"
+        self.pk_started = True
         self.pk_scores = {"blue": 0, "red": 0}
         self.pk_taken = {"blue": 0, "red": 0}
         self.pk_round = 1
-        self.pk_turn = "blue"
+        self.pk_first = self._rng.choice(list(SOCCER_TEAM_NAMES))
+        self.pk_turn = self.pk_first
+        self.pk_shooter_id = None
+        self.pk_defender_id = None
         self._clear_return_flags()
-        logger.info("[Soccer] 黃金進球仍平手，進入 PK")
+        logger.info("[Soccer] 進入 PK，擲硬幣 %s 先罰", self.pk_first)
         await self._arm_pk_clock()
 
-    async def _pk_attempt(self, record: StudentRecord) -> None:
-        """輪到的攻擊手穿對方圓環 = 這記點球命中，立刻換邊。"""
+    async def claim_pk(self, record: StudentRecord) -> None:
+        """這一記改由同隊另一人來罰（WDSC 8.7：可以換人，也可以同一人連罰）。"""
+        if self.status != "pk" or self.pk_turn not in SOCCER_TEAM_NAMES:
+            return
         p = self._player_for(record)
         if (
             p is None
             or not p.active
             or p.disconnected
-            or not p.striker
+            or p.disabled
+            or p.ejected_match
+            or p.team != self.pk_turn
+        ):
+            return
+        if p.record.id == self.pk_shooter_id:
+            return
+        self.pk_shooter_id = p.record.id
+        self._place_pk_actors()
+        await self.broadcast_scores(include_spawns=True)
+        logger.info("[Soccer] PK 換 %s 來罰", p.record.name)
+
+    async def _pk_attempt(self, record: StudentRecord) -> None:
+        """輪到的主罰穿對方圓環 = 這記點球命中，立刻換邊。"""
+        p = self._player_for(record)
+        if (
+            p is None
+            or not p.active
+            or p.disconnected
+            or p.disabled
+            or p.record.id != self.pk_shooter_id
             or p.team != self.pk_turn
             or p.team not in SOCCER_TEAM_NAMES
         ):
@@ -1032,16 +1208,22 @@ class SoccerGame(BaseGame):
         self.pk_taken[team] += 1
         other = "red" if team == "blue" else "blue"
         if self.pk_taken["blue"] == self.pk_taken["red"]:
-            if (
-                self.pk_round >= SOCCER_PK_MIN_ROUNDS
-                and self.pk_scores["blue"] != self.pk_scores["red"]
-            ):
+            if self.pk_round >= SOCCER_PK_MIN_ROUNDS:
+                if self.pk_scores["blue"] != self.pk_scores["red"]:
+                    await self._end("pk")
+                    return
+                # 各罰滿 3 球仍平手：預設改黃金進球；黃金已經打過就結束成平手
+                if self.tie_break == "pk_then_golden" and self.phase == "pk":
+                    await self._begin_golden()
+                    return
                 await self._end("pk")
                 return
             self.pk_round += 1
-            self.pk_turn = "blue"
+            self.pk_turn = self.pk_first or "blue"
+            self.pk_shooter_id = None
         else:
             self.pk_turn = other
+            self.pk_shooter_id = None
         await self._arm_pk_clock()
 
     # ---------- tick（legacy setInterval 80ms 的對應）----------
@@ -1055,14 +1237,27 @@ class SoccerGame(BaseGame):
         self.penalty_resume = None
         self.penalty_remain_ms = None
 
-    def _clear_discipline(self, *, restore: bool) -> None:
-        """新局或重開：紅牌／墜機排除解除。restore 時把被拿掉的前鋒還回去。"""
+    def _clear_discipline(self, *, restore: bool, match: bool) -> None:
+        """新局清本局出場；match 時連警告、黃牌張數、紅牌整場出場一起清。"""
+        if match:
+            self.warnings = {"blue": {}, "red": {}}
+            self.team_yellows = {"blue": 0, "red": 0}
+            self.annul_goal = {"blue": False, "red": False}
+        self.timeout_used = {"blue": False, "red": False}
         for p in self.players.values():
+            if match:
+                p.ejected_match = False
+            if p.ejected_match:
+                p.disabled = True
+                p.card = "red"
+                p.striker = False
+                p.restore_striker = False
+                p.pending_cross = False
+                continue
             if restore and p.restore_striker:
                 p.striker = True
             p.restore_striker = False
             p.disabled = False
-            p.yellow = 0
             p.card = None
             p.pending_cross = False
 
@@ -1078,7 +1273,7 @@ class SoccerGame(BaseGame):
         if self.status != "countdown" or self.mode != "striker":
             return False
         dist = math.dist((msg.x, msg.y, msg.z), (p.spawn_x, 0.4, p.spawn_z))
-        if dist <= FALSE_START_RADIUS:
+        if dist <= false_start_radius(self.field.shield_r):
             p.spawn_checked_in = True
             return False
         if not p.spawn_checked_in:
@@ -1110,17 +1305,38 @@ class SoccerGame(BaseGame):
                 p.pending_cross_ms = self.now_ms()
             return
         if self.status == "pk":
-            if p.striker and p.team == self.pk_turn:
+            if p.record.id == self.pk_shooter_id and p.team == self.pk_turn:
                 p.pending_cross = True
                 p.pending_cross_ms = self.now_ms()
             return
         if self.status not in ("running", "golden") or not p.striker:
             return
-        if p.needs_return:
+        if not self.armed.get(p.team, True):
+            # 隊上還有人沒回來就再攻：罰球，這一球不算（F9A.8.4）
             await self._begin_penalty(self._other_team(p.team), p.team, "no_return", p)
+            return
+        if self.annul_goal.get(p.team):
+            self.annul_goal[p.team] = False
+            logger.info("[Soccer] %s 下一球不算（未返場違規）", p.team)
             return
         p.pending_cross = True
         p.pending_cross_ms = self.now_ms()
+
+    async def _guard_reentry(self, p: SoccerPlayer, prev_z: float) -> None:
+        """已經回到己方、隊友卻還沒回來，又飛過中線 → 罰球，而且下一球不算。"""
+        if self.mode != "striker" or self.status not in ("running", "golden"):
+            return
+        if p.disabled or p.ejected_match or p.team not in SOCCER_TEAM_NAMES:
+            return
+        if self.armed.get(p.team, True):
+            return
+        if self._z_on_own_half(p.team, prev_z) and not self._z_on_own_half(p.team, p.z):
+            self.annul_goal[p.team] = True
+            await self._begin_penalty(self._other_team(p.team), p.team, "no_return", p)
+
+    def _z_on_own_half(self, team: str, z: float) -> bool:
+        cfg = self._teams[team]
+        return z < 0 if cfg["stationZ"] < 0 else z > 0
 
     async def _on_own_ring(self, p: SoccerPlayer) -> None:
         if self.mode != "striker" or p.team not in SOCCER_TEAM_NAMES:
@@ -1257,8 +1473,7 @@ class SoccerGame(BaseGame):
             self._clear_penalty()
             await self._end("golden")
             return
-        p.needs_return = True
-        self._sync_armed()
+        self._mark_team_return(team)
         await self._finish_penalty()
 
     async def _finish_penalty(self) -> None:
@@ -1284,32 +1499,24 @@ class SoccerGame(BaseGame):
         await self.broadcast_scores()
 
     async def crash(self, record: StudentRecord) -> None:
-        """墜機自報：只排除這一台。"""
+        """墜機自報：安全事件，本局少一人，不發紅牌（F9A.8.5）。"""
         p = self._player_for(record)
         if p is None or not p.active or p.disconnected or p.disabled:
             return
-        if self.status not in ("running", "golden", "penalty"):
+        if self.status not in ("running", "golden", "penalty", "pk"):
             return
-        await self._give_card(p, "red", "crash")
+        await self._safety_out(p, "crash")
 
-    async def _give_card(self, p: SoccerPlayer, color: str, reason: str) -> None:
-        if p.disabled:
+    async def _safety_out(self, p: SoccerPlayer, reason: str) -> None:
+        if p.disabled or p.team not in SOCCER_TEAM_NAMES:
             return
-        if color == "yellow" and p.yellow >= 1:
-            color = "red"
-        if color == "red":
-            p.yellow = max(p.yellow, 2)
-            p.card = "red"
-            p.disabled = True
-            if p.striker:
-                p.striker = False
-                p.restore_striker = True
-        else:
-            p.yellow += 1
-            p.card = "yellow"
+        p.disabled = True
+        p.card = None
+        if p.striker:
+            p.striker = False
+            p.restore_striker = True
         msg = {
-            "type": "soccer_card",
-            "card": p.card,
+            "type": "soccer_safety",
             "by": p.record.id,
             "byName": p.record.name,
             "team": p.team,
@@ -1318,8 +1525,133 @@ class SoccerGame(BaseGame):
         await self._broadcast(self._active(), msg)
         await self._broadcast_teachers(msg)
         await self.broadcast_state()
-        card = "紅牌" if p.card == "red" else "黃牌"
-        logger.info("[Soccer] %s %s（%s）", card, p.record.name, reason)
+        logger.info("[Soccer] 安全事件 %s（%s），本局少一人", p.record.name, reason)
+
+    async def warn(self, student_id: str, reason: str = "conduct") -> None:
+        """老師（裁判）記一次警告。同理由兩次升黃牌。"""
+        p = next((q for q in self._active() if q.record.id == student_id), None)
+        if p is None or p.team not in SOCCER_TEAM_NAMES:
+            return
+        await self._give_warning(p, reason or "conduct")
+
+    async def striker_timeout(self, record: StudentRecord, new_striker_id: str = "") -> None:
+        """前鋒失能時，未失能的隊員可喊暫停換前鋒，每局一次（F9A.8.5）。"""
+        if self.mode != "striker" or self.status not in ("running", "golden"):
+            return
+        caller = self._player_for(record)
+        if (
+            caller is None
+            or not caller.active
+            or caller.disconnected
+            or caller.disabled
+            or caller.team not in SOCCER_TEAM_NAMES
+        ):
+            return
+        team = caller.team
+        if self.timeout_used.get(team):
+            return
+        flying_striker = self._striker_of(team)
+        if flying_striker is not None and not flying_striker.disabled:
+            return
+        if not any(q.disabled for q in self._team(team)):
+            return
+        candidates = [q for q in self._eligible(team) if q is not flying_striker]
+        if not candidates:
+            return
+        nxt = next((q for q in candidates if q.record.id == new_striker_id), None)
+        if nxt is None:
+            nxt = candidates[0]
+        for q in self._team(team):
+            if q.striker and q is not nxt:
+                q.striker = False
+        nxt.striker = True
+        nxt.restore_striker = False
+        sign = -1.0 if self._teams[team]["stationZ"] < 0 else 1.0
+        z = round(sign * (self.field.half_z - self.field.start_depth / 2), 2)
+        nxt.spawn_x, nxt.spawn_z = 0.0, z
+        nxt.x, nxt.y, nxt.z = 0.0, 0.4, z
+        nxt.last_pos_ms = None
+        nxt.needs_return = False
+        nxt.pending_cross = False
+        self.timeout_used[team] = True
+        msg = {
+            "type": "soccer_timeout",
+            "team": team,
+            "by": caller.record.id,
+            "byName": caller.record.name,
+            "strikerId": nxt.record.id,
+            "spawns": [{"id": nxt.record.id, "x": nxt.spawn_x, "z": nxt.spawn_z}],
+        }
+        await self._broadcast(self._active(), msg)
+        await self._broadcast_teachers(msg)
+        await self.broadcast_state()
+        logger.info("[Soccer] %s 暫停，%s 換上前鋒", team, nxt.record.name)
+
+    async def _give_warning(self, p: SoccerPlayer, reason: str) -> None:
+        """同理由第 2 次警告 → 黃牌（F9A.9.2／9.3）。按隊伍計，不記在個人。"""
+        if p.disabled or p.ejected_match or p.team not in SOCCER_TEAM_NAMES:
+            return
+        if self.status not in ("running", "golden", "penalty", "pk"):
+            return
+        bucket = self.warnings[p.team]
+        bucket[reason] = bucket.get(reason, 0) + 1
+        count = bucket[reason]
+        msg = {
+            "type": "soccer_warning",
+            "by": p.record.id,
+            "byName": p.record.name,
+            "team": p.team,
+            "reason": reason,
+            "count": count,
+        }
+        await self._broadcast(self._active(), msg)
+        await self._broadcast_teachers(msg)
+        logger.info("[Soccer] 警告 %s（%s）第 %d 次", p.record.name, reason, count)
+        if count >= 2:
+            bucket[reason] = 0
+            await self._give_yellow(p, reason)
+
+    async def _give_yellow(self, p: SoccerPlayer, reason: str) -> None:
+        """黃牌：這一位本局出場。同隊第 2 張黃牌改發紅牌（F9A.9.3／9.4）。"""
+        if p.ejected_match or p.team not in SOCCER_TEAM_NAMES:
+            return
+        self.team_yellows[p.team] = self.team_yellows.get(p.team, 0) + 1
+        if self.team_yellows[p.team] >= 2:
+            await self._give_red(p, reason)
+            return
+        p.card = "yellow"
+        p.disabled = True
+        if p.striker:
+            p.striker = False
+            p.restore_striker = True
+        await self._broadcast_card(p, "yellow", reason)
+
+    async def _give_red(self, p: SoccerPlayer, reason: str) -> None:
+        """紅牌：這一位整場出場，隊伍接下來少一人。"""
+        if p.team not in SOCCER_TEAM_NAMES:
+            return
+        p.card = "red"
+        p.disabled = True
+        p.ejected_match = True
+        p.restore_striker = False
+        if p.striker:
+            p.striker = False
+        await self._broadcast_card(p, "red", reason)
+
+    async def _broadcast_card(self, p: SoccerPlayer, color: str, reason: str) -> None:
+        msg = {
+            "type": "soccer_card",
+            "card": color,
+            "by": p.record.id,
+            "byName": p.record.name,
+            "team": p.team,
+            "reason": reason,
+        }
+        await self._broadcast(self._active(), msg)
+        await self._broadcast_teachers(msg)
+        await self.broadcast_state()
+        label = "紅牌" if color == "red" else "黃牌"
+        logger.info("[Soccer] %s %s（%s）", label, p.record.name, reason)
 
     def _pair_closing(self, a: SoccerPlayer, b: SoccerPlayer) -> tuple[float, SoccerPlayer]:
         dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
@@ -1359,8 +1691,11 @@ class SoccerGame(BaseGame):
                 if closing < YELLOW_CLOSING_MPS:
                     continue
                 self._contact_latch.add(key)
-                color = "red" if closing >= RED_CLOSING_MPS else "yellow"
-                await self._give_card(aggressor, color, "contact")
+                # 教學選項：接近太快記一次警告（同理由兩次才升黃牌）。更快的一擊直接黃牌。
+                if closing >= RED_CLOSING_MPS:
+                    await self._give_yellow(aggressor, "contact")
+                else:
+                    await self._give_warning(aggressor, "contact")
         self._contact_latch.intersection_update(live)
 
     async def tick(self) -> None:
@@ -1386,7 +1721,10 @@ class SoccerGame(BaseGame):
             self.period += 1
             await self._open_period(first=False)
         elif self.status == "golden" and now >= self.end_time:
-            await self._begin_pk()
+            if self.tie_break == "golden_then_pk" and not self.pk_started:
+                await self._begin_pk()
+            else:
+                await self._end("golden")
         elif self.status == "pk" and now >= self.end_time:
             await self._finish_pk_shot()
         players = self._present()
