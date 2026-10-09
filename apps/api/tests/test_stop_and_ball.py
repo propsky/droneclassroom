@@ -9,6 +9,7 @@
 tick 相關流程全部用假時鐘（conftest.clock）＋ 手動 tick（conftest.tick），不 sleep。
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.games.soccer import BALL_RADIUS
@@ -265,11 +266,15 @@ def test_ball模式_開賽下發場地與球_推球位移與廣播(
             _join(s2, "soccer")
             go = _start_ball_game(client, t, clock, s1, s2)
             assert go["mode"] == "ball"
-            assert go["ball"] == {"x": 0.0, "y": 3.25, "z": 0.0, "r": BALL_RADIUS}
+            assert go["ball"]["x"] == 0.0 and go["ball"]["z"] == 0.0
+            assert go["ball"]["r"] == BALL_RADIUS
+            assert go["ball"]["y"] == pytest.approx(soccer.field.goal_y)
             assert go["field"]["halfZ"] == 7.0
 
             # 藍隊員從球後方貼近（距 1.0 < 球 1.2 + 機 0.8）→ 沿法線（+z）推
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -1.0, "yaw": 0})
+            s1.send_json(
+                {"type": "soccer_pos", "x": 0, "y": soccer.field.goal_y, "z": -1.0, "yaw": 0}
+            )
             tick(client)
             assert soccer.ball.z > 0  # 球被往 +z（紅隊門）推
             assert soccer.ball.last_touch is soccer.players["g:小明"]
@@ -312,24 +317,27 @@ def test_ball模式_進球烏龍與重置(
             _join(s2, "soccer")
             _start_ball_game(client, t, clock, s1, s2)
 
-            # 藍隊員最後觸球、球由場內穿越 +z 門面（goal_z=5，藍隊攻門）→ 藍得分、非烏龍
+            # 藍隊員最後觸球、球由場內穿越 +z 門面 → 藍得分、非烏龍
             ball = soccer.ball
+            gz = soccer.field.goal_z
+            gy = soccer.field.goal_y
             ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 0.0, 3.25, 4.6, 10.0
-            tick(client)  # z: 4.6 + 0.8 = 5.4，跨越門面 5 且在門環內
+            ball.x, ball.y, ball.z, ball.vz = 0.0, gy, gz - 0.6, 10.0
+            tick(client)  # z += 0.8，跨越門面且球心在內半徑內
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["own"] is False
             assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 0}
             assert soccer.armed["blue"] is False  # 進球隊退回（過中線恢復）
             # 球重置中場（懸浮高度）、速度歸零、清最後觸球者
             b = soccer.ball
-            assert (b.x, b.y, b.z) == (0.0, 3.25, 0.0)
+            assert (b.x, b.z) == (0.0, 0.0)
+            assert b.y == pytest.approx(gy)
             assert (b.vx, b.vy, b.vz) == (0.0, 0.0, 0.0)
             assert b.last_touch is None
 
             # 藍隊員把球推進自家（-z）門 → 烏龍球：得分歸紅隊、own=true、by=觸球者
             b.last_touch = soccer.players["g:小明"]
-            b.x, b.y, b.z, b.vz = 0.0, 3.25, -4.6, -10.0
+            b.x, b.y, b.z, b.vz = 0.0, gy, -(gz - 0.6), -10.0
             tick(client)
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "red" and ok["own"] is True
@@ -352,7 +360,7 @@ def test_ball模式_門環外撞端牆反彈不進球(
 
             ball = soccer.ball
             ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 2.0, 3.25, 6.3, 15.0  # x=2 在內半徑 0.35 外
+            ball.x, ball.y, ball.z, ball.vz = 2.0, soccer.field.goal_y, 6.3, 15.0  # x=2 在內半徑外
             tick(client)
             assert soccer.scores == {"blue": 0, "red": 0}  # 沒進球
             assert soccer.ball.z == 7.0 - BALL_RADIUS  # 端牆反彈
@@ -374,7 +382,15 @@ def test_ball模式_client進球上報忽略(
             _start_ball_game(client, t, clock, s1, s2)
 
             # 藍前鋒人在對方門環內宣告進球（striker 模式會算）→ ball 模式忽略
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
+            s1.send_json(
+                {
+                    "type": "soccer_pos",
+                    "x": 0,
+                    "y": soccer.field.goal_y,
+                    "z": soccer.field.goal_z,
+                    "yaw": 0,
+                }
+            )
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores == {"blue": 0, "red": 0}

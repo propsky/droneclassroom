@@ -276,7 +276,11 @@ class RoomManager:
             settings=settings,
             roster=roster,
             arena=ArenaGame(roster),
-            soccer=SoccerGame(roster, field=self._soccer_field),
+            soccer=SoccerGame(
+                roster,
+                field=self._soccer_field,
+                air_contact_cards=self._cfg.soccer_air_contact_cards,
+            ),
             created_at=self.now_ms() if created_at is None else created_at,
             team_id=team_id,
             owner_teacher_id=owner_teacher_id,

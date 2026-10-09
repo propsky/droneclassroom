@@ -1,6 +1,6 @@
 // ⚽ 足球視覺：室內護網球館、護罩機、吊掛發光圓環、雙面計分板、撞擊／進球特效。
-// 門框碰撞仍用同一顆 torus（內徑 70cm、厚度 20cm）烤進 Havok，不改判定。
-// 場地尺寸一律讀 soccer/field.ts 的生效值。
+// 圓環與護罩都讀 soccer/field.ts 的生效尺寸（伺服器下發，或 F9A-A fallback）。
+// 門框碰撞用同一顆 torus 烤進 Havok。
 import {
   Scene,
   Mesh,
@@ -21,7 +21,6 @@ import { bus, toast } from '../core/events';
 import { droneState, DRONE_RADIUS, type Vec3 } from '../core/droneState';
 import { setMeshCollisionBackend } from '../core/physics';
 import {
-  SOCCER_BALL_R,
   SOCCER_START_DEPTH,
   SOCCER_START_WIDTH,
   SOCCER_TEAM_COLORS,
@@ -169,7 +168,7 @@ export class SoccerFieldVisuals {
       probe: (x: number, y: number, z: number): { pos: Vec3; bumped: boolean } => {
         const pos = { x, y, z };
         const vel = { x: 0, y: 0, z: 0 };
-        const { bumped } = this.backend.resolveCollisions(pos, vel, SOCCER_BALL_R);
+        const { bumped } = this.backend.resolveCollisions(pos, vel, activeSoccerField().shieldR);
         return { pos, bumped };
       },
       burstGoal: () => this.burstGoal(),
@@ -215,7 +214,7 @@ export class SoccerFieldVisuals {
     this.hangGoal(F.goalZ);
     void this.registerGoalCollision(gen);
 
-    this.myDrone = createSoccerDrone(scene, 'me', SOCCER_BALL_R, this.shadows);
+    this.myDrone = createSoccerDrone(scene, 'me', F.shieldR, this.shadows);
     this.myDrone.pose(
       droneState.position.x,
       droneState.position.y,
@@ -766,8 +765,8 @@ export class SoccerFieldVisuals {
   }
 
   /**
-   * 圓環本體維持階段一尺寸（洞 70cm、管厚 20cm），材質改成軟墊發光。
-   * 這顆 mesh 會烤進碰撞，幾何不要改。
+   * 圓環幾何跟生效場地走（F9A-A 預設：內半徑 0.30、管半徑 0.10、外徑 1.00 m）。
+   * 這顆 mesh 會烤進碰撞。
    */
   private makeGoalRing(z: number, color: number): Mesh {
     const F = activeSoccerField();
@@ -838,7 +837,7 @@ export class SoccerFieldVisuals {
     const soup = bakeTriangleSoup(this.goalMeshes);
     if (!soup) return;
     this.backend.addStaticMesh('soccer-goals', soup.positions, soup.indices);
-    setMeshCollisionBackend(this.backend, SOCCER_BALL_R);
+    setMeshCollisionBackend(this.backend, activeSoccerField().shieldR);
     this.collisionReady = true;
   }
 
@@ -1004,7 +1003,7 @@ export class SoccerFieldVisuals {
   private makeClone(id: string, o: SoccerOther): SoccerCloneVisual {
     const team = o.team === 'red' || o.team === 'blue' ? o.team : null;
     const striker = soccerState.mode === 'striker' && o.striker;
-    const model = createSoccerDrone(this.scene, id, SOCCER_BALL_R, this.shadows);
+    const model = createSoccerDrone(this.scene, id, activeSoccerField().shieldR, this.shadows);
     model.setGuardColor(soccerGuardColor(team, striker));
     const label = makeNameLabel(this.scene, `${o.emoji || ''}${o.name || '?'}`);
     label.scaling.setAll(0.22);

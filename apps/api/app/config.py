@@ -27,13 +27,11 @@ class Settings(BaseSettings):
     - max_students：學生人數上限（顯示用，/api/info 帶出）
     - game_tick_interval：賽局主迴圈週期秒（legacy setInterval 80ms）；
       設 0 不啟動 asyncio tick task（測試注入假時鐘、手動呼叫 tick()）
-    - soccer_half_x / soccer_half_z / soccer_goal_y / soccer_goal_r / soccer_ceil /
-      soccer_goal_tube / soccer_goal_inset：
-      足球場地尺寸（資料驅動：伺服器以 SoccerFieldDef 下發，client 據此渲染；
-      環境變數 SOCCER_HALF_X … 可調）。預設對齊 FAI F9A-A 階段一：
-      寬 7m（half_x 3.5）× 長 14m（half_z 7）× 天花板 5m，
-      門環內半徑 0.35（內徑 70cm）、管半徑 0.10（厚度 20cm、外徑 110cm）、
-      中心高 3.25m、門面離底線 2m
+    - soccer_class：足球子類，F9A-A（預設）或 F9A-B。尺寸只在
+      games/soccer_presets.py，環境變數 SOCCER_CLASS 可切換，伺服器整組下發。
+    - soccer_air_contact_cards：空中機對機「接近速度」黃／紅牌的教學選項。
+      2026 F9A.9 沒有這條，預設關閉（SOCCER_AIR_CONTACT_CARDS=1 才開）。
+      墜機紅牌不受這個開關影響。
     - room_code_length / room_code_alphabet：房間碼長度與字元集（預設 4 碼、去 0/O/1/I 防混淆）
     - default_room_code：預設房代碼（啟動即存在、不可關閉；不帶房間碼的學生走這裡 = 舊流程）
     - room_default_max_students：新房預設人數上限；None = 沿用 max_students
@@ -83,14 +81,10 @@ class Settings(BaseSettings):
     )
     max_students: int = 12
     game_tick_interval: float = 0.08
-    soccer_half_x: float = 3.5
-    soccer_half_z: float = 7.0
-    soccer_goal_y: float = 3.25
-    soccer_goal_r: float = 0.35
-    soccer_ceil: float = 5.0
-    # 環管半徑（厚度 20cm → 半徑 10cm）；門面離底線往場內 2m
-    soccer_goal_tube: float = 0.10
-    soccer_goal_inset: float = 2.0
+    # 足球子類。尺寸見 games/soccer_presets.py，不在這裡再寫一組數字。
+    soccer_class: Literal["F9A-A", "F9A-B"] = "F9A-A"
+    # 空中接近速度罰牌（教學用）。預設關。
+    soccer_air_contact_cards: bool = False
     room_code_length: int = 4
     room_code_alphabet: str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     default_room_code: str = "MAIN"

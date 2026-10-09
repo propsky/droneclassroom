@@ -7,10 +7,10 @@ import { setSolidObstacles } from '../core/physics';
 import { clearLevel } from '../core/level';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
-import { SOCCER_FIELD, SOCCER_BALL_R } from './constants';
+import { SOCCER_FIELD } from './constants';
 import { shieldPassesRing } from './crossing';
 import { bounceSoccerWalls } from './contact';
-import { resetSoccerField } from './field';
+import { activeSoccerField, resetSoccerField } from './field';
 import {
   showSoccerPracticeHud,
   renderDrillButtons,
@@ -221,15 +221,17 @@ export function tickSoccerPractice(): void {
   }
   const p = droneState.position;
   const z = p.z;
+  const F = activeSoccerField();
   // 遠端門在 -z。整顆護罩沿行進方向穿過才算，不看機頭、不只看球心。
+  // 場地與護罩跟 fallback 同一份（resetSoccerField → constants 的 F9A-A）。
   const crossedFar = shieldPassesRing(
     { x: practiceState.prevX, y: practiceState.prevY, z: practiceState.prevZ },
     p,
     {
-      goalZ: -SOCCER_FIELD.goalZ,
-      goalY: SOCCER_FIELD.goalY,
-      goalR: SOCCER_FIELD.goalR,
-      shieldR: SOCCER_BALL_R,
+      goalZ: -F.goalZ,
+      goalY: F.goalY,
+      goalR: F.goalR,
+      shieldR: F.shieldR,
       attackSign: -1,
     },
   );
@@ -271,11 +273,12 @@ export function tickSoccerPractice(): void {
 
 /** 場地邊界：護罩貼牆後輕微反彈（地板仍由 integrate 落地） */
 function clampSoccerBounds(): void {
+  const F = activeSoccerField();
   bounceSoccerWalls(
     droneState.position,
     droneState.velocity,
-    { halfX: SOCCER_FIELD.halfX, halfZ: SOCCER_FIELD.halfZ, top: SOCCER_FIELD.top },
-    SOCCER_BALL_R,
+    { halfX: F.halfX, halfZ: F.halfZ, top: F.top },
+    F.shieldR,
   );
 }
 
