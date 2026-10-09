@@ -111,8 +111,8 @@ export interface CoreEventMap {
   'soccer-exited': Record<string, never>;
   /** 窄邊定點視角切換：sign = 站哪個 z 端往場內看（+1 / -1）；null = 還原跟隨視角 */
   'soccer-view-changed': { sign: number | null };
-  /** 練習 P-5 假人擺放（render 畫紫色方塊；碰撞由 setSolidObstacles 註冊） */
-  'soccer-dummies-changed': { boxes: { x: number; y: number; z: number; half: number }[] };
+  /** 練習 P-5 假人（球形；位置每 tick 更新。碰撞在 practice，用護罩半徑） */
+  'soccer-dummies-changed': { spheres: { x: number; y: number; z: number; r: number }[] };
   // ---- 搖桿校正精靈（input/calibration.ts → ui/calibrationOverlay.ts）----
   /** 顯示 / 隱藏校正 overlay */
   'calib-show': { show: boolean };

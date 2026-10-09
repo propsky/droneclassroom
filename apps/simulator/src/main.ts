@@ -280,7 +280,7 @@ function fixedTick(nowMs: number): void {
   tickInputDevices(isManualLocked());
 
   const controlFrame = collectControlFrame();
-  // 足球三檔傾角只改這條水平推力；關卡與大亂鬥仍用原本的控制幀。
+  // 足球手感只改這條推力（含選配無定高）；關卡與大亂鬥仍用原本的控制幀。
   const soccerOn = soccerState.active || practiceState.active;
   const feltFrame = applySoccerFeel(controlFrame, {
     enabled: soccerOn,

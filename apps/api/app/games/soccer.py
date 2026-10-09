@@ -67,8 +67,13 @@ TIE_BREAKS = ("pk_then_golden", "golden_then_pk")
 # ---------- 推球模式（ball）物理常數 ----------
 # 伺服器 80ms tick 模擬；數值以「單位/秒」為主，每 tick 的量以 BALL_TICK_DT 換算
 
-BALL_RADIUS = 1.2  # 球半徑（大顆好推好看；隨 soccer_ball 下發，client 據此渲染）
-DRONE_RADIUS = 0.8  # 推球模式接觸半徑（隱藏 ball 玩法；不是 F9A 護罩）
+# 推球模式的黃球半徑。與 client SOCCER_PUSH_BALL_R 同一份（兩邊都是 0.6）。
+# 舊版伺服器寫 1.2、客戶端缺 r 時 fallback 0.6，現在合成這一個值。
+# F9A-A 天花板 5 m、圓環內徑 0.6 m；1.2 的球直徑 2.4 m 會頂到天花，也比整個圓環大。
+BALL_RADIUS = 0.6
+# 推球接觸用的機體半徑（公尺）。只給隱藏的 ball 模式。
+# 不是教室關卡的 DRONE_RADIUS（0.6），也不是 F9A 護罩 shield_r（0.20）。三個數字不要混成同一個。
+DRONE_RADIUS = 0.8
 BALL_TICK_DT = 0.08  # 物理積分步長 = 賽局 tick 週期（80ms），與假時鐘無關、每 tick 固定
 BALL_DRAG = 0.985  # 輕阻力：每 tick 速度衰減倍率
 BALL_HOVER_GAIN = 1.5  # 弱重力：向懸浮高度（goalY）回歸的加速度增益（/秒²）
@@ -1296,6 +1301,7 @@ class SoccerGame(BaseGame):
             goal_r=self.field.goal_r,
             attack_sign=sign,
             shield_r=self.field.shield_r,
+            half_thick=self.field.goal_tube,
         )
         if not passed:
             return

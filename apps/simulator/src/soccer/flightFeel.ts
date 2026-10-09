@@ -1,9 +1,10 @@
-// 足球飛行手感三檔。只改足球模式的水平推力路徑，不碰關卡物理與重播 hash。
+// 足球飛行手感。只改足球模式的推力路徑，不碰關卡物理與重播 hash。
 // 搖桿命令傾角，鬆桿依該檔自動回正；水平推力 = sin(傾角) / sin(42°)，專業滿舵才是原本滿推力。
+// 新手／模擬／專業有定高。無定高（Angle）傾角沿用模擬的 30°，鬆開上升會下降。
 import type { ControlFrame } from '../core/physics';
 import { droneState } from '../core/droneState';
 
-export type SoccerFeelId = 'beginner' | 'sim' | 'pro';
+export type SoccerFeelId = 'beginner' | 'sim' | 'pro' | 'angle';
 
 export interface FeelProfile {
   id: SoccerFeelId;
@@ -13,12 +14,49 @@ export interface FeelProfile {
   response: number;
   /** 鬆桿時回到水平的每 tick 比例（新手強、專業弱） */
   autoLevel: number;
+  /** false = Angle 模式，沒有定高 */
+  altitudeHold: boolean;
+  /** 無定高時從上升指令扣掉的量。定高檔為 0。約 0.15 時，鬆桿下降約 1.6 m/s，按住一點上升才懸停 */
+  sink: number;
 }
 
 export const SOCCER_FEELS: Record<SoccerFeelId, FeelProfile> = {
-  beginner: { id: 'beginner', label: '新手', maxTiltDeg: 18, response: 0.22, autoLevel: 0.2 },
-  sim: { id: 'sim', label: '模擬', maxTiltDeg: 30, response: 0.16, autoLevel: 0.1 },
-  pro: { id: 'pro', label: '專業', maxTiltDeg: 42, response: 0.14, autoLevel: 0.04 },
+  beginner: {
+    id: 'beginner',
+    label: '新手',
+    maxTiltDeg: 18,
+    response: 0.22,
+    autoLevel: 0.2,
+    altitudeHold: true,
+    sink: 0,
+  },
+  sim: {
+    id: 'sim',
+    label: '模擬',
+    maxTiltDeg: 30,
+    response: 0.16,
+    autoLevel: 0.1,
+    altitudeHold: true,
+    sink: 0,
+  },
+  pro: {
+    id: 'pro',
+    label: '專業',
+    maxTiltDeg: 42,
+    response: 0.14,
+    autoLevel: 0.04,
+    altitudeHold: true,
+    sink: 0,
+  },
+  angle: {
+    id: 'angle',
+    label: '無定高',
+    maxTiltDeg: 30,
+    response: 0.16,
+    autoLevel: 0.1,
+    altitudeHold: false,
+    sink: 0.15,
+  },
 };
 
 const PRO_MAX_DEG = 42;
@@ -42,11 +80,11 @@ export function resetSoccerAttitude(): void {
   droneState.attitudeRoll = null;
 }
 
-/** 網址 ?feel=beginner|sim|pro（只在瀏覽器初始化時讀，測試不碰 location） */
+/** 網址 ?feel=beginner|sim|pro|angle（只在瀏覽器初始化時讀，測試不碰 location） */
 export function initSoccerFeelFromUrl(): void {
   if (typeof location === 'undefined') return;
   const q = new URLSearchParams(location.search).get('feel');
-  if (q === 'beginner' || q === 'sim' || q === 'pro') feel = q;
+  if (q === 'beginner' || q === 'sim' || q === 'pro' || q === 'angle') feel = q;
 }
 
 function clampStick(v: number): number {
@@ -104,7 +142,9 @@ export function applySoccerFeel(
     forward = (pitch / tilt) * auth;
     right = (roll / tilt) * auth;
   }
-  return { ...frame, forward, right };
+  let lift = frame.lift;
+  if (!profile.altitudeHold && droneState.isFlying) lift -= profile.sink;
+  return { ...frame, forward, right, lift };
 }
 
 /** 測試用：直接看目前傾角（弧度） */

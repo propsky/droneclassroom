@@ -190,7 +190,7 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
 
 let feelWired = false;
 
-/** 飛行手感三檔。練習與對戰都顯示；沒有這列時不改 DOM。 */
+/** 飛行手感。練習與對戰都顯示；沒有這列時不改 DOM。 */
 export function showSoccerFeel(on: boolean): void {
   const bar = $('soccer-feel');
   if (!bar) return;
@@ -200,7 +200,7 @@ export function showSoccerFeel(on: boolean): void {
     bar.querySelectorAll<HTMLButtonElement>('[data-feel]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.dataset['feel'];
-        if (id === 'beginner' || id === 'sim' || id === 'pro') setSoccerFeel(id);
+        if (id === 'beginner' || id === 'sim' || id === 'pro' || id === 'angle') setSoccerFeel(id);
         paintFeel();
       });
     });
@@ -217,6 +217,7 @@ function paintFeel(): void {
 
 export function soccerFeelButtonLabel(id: SoccerFeelId): string {
   const p = SOCCER_FEELS[id];
+  if (!p.altitudeHold) return p.label;
   return `${p.label} ${p.maxTiltDeg}°`;
 }
 

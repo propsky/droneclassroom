@@ -31,7 +31,7 @@ import {
   soccerGuardColor,
   type BroadcastView,
 } from '../soccer/broadcast';
-import { activeSoccerField } from '../soccer/field';
+import { activeSoccerField, soccerBoundaryMarkSize } from '../soccer/field';
 import {
   enclosureFaceVisible,
   SOCCER_CEIL_DROP,
@@ -147,7 +147,7 @@ export class SoccerFieldVisuals {
     this.backend = getHavokBackend(scene);
     bus.on('soccer-entered', ({ variant }) => this.build(variant));
     bus.on('soccer-exited', () => this.disposeAll());
-    bus.on('soccer-dummies-changed', ({ boxes }) => this.buildDummies(boxes));
+    bus.on('soccer-dummies-changed', ({ spheres }) => this.syncDummies(spheres));
     bus.on('soccer-field-changed', () => {
       if (this.active) this.build(this.variant);
     });
@@ -673,13 +673,12 @@ export class SoccerFieldVisuals {
       this.fieldMeshes.push(m);
     };
     const t = 0.08;
-    const width = F.halfX * 2 - 0.7;
-    const length = F.halfZ * 2 - 0.7;
-    strip('soccerLineN', width, t, 0, -length / 2);
-    strip('soccerLineS', width, t, 0, length / 2);
-    strip('soccerLineW', t, length, -width / 2, 0);
-    strip('soccerLineE', t, length, width / 2, 0);
-    strip('soccerMidLine', width, variant === 'match' ? 0.1 : 0.12, 0, 0);
+    const mark = soccerBoundaryMarkSize(F.halfX, F.halfZ);
+    strip('soccerLineN', mark.width, t, 0, -mark.length / 2);
+    strip('soccerLineS', mark.width, t, 0, mark.length / 2);
+    strip('soccerLineW', t, mark.length, -mark.width / 2, 0);
+    strip('soccerLineE', t, mark.length, mark.width / 2, 0);
+    strip('soccerMidLine', mark.width, variant === 'match' ? 0.1 : 0.12, 0, 0);
 
     const spot = MeshBuilder.CreateCylinder(
       'soccerCenterSpot',
@@ -839,18 +838,31 @@ export class SoccerFieldVisuals {
     this.collisionReady = true;
   }
 
-  private buildDummies(boxes: { x: number; y: number; z: number; half: number }[]): void {
-    this.dummyMeshes.forEach((m) => m.dispose(false, true));
-    this.dummyMeshes = boxes.map((b, i) => {
-      const m = MeshBuilder.CreateBox(`soccerDummy-${i}`, { size: b.half * 2 }, this.scene);
-      m.position.set(b.x, b.y, b.z);
-      const mat = new StandardMaterial(`soccerDummyMat-${i}`, this.scene);
-      mat.diffuseColor = hex(0x9b5de5);
-      mat.emissiveColor = hex(0x9b5de5).scale(0.2);
-      mat.alpha = 0.9;
-      m.material = mat;
-      m.isPickable = false;
-      return m;
+  private dummyKey = '';
+
+  /** 顆數或半徑變了才重建；巡邏只改位置，避免每 tick 拆 mesh */
+  private syncDummies(spheres: { x: number; y: number; z: number; r: number }[]): void {
+    const key = spheres.map((s) => s.r.toFixed(3)).join('|');
+    if (key !== this.dummyKey) {
+      this.dummyMeshes.forEach((m) => m.dispose(false, true));
+      this.dummyMeshes = spheres.map((s, i) => {
+        const m = MeshBuilder.CreateSphere(
+          `soccerDummy-${i}`,
+          { diameter: s.r * 2, segments: 16 },
+          this.scene,
+        );
+        const mat = new StandardMaterial(`soccerDummyMat-${i}`, this.scene);
+        mat.diffuseColor = hex(0x9b5de5);
+        mat.emissiveColor = hex(0x9b5de5).scale(0.35);
+        mat.alpha = 0.92;
+        m.material = mat;
+        m.isPickable = false;
+        return m;
+      });
+      this.dummyKey = key;
+    }
+    spheres.forEach((s, i) => {
+      this.dummyMeshes[i]?.position.set(s.x, s.y, s.z);
     });
   }
 
@@ -1283,6 +1295,7 @@ export class SoccerFieldVisuals {
     this.goals = [];
     this.dummyMeshes.forEach((m) => m.dispose(false, true));
     this.dummyMeshes = [];
+    this.dummyKey = '';
     this.myDrone?.dispose();
     this.myDrone = null;
     this.scoreboard?.dispose();

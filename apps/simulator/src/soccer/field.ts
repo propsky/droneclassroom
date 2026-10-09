@@ -115,6 +115,17 @@ export function setSoccerFieldFromServer(def: SoccerFieldDef | null | undefined)
   return changed;
 }
 
+/**
+ * 地面外框線的長與寬（公尺）。線的中心貼在半場邊界上，不往內縮。
+ * F9A-A 是 14×7；F9A-B 用該組自己的 halfX／halfZ，畫在那一塊場地的真正邊界。
+ */
+export function soccerBoundaryMarkSize(
+  halfX: number,
+  halfZ: number,
+): { width: number; length: number } {
+  return { width: halfX * 2, length: halfZ * 2 };
+}
+
 /** 回 fallback（單人練習進場 / 離開多人對戰時呼叫，避免殘留上一場的伺服器場地） */
 export function resetSoccerField(): void {
   current = fromFallback();

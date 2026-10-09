@@ -43,13 +43,15 @@ def shield_passes_ring(
     goal_y: float,
     goal_r: float,
     attack_sign: float,
+    half_thick: float,
     shield_r: float = DEFAULT_SHIELD_R,
 ) -> bool:
     """整顆護罩沿行進方向穿過圓環才算。
 
     attack_sign：+1 表示必須往 +z 走（藍隊攻 +z 門）。dz 與它反向、或幾乎沒動，都不算。
-    後緣（行進反方向的那一側）跨過門面的那一刻，球心到圓心的徑向距離必須 ≤ 內半徑 − 護罩半徑，
-    護罩才整顆在洞裡；球心進洞但擦到框不算。
+    後緣（行進反方向的那一側）要跨過環的出口面：門面再往行進方向半個環厚（half_thick = 管半徑）。
+    那一刻球心到圓心的徑向距離必須 ≤ 內半徑 − 護罩半徑，護罩才整顆離開洞；
+    只過門面中心、或球心進洞但擦到框，都不算。
     """
     dz = curr[2] - prev[2]
     if attack_sign == 0 or dz * attack_sign <= 1e-9:
@@ -57,15 +59,16 @@ def shield_passes_ring(
     sign = 1.0 if dz > 0.0 else -1.0
     prev_trail = prev[2] - shield_r * sign
     curr_trail = curr[2] - shield_r * sign
+    exit_z = goal_z + sign * half_thick
     if sign > 0.0:
-        if not (prev_trail < goal_z <= curr_trail):
+        if not (prev_trail < exit_z <= curr_trail):
             return False
-    elif not (prev_trail > goal_z >= curr_trail):
+    elif not (prev_trail > exit_z >= curr_trail):
         return False
     span = curr_trail - prev_trail
     if abs(span) < 1e-12:
         return False
-    t = (goal_z - prev_trail) / span
+    t = (exit_z - prev_trail) / span
     if t < -1e-6 or t > 1.0 + 1e-6:
         return False
     t = min(1.0, max(0.0, t))

@@ -242,6 +242,14 @@ def test_智能停止_賽局idle時不發end(client: TestClient, teacher_ticket:
             assert "soccer_end" not in seen
 
 
+def test_推球半徑與客戶端同一份() -> None:
+    """BALL_RADIUS 要跟 client SOCCER_PUSH_BALL_R 相同。機體 0.8 不是護罩、也不是 0.6。"""
+    from app.games.soccer import DRONE_RADIUS
+
+    assert BALL_RADIUS == 0.6
+    assert DRONE_RADIUS == 0.8
+
+
 # ---------- 推球模式（mode:'ball'，須明確指定；缺省已改 striker）----------
 
 
@@ -271,7 +279,7 @@ def test_ball模式_開賽下發場地與球_推球位移與廣播(
             assert go["ball"]["y"] == pytest.approx(soccer.field.goal_y)
             assert go["field"]["halfZ"] == 7.0
 
-            # 藍隊員從球後方貼近（距 1.0 < 球 1.2 + 機 0.8）→ 沿法線（+z）推
+            # 藍隊員從球後方貼近（距 1.0 < 球半徑 + 機 0.8）→ 沿法線（+z）推
             s1.send_json(
                 {"type": "soccer_pos", "x": 0, "y": soccer.field.goal_y, "z": -1.0, "yaw": 0}
             )
@@ -297,7 +305,7 @@ def test_ball模式_牆反彈(client: TestClient, teacher_ticket: str, clock: Fa
             _start_ball_game(client, t, clock, s1, s2)
 
             soccer.ball.x, soccer.ball.vx = -2.2, -10.0  # 直衝 -x 牆
-            tick(client)  # x: -2.2 - 0.8 = -3.0 → 超出 -(3.5 - 1.2) → 反彈
+            tick(client)  # x: -2.2 - 0.8 = -3.0 → 超出 -(halfX - 球半徑) → 反彈
             assert soccer.ball.x == -(3.5 - BALL_RADIUS)
             assert soccer.ball.vx > 0  # 反向且衰減
 
