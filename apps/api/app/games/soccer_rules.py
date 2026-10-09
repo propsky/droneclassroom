@@ -1,20 +1,24 @@
 """F9A 階段二純規則：護罩是否整顆穿過圓環。
 
 與 apps/simulator/src/soccer/crossing.ts 同一套幾何。伺服器只看位置軌跡的行進方向，
-不看機頭朝向，也不只看球心有沒有進洞。
+不看機頭朝向，也不只看球心有沒有進洞。護罩半徑來自 soccer_presets（預設 F9A-A）。
 """
 
 import math
 
-# 護罩半徑（m）。與客戶端 SOCCER_BALL_R 相同：直徑 24cm，小於內半徑 35cm。
-SHIELD_R = 0.12
+from .soccer_presets import F9A_A
+
+# 沒帶 shield_r 時的預設（F9A-A，直徑 40 cm）。賽局應傳場地上的 shield_r。
+DEFAULT_SHIELD_R = F9A_A.shield_r
 # 罰球 10 秒（攻擊手對一名防守）
 PENALTY_SEC = 10.0
 # 倒數期間離起飛點超過這個距離，且已經在起飛點報到過 → 搶跑
 FALSE_START_RADIUS = 0.45
 # 穿越授權的有效時間：逾時的 soccer_goal 不能拿舊軌跡兌換
 CROSS_GRANT_MS = 1500.0
-# 機對機沿法線的接近速度（m/s）
+# 教學選項：空中機對機沿法線的接近速度（m/s）。
+# 2026 F9A.9 沒有「飛在空中互相接近太快就發牌」；預設關閉，見 SoccerGame.air_contact_cards。
+# 地面墜機紅牌（soccer_crash）與這條無關，不要混在一起關。
 YELLOW_CLOSING_MPS = 2.2
 RED_CLOSING_MPS = 5.5
 
@@ -27,7 +31,7 @@ def shield_passes_ring(
     goal_y: float,
     goal_r: float,
     attack_sign: float,
-    shield_r: float = SHIELD_R,
+    shield_r: float = DEFAULT_SHIELD_R,
 ) -> bool:
     """整顆護罩沿行進方向穿過圓環才算。
 
@@ -69,7 +73,7 @@ def shield_overlaps_opening(
     goal_z: float,
     goal_y: float,
     goal_r: float,
-    shield_r: float = SHIELD_R,
+    shield_r: float = DEFAULT_SHIELD_R,
 ) -> bool:
     """護罩碰到圓環開口（非攻擊手進自家圓環）。
 

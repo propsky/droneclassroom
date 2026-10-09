@@ -102,7 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # 所有可變狀態封裝在 app.state（測試隔離：每個 create_app 一份房間管理器）。
         # 房間模型見 rooms.py：每房一份名冊 + 賽局；預設房啟動即存在（不帶房間碼 = 舊流程）；
         # 有 DB 時老師開的房持久化為班級（teams 表），故把 sessionmaker 注入。
-        # 足球場地尺寸資料驅動（環境變數 SOCCER_HALF_X … 可調，見 config.py）
+        # 足球場地：SOCCER_CLASS 選 F9A-A／F9A-B（尺寸在 games/soccer_presets.py）
         app.state.rooms = RoomManager(
             cfg, known_levels=known, db=app.state.db_sessionmaker
         )

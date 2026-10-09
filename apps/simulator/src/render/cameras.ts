@@ -170,7 +170,7 @@ export class CameraRig {
       return true;
     }
 
-    // 足球跟隨：護罩直徑約 24cm，機位退後才看得到螺旋槳與 LED。
+    // 足球跟隨：F9A-A 護罩直徑 40cm，機位退後才看得到螺旋槳與 LED。
     // 貼邊時機位會落在牆或天花外側；那一面由場地視覺關掉，不擋視線。
     if (this.soccerSign !== null && this.soccerCam === 'follow') {
       const dist = SOCCER_FOLLOW_DISTANCE;

@@ -3,10 +3,22 @@
 tick 相關流程全部用假時鐘（conftest.clock）＋ 手動 tick（conftest.tick），不 sleep。
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.games.soccer import SOCCER_BREAK_SEC, SOCCER_PK_MIN_ROUNDS, SOCCER_PK_SHOT_SEC
+from app.config import Settings
+from app.games.soccer import SOCCER_BREAK_SEC, SOCCER_PK_MIN_ROUNDS, SOCCER_PK_SHOT_SEC, SoccerField
+from app.games.soccer_presets import F9A_A, F9A_B
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
+
+
+def f9a_cross() -> tuple[float, float, float, float]:
+    """F9A-A 穿環用：(圓心高, 門面 z, 門前, 穿過後)。門前的後緣還沒過門面。"""
+    gz = F9A_A.half_z - F9A_A.goal_inset
+    y = F9A_A.goal_y
+    z0 = gz - F9A_A.shield_r - 0.1
+    z1 = gz + F9A_A.shield_r + 0.1
+    return y, gz, z0, z1
 
 
 def _gkey(name: str) -> str:
@@ -103,16 +115,17 @@ def test_striker模式進球驗證與半場重置與勝負(
             assert go["mode"] == "striker"
             assert go["ball"] is None  # striker 模式沒有共用球
             assert go["match"]["phase"] == "period" and go["match"]["period"] == 1
-            # F9A 階段一：14×7×5、內半徑 0.35、管半徑 0.1、門面離底線 2m（goalZ=5）
-            assert go["field"] == {
-                "halfX": 3.5,
-                "halfZ": 7.0,
-                "goalY": 3.25,
-                "goalR": 0.35,
-                "ceil": 5.0,
-                "goalTube": 0.1,
-                "goalZ": 5.0,
-            }
+            # F9A-A：14×7×5、內半徑 0.30、管半徑 0.10、門面離底線 1.5m（goalZ=5.5）、護罩 0.20
+            y, gz, _z0, _z1 = f9a_cross()
+            assert go["field"] == soccer.field.payload()
+            assert go["field"]["halfX"] == pytest.approx(3.5)
+            assert go["field"]["halfZ"] == pytest.approx(7.0)
+            assert go["field"]["ceil"] == pytest.approx(5.0)
+            assert go["field"]["goalR"] == pytest.approx(0.30)
+            assert go["field"]["goalTube"] == pytest.approx(0.10)
+            assert go["field"]["goalY"] == pytest.approx(y)
+            assert go["field"]["goalZ"] == pytest.approx(gz)
+            assert go["field"]["shieldR"] == pytest.approx(0.20)
             # 出生點：起飛窄帶貼底線（|z| = halfZ - 0.5），前鋒居中，防守在帶內
             spawns = {sp["id"]: sp for sp in go["spawns"]}
             assert spawns["s1"] == {"id": "s1", "x": 0.0, "z": -6.5}  # 藍前鋒
@@ -121,24 +134,25 @@ def test_striker模式進球驗證與半場重置與勝負(
             assert spawns["s3"]["z"] == -6.5
             assert go["endTime"] == int(clock.ms + 40_000)
 
-            # 底線 z=7 距門面 2m（容差 1）→ 不算
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 7, "yaw": 0})
+            # 底線 z=7，離門面 1.5m → 不算
+            y, gz, z0, z1 = f9a_cross()
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": 7, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 0
-            # 門面上但在環外（hypot≈0.42 > 內半徑 0.35）→ 不算
+            # 門面上但球心在環外（x=0.45 > 內半徑 0.30）→ 不算
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 0.3, "y": 3.55, "z": 5, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0.45, "y": y, "z": gz, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 0
 
             # 整顆護罩沿 +z 穿過：後緣過門面、球心在淨空半徑內才算
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 4.80, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
             settle(client)
             clock.advance(400)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5.16, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             ok = recv_until(s1, "soccer_goal_ok")
             assert ok["team"] == "blue" and ok["scores"] == {"blue": 1, "red": 0}
@@ -154,7 +168,7 @@ def test_striker模式進球驗證與半場重置與勝負(
 
             # 非前鋒在門環內宣告 → 不算
             clock.advance(3000)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5, "yaw": 0})
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": gz, "yaw": 0})
             s3.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 1
@@ -272,11 +286,12 @@ def test_與大亂鬥互斥(client: TestClient, teacher_ticket: str) -> None:
 
 def _blue_goal(client: TestClient, clock: FakeClock, ws) -> None:
     """藍隊前鋒整顆護罩沿 +z 穿過對方圓環再宣告（兩筆位置，避免超速）。"""
+    y, _gz, z0, z1 = f9a_cross()
     clock.advance(3000)
-    ws.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 4.80, "yaw": 3.14})
+    ws.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 3.14})
     settle(client)
     clock.advance(400)
-    ws.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5.16, "yaw": 3.14})
+    ws.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 3.14})
     ws.send_json({"type": "soccer_goal"})
     settle(client)
 
@@ -315,8 +330,9 @@ def test_非攻擊手進自家圓環犯規(
             t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
             _countdown_to_go(client, clock, s1)
 
-            # 防守進入藍隊自家門（z=-5）→ 公告並改判 10 秒罰球
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
+            # 防守進入藍隊自家門 → 公告並改判 10 秒罰球
+            y, gz, _z0, _z1 = f9a_cross()
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0})
             tick(client)
             foul = recv_until(s3, "soccer_foul")
             assert foul["reason"] == "own_ring" and foul["by"] == "s2"
@@ -330,7 +346,7 @@ def test_非攻擊手進自家圓環犯規(
 
             # 攻擊手進自家圓環不是犯規
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0})
             tick(client)
             assert soccer.foul_count == 1
 
@@ -345,7 +361,7 @@ def test_非攻擊手進自家圓環犯規(
             tick(client)
             assert soccer.players[_gkey("小美")].in_own_ring is False
             clock.advance(3000)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": -5, "yaw": 0})
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0})
             tick(client)
             assert soccer.foul_count == 2
             assert soccer.status == "penalty"
@@ -460,11 +476,12 @@ def test_黃金進球再平手進PK(
 
             for rnd in range(1, SOCCER_PK_MIN_ROUNDS + 1):
                 assert soccer.pk_turn == "blue"
+                y, _gz, z0, z1 = f9a_cross()
                 clock.advance(3000)
-                s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 4.80, "yaw": 0})
+                s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
                 settle(client)
                 clock.advance(400)
-                s1.send_json({"type": "soccer_pos", "x": 0, "y": 3.25, "z": 5.16, "yaw": 0})
+                s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
                 s1.send_json({"type": "soccer_goal"})
                 settle(client)
                 assert soccer.pk_scores["blue"] == rnd
@@ -476,3 +493,27 @@ def test_黃金進球再平手進PK(
             assert end["reason"] == "pk" and end["winner"] == "blue"
             assert end["match"]["pkScores"] == {"blue": 3, "red": 0}
             assert soccer.status == "done"
+
+
+def test_尺寸只在F9A預設_B組可切換() -> None:
+    """F9A-A／F9A-B 的數字只從 soccer_presets 來，dataclass 不再自帶一份。"""
+    a = SoccerField.from_spec(F9A_A)
+    assert a.goal_r == pytest.approx(0.30)
+    assert a.goal_tube == pytest.approx(0.10)
+    assert a.goal_r + a.goal_tube * 2 == pytest.approx(0.50)
+    assert a.goal_inset == pytest.approx(1.5)
+    assert a.goal_z == pytest.approx(5.5)
+    assert a.goal_y == pytest.approx(3.30)
+    assert a.shield_r == pytest.approx(0.20)
+    assert (a.half_x * 2, a.half_z * 2, a.ceil) == (7, 14, 5)
+
+    b = SoccerField.from_settings(Settings(soccer_class="F9A-B"))
+    assert (b.half_z * 2, b.half_x * 2, b.ceil) == (6, 3, 3)
+    assert b.goal_r == pytest.approx(F9A_B.goal_r) == pytest.approx(0.20)
+    assert b.goal_r + b.goal_tube * 2 == pytest.approx(0.35)
+    assert F9A_B.thickness_max == pytest.approx(0.10)
+    assert b.goal_inset == pytest.approx(1.0)
+    assert b.goal_z == pytest.approx(2.0)
+    assert b.goal_y == pytest.approx(2.20)
+    assert b.shield_r == pytest.approx(0.10)
+    assert "shieldR" in b.payload()

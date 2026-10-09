@@ -22,22 +22,23 @@ const ring = {
 };
 
 describe('F9A 階段二穿環', () => {
+  const y = SOCCER_FIELD.goalY;
+  const before = SOCCER_FIELD.goalZ - SOCCER_BALL_R - 0.1;
+  const through = SOCCER_FIELD.goalZ + SOCCER_BALL_R + 0.1;
+
   it('護罩後緣沿行進方向整顆穿過才算', () => {
-    expect(
-      shieldPassesRing({ x: 0, y: 3.25, z: 4.8 }, { x: 0, y: 3.25, z: 5.16 }, ring),
-    ).toBe(true);
+    expect(shieldPassesRing({ x: 0, y, z: before }, { x: 0, y, z: through }, ring)).toBe(true);
   });
 
   it('球心到門面但後緣沒過、擦框、反向都不算', () => {
     expect(
-      shieldPassesRing({ x: 0, y: 3.25, z: 4.8 }, { x: 0, y: 3.25, z: 5 }, ring),
+      shieldPassesRing({ x: 0, y, z: before }, { x: 0, y, z: SOCCER_FIELD.goalZ }, ring),
     ).toBe(false);
+    const graze = SOCCER_FIELD.goalR - SOCCER_BALL_R + 0.05;
     expect(
-      shieldPassesRing({ x: 0.3, y: 3.25, z: 4.8 }, { x: 0.3, y: 3.25, z: 5.16 }, ring),
+      shieldPassesRing({ x: graze, y, z: before }, { x: graze, y, z: through }, ring),
     ).toBe(false);
-    expect(
-      shieldPassesRing({ x: 0, y: 3.25, z: 5.16 }, { x: 0, y: 3.25, z: 4.8 }, ring),
-    ).toBe(false);
+    expect(shieldPassesRing({ x: 0, y, z: through }, { x: 0, y, z: before }, ring)).toBe(false);
   });
 });
 

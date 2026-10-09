@@ -353,7 +353,8 @@ export interface SoccerSpawn { id: string; x: number; z: number }
 /**
  * 場地尺寸 — 由伺服器下發、客戶端據此渲染（資料驅動：調整大小只改伺服器設定）。
  * halfX/halfZ = 場地半寬/半長；goalY = 門環中心高；goalR = 門環內半徑；ceil = 天花板高。
- * goalTube = 環管半徑（選用；沒帶時客戶端自行衍生）。goalZ 由伺服器一併下發（舊客戶端可忽略）。
+ * goalTube = 環管半徑（選用；沒帶時客戶端自行衍生）。goalZ、shieldR 由伺服器一併下發
+ * （舊客戶端可忽略多出來的欄位）。
  */
 export interface SoccerFieldDef {
   halfX: number;
@@ -365,6 +366,8 @@ export interface SoccerFieldDef {
   goalTube?: number;
   /** 門面 |z|（離底線往場內） */
   goalZ?: number;
+  /** 護罩半徑（m）。沒帶時客戶端用 F9A-A fallback */
+  shieldR?: number;
 }
 
 /** 賽制階段。正規局進行中 status 仍是 'running'；休息／黃金／PK 用同名 status */

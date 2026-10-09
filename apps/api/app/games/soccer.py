@@ -7,8 +7,8 @@
 - 位置級防作弊（base.py）：座標 clamp、速度上限
 - 賽終狀態線上值沿用 legacy 的 'done'（shared/protocol.ts 註記 'ended' 與 legacy 實際不符，
   以 legacy 為準）
-- 場地尺寸資料驅動（SoccerField，config 環境變數可調）：soccer_state / soccer_go 下發
-  完整 SoccerFieldDef，client 據此渲染 —— 調整大小只改伺服器設定
+- 場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
+  完整 SoccerFieldDef（含護罩半徑），client 據此渲染。SOCCER_CLASS 選子類
 - 兩種玩法（SoccerStartMsg.mode）：
   'striker'（預設）= FAI 前鋒穿門：只有攻擊手穿對方圓環得分；得分的那一台
     須先回己方半場才能再得分。階段二：穿環看整顆護罩與行進方向，伺服器不單信
@@ -33,12 +33,12 @@ from ..config import Settings
 from ..protocol import SoccerPosMsg
 from ..roster import Roster, StudentRecord
 from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
+from .soccer_presets import F9A_A, SoccerClassSpec, preset_for
 from .soccer_rules import (
     CROSS_GRANT_MS,
     FALSE_START_RADIUS,
     PENALTY_SEC,
     RED_CLOSING_MPS,
-    SHIELD_R,
     YELLOW_CLOSING_MPS,
     shield_overlaps_opening,
     shield_passes_ring,
@@ -64,7 +64,7 @@ SOCCER_START_HALF_W = 0.5
 # 伺服器 80ms tick 模擬；數值以「單位/秒」為主，每 tick 的量以 BALL_TICK_DT 換算
 
 BALL_RADIUS = 1.2  # 球半徑（大顆好推好看；隨 soccer_ball 下發，client 據此渲染）
-DRONE_RADIUS = 0.8  # 推球接觸判定用的無人機半徑（與 client SOCCER_BALL_R 球形保護框一致）
+DRONE_RADIUS = 0.8  # 推球模式接觸半徑（隱藏 ball 玩法；不是 F9A 護罩）
 BALL_TICK_DT = 0.08  # 物理積分步長 = 賽局 tick 週期（80ms），與假時鐘無關、每 tick 固定
 BALL_DRAG = 0.985  # 輕阻力：每 tick 速度衰減倍率
 BALL_HOVER_GAIN = 1.5  # 弱重力：向懸浮高度（goalY）回歸的加速度增益（/秒²）
@@ -79,19 +79,21 @@ BALL_MAX_SPEED = 20.0  # 球速上限（重疊時每 tick 連推會疊加，防�
 class SoccerField:
     """場地尺寸（資料驅動）：以 SoccerFieldDef 下發，client 據此渲染。
 
+    數字不寫在這裡。from_spec / from_settings 只轉 soccer_presets 的那一份。
     half_x / half_z = 場地半寬 / 半長（長軸 z、中線 z=0）；
     goal_y = 門環中心高；goal_r = 門環內半徑；goal_tube = 管半徑；ceil = 天花板高。
     兩門在 z=±goal_z（自底線往場內 goal_inset，與 client 門環視覺同位置）；
-    端牆 z=±half_z 是場地邊界。
+    端牆 z=±half_z 是場地邊界。shield_r = 護罩半徑。
     """
 
-    half_x: float = 3.5
-    half_z: float = 7.0
-    goal_y: float = 3.25
-    goal_r: float = 0.35
-    ceil: float = 5.0
-    goal_tube: float = 0.10
-    goal_inset: float = 2.0
+    half_x: float
+    half_z: float
+    goal_y: float
+    goal_r: float
+    ceil: float
+    goal_tube: float
+    goal_inset: float
+    shield_r: float
 
     @property
     def goal_z(self) -> float:
@@ -99,17 +101,24 @@ class SoccerField:
         return self.half_z - self.goal_inset
 
     @classmethod
-    def from_settings(cls, cfg: Settings) -> "SoccerField":
-        """由伺服器設定建立（環境變數 SOCCER_HALF_X … 可調，見 config.py）。"""
+    def from_spec(cls, spec: SoccerClassSpec | None = None) -> "SoccerField":
+        """由子類預設建立。沒帶就用 F9A-A。"""
+        chosen = F9A_A if spec is None else spec
         return cls(
-            half_x=cfg.soccer_half_x,
-            half_z=cfg.soccer_half_z,
-            goal_y=cfg.soccer_goal_y,
-            goal_r=cfg.soccer_goal_r,
-            ceil=cfg.soccer_ceil,
-            goal_tube=cfg.soccer_goal_tube,
-            goal_inset=cfg.soccer_goal_inset,
+            half_x=chosen.half_x,
+            half_z=chosen.half_z,
+            goal_y=chosen.goal_y,
+            goal_r=chosen.goal_r,
+            ceil=chosen.ceil,
+            goal_tube=chosen.goal_tube,
+            goal_inset=chosen.goal_inset,
+            shield_r=chosen.shield_r,
         )
+
+    @classmethod
+    def from_settings(cls, cfg: Settings) -> "SoccerField":
+        """由 SOCCER_CLASS 選 F9A-A 或 F9A-B（見 soccer_presets）。"""
+        return cls.from_spec(preset_for(cfg.soccer_class))
 
     def payload(self) -> dict[str, float]:
         """線上格式（SoccerFieldDef，欄位名 camelCase）。"""
@@ -120,8 +129,9 @@ class SoccerField:
             "goalR": self.goal_r,
             "ceil": self.ceil,
             "goalTube": self.goal_tube,
-            # 門面 z 一併下發（client field.ts 有帶就用，沒帶才用 halfZ - inset 衍生）
+            # 門面 z、護罩半徑一併下發（client 有帶就用，沒帶才 fallback）
             "goalZ": self.goal_z,
+            "shieldR": self.shield_r,
         }
 
 
@@ -181,9 +191,17 @@ class SoccerPlayer:
 class SoccerGame(BaseGame):
     """足球賽局（狀態自持，掛 app.state.soccer）。"""
 
-    def __init__(self, roster: Roster, field: SoccerField | None = None) -> None:
+    def __init__(
+        self,
+        roster: Roster,
+        field: SoccerField | None = None,
+        *,
+        air_contact_cards: bool = False,
+    ) -> None:
         super().__init__(roster)
-        self.field = field or SoccerField()
+        self.field = field or SoccerField.from_spec(F9A_A)
+        # 空中機對機接近速度罰牌。預設關（2026 F9A.9 沒有這條）；教學可打開。
+        self.air_contact_cards = air_contact_cards
         # 玩法：'striker' FAI 前鋒穿門（預設）/ 'ball' 推球進門（隱藏選配）
         self.mode = "striker"
         self.end_time = 0
@@ -1082,6 +1100,7 @@ class SoccerGame(BaseGame):
             goal_y=self.field.goal_y,
             goal_r=self.field.goal_r,
             attack_sign=sign,
+            shield_r=self.field.shield_r,
         )
         if not passed:
             return
@@ -1114,6 +1133,7 @@ class SoccerGame(BaseGame):
             goal_z=goal_z,
             goal_y=self.field.goal_y,
             goal_r=self.field.goal_r,
+            shield_r=self.field.shield_r,
         )
         entered = (not p.striker) and (not p.disabled) and inside
         if self.status not in ("running", "golden"):
@@ -1314,15 +1334,22 @@ class SoccerGame(BaseGame):
         return closing, a if a_toward >= b_toward else b
 
     async def _tick_contacts(self) -> None:
+        """空中接近速度罰牌。預設不跑；air_contact_cards 是教學開關。
+
+        墜機走 crash()，不經過這裡。
+        """
+        if not self.air_contact_cards:
+            return
         if self.mode != "striker" or self.status not in ("running", "golden", "penalty"):
             return
         players = [p for p in self._active() if not p.disabled]
         live: set[tuple[str, str]] = set()
+        reach = self.field.shield_r * 2 + 0.05
         for i, a in enumerate(players):
             for b in players[i + 1 :]:
                 key = tuple(sorted((a.record.id, b.record.id)))
                 dist = math.dist((a.x, a.y, a.z), (b.x, b.y, b.z))
-                if dist > SHIELD_R * 2 + 0.05:
+                if dist > reach:
                     self._contact_latch.discard(key)
                     continue
                 live.add(key)

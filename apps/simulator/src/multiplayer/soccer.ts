@@ -26,10 +26,7 @@ import { clearLevel } from '../core/level';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
-import {
-  SOCCER_BALL_R,
-  soccerCameraSign,
-} from '../soccer/constants';
+import { soccerCameraSign } from '../soccer/constants';
 import { shieldPassesRing } from '../soccer/crossing';
 import {
   SOCCER_IMPACT_TICK,
@@ -656,7 +653,7 @@ function clampMatchBounds(): void {
     halfX: F.halfX,
     halfZ: F.halfZ,
     top: F.top,
-  }, SOCCER_BALL_R);
+  }, F.shieldR);
 }
 
 /** 下降速度夠大撞地 → 通知伺服器，本局排除（只報自己） */
@@ -691,7 +688,8 @@ function interpolateBall(): void {
   b.pos.z += (b.target.z - b.pos.z) * INTERP;
   const p = droneState.position;
   const d = Math.hypot(p.x - b.pos.x, p.y - b.pos.y, p.z - b.pos.z);
-  soccerState.ballNear = d < b.r + SOCCER_BALL_R + 0.15; // 與伺服器推球門檻對齊（+0.15 網路延遲餘裕）
+  const shieldR = activeSoccerField().shieldR;
+  soccerState.ballNear = d < b.r + shieldR + 0.15; // 視覺貼近：護罩半徑 + 網路延遲餘裕
 }
 
 /** 內插他人分身位置（60Hz 固定 tick × 0.25 = legacy 每幀 @60fps 等價） */
@@ -717,7 +715,7 @@ function resolveDroneContacts(): void {
   let bumped = false;
   for (const [id, o] of soccerState.others) {
     if (!o.hasPos) continue;
-    const hit = resolveShieldContact(body, o.pos, wsState.myId, id, SOCCER_BALL_R);
+    const hit = resolveShieldContact(body, o.pos, wsState.myId, id, activeSoccerField().shieldR);
     if (hit.separated) bumped = bumped || hit.impact >= SOCCER_IMPACT_TICK;
   }
   p.x = body.x;
@@ -760,7 +758,7 @@ function detectGoal(): void {
       goalZ: attackSign * F.goalZ,
       goalY: F.goalY,
       goalR: F.goalR,
-      shieldR: SOCCER_BALL_R,
+      shieldR: F.shieldR,
       attackSign,
     },
   );

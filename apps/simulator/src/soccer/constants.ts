@@ -1,58 +1,129 @@
 // ⚽ 足球模式共用常數 — 純 TS（core / render / ui 皆可 import，不得依賴 Babylon）。
 //
-// 【場地資料驅動】多人對戰的場地尺寸由伺服器下發（soccer_go / soccer_state 的
-// field: SoccerFieldDef，見 soccer/field.ts）；這裡的 SOCCER_FIELD 只在兩種情況使用：
-//   1. 單人練習場（沒有伺服器）
-//   2. 多人 fallback — 伺服器「未下發」field 時才用（例如舊版伺服器）
-// 數值對齊 FAI F9A-A 階段一：14×7×5m、圓環內徑 70cm。與 apps/api 的 config 預設同一套。
+// 【尺寸只放這裡】F9A-A 與 F9A-B 兩組預設。多人對戰由伺服器下發同一組數字
+// （soccer_go / soccer_state 的 field，見 soccer/field.ts）；這份預設只用在：
+//   1. 單人練習（沒有伺服器）
+//   2. 多人 fallback — 伺服器沒帶 field 時
+// 伺服器的同一份在 apps/api/app/games/soccer_presets.py。預設子類 F9A-A。
+//
+// 依據：FAI SC4 Vol.F9 2026 Edition V2（F9A.1.1／2.2／3.1／3.2）
+// 與 2025 WDSC Sporting Rules 1.4.2（內圈底部：A 為 3 m、B 為 2 m）。
 import type { SoccerTeam } from '@creafly/shared';
 
+export type SoccerClassCode = 'F9A-A' | 'F9A-B';
+
+/** 一個子類的場地、圓環、護罩。管半徑由外半徑與內半徑算出，外緣才對得上建議外徑。 */
+export interface SoccerClassPreset {
+  id: SoccerClassCode;
+  /** 半寬（全寬 = 2 × halfX） */
+  halfX: number;
+  /** 半長（全長 = 2 × halfZ，長軸 z） */
+  halfZ: number;
+  /** 天花板 */
+  top: number;
+  /** 內半徑（穿環） */
+  goalR: number;
+  /** 外半徑（圓環外緣） */
+  outerR: number;
+  /** 管半徑 = (外半徑 − 內半徑) / 2 */
+  goalTube: number;
+  /** 門面離底線、往場內 */
+  goalInset: number;
+  /** 內圈底部離地。圓心 = 底部 + 內半徑 */
+  innerBottom: number;
+  /** 圓心離地 */
+  goalY: number;
+  /** 護罩半徑 */
+  shieldR: number;
+  /**
+   * F9A.3.1 標的最大厚度 T。
+   * A 的 T 等於徑向跨距；B 的建議外徑／內徑跨距是 15 cm，T 上限 10 cm。
+   * 畫出來的管子填滿內緣到外緣，所以 B 的視覺管徑是 15 cm，不是把洞縮小成 T。
+   */
+  thicknessMax: number;
+}
+
+function preset(
+  spec: Omit<SoccerClassPreset, 'goalTube' | 'goalY'>,
+): SoccerClassPreset {
+  return {
+    ...spec,
+    goalTube: (spec.outerR - spec.goalR) / 2,
+    goalY: spec.innerBottom + spec.goalR,
+  };
+}
+
+/** F9A-A：外徑 1.00 m、內徑 0.60 m、厚 0.20 m、離底線 1.5 m、內圈底 3 m、護罩直徑 40 cm。 */
+export const F9A_A: SoccerClassPreset = preset({
+  id: 'F9A-A',
+  halfX: 3.5,
+  halfZ: 7,
+  top: 5,
+  goalR: 0.3,
+  outerR: 0.5,
+  goalInset: 1.5,
+  innerBottom: 3,
+  shieldR: 0.2,
+  thicknessMax: 0.2,
+});
+
+/** F9A-B：場地 6×3×3、內半徑 0.20、外半徑 0.35、T 上限 0.10、離底線 1 m、內圈底 2 m、護罩半徑 0.10。 */
+export const F9A_B: SoccerClassPreset = preset({
+  id: 'F9A-B',
+  halfX: 1.5,
+  halfZ: 3,
+  top: 3,
+  goalR: 0.2,
+  outerR: 0.35,
+  goalInset: 1,
+  innerBottom: 2,
+  shieldR: 0.1,
+  thicknessMax: 0.1,
+});
+
+export const SOCCER_PRESETS: Record<SoccerClassCode, SoccerClassPreset> = {
+  'F9A-A': F9A_A,
+  'F9A-B': F9A_B,
+};
+
+export const DEFAULT_SOCCER_CLASS: SoccerClassCode = 'F9A-A';
+
+/** 起飛區進深（沿 z）。兩子類目前共用；人數與假人不在這次改。 */
+export const SOCCER_START_DEPTH = 1;
+/** 起飛區寬（沿 x） */
+export const SOCCER_START_WIDTH = 1;
+
 /**
- * 場地（fallback / 單人練習）：長軸 z（兩門連線）、寬 x、中線 z=0。
- * 長 14m = 2 × 寬 7m，天花板 5m。
+ * 生效 fallback／單人練習場地：預設 F9A-A。
+ * 長軸 z（兩門連線）、寬 x、中線 z=0。
  */
 export const SOCCER_FIELD = {
-  /** 半寬（x 邊界 ±3.5，全寬 7m） */
-  halfX: 3.5,
-  /** 半長（z 邊界 ±7，全長 14m） */
-  halfZ: 7,
-  /** 天花板高度（與伺服器預設 soccer_ceil 一致） */
-  top: 5,
-  /** 球門面 z（兩端 ±5 = halfZ - 離底線 2m） */
-  goalZ: 5,
-  /** 球門中心離地高度 */
-  goalY: 3.25,
-  /**
-   * 球門內半徑（穿門判定：hypot(x, y-goalY) < goalR）。
-   * 內徑 70cm → 半徑 35cm。外徑與厚度見 goalTube。
-   */
-  goalR: 0.35,
-  /**
-   * 球門環管半徑。厚度 20cm = 管直徑，故半徑 10cm。
-   * 外徑 = 內徑 + 2×厚度 = 70 + 40 = 110cm。
-   */
-  goalTube: 0.1,
-  /** 單人練習起飛區中心 z（貼 +z 底線內側；= halfZ - 起飛帶進深/2） */
-  startZ: 6.5,
+  halfX: F9A_A.halfX,
+  halfZ: F9A_A.halfZ,
+  top: F9A_A.top,
+  /** 球門面 |z| = halfZ − 離底線 */
+  goalZ: F9A_A.halfZ - F9A_A.goalInset,
+  goalY: F9A_A.goalY,
+  goalR: F9A_A.goalR,
+  goalTube: F9A_A.goalTube,
+  /** 單人練習起飛區中心 z（貼 +z 底線內側） */
+  startZ: F9A_A.halfZ - SOCCER_START_DEPTH / 2,
+  shieldR: F9A_A.shieldR,
 } as const;
 
-/** 球門面離底線、往場內的距離（goalZ = halfZ - 此值；與伺服器 soccer_goal_inset 預設一致） */
-export const SOCCER_GOAL_INSET = 2;
-
-/** 起飛區：底線中段窄帶。寬沿 x、進深沿 z，兩隊各一條（與伺服器出生點同一套） */
-export const SOCCER_START_WIDTH = 1;
-export const SOCCER_START_DEPTH = 1;
+/** 球門面離底線（與預設子類 goalInset 同一份） */
+export const SOCCER_GOAL_INSET = F9A_A.goalInset;
 
 /**
- * 機體外的球形保護框半徑（約 20cm 級：直徑 24cm）。
- * 必須小於圓環內半徑，中心才過得了 70cm 的洞；擦到框仍會被擋，所以穿環有難度。
- * 階段二穿環：整顆護罩的後緣都要過洞，淨空 = 內半徑 − 這個半徑。
+ * 球形護罩半徑。F9A-A 直徑 40 cm（F9A.1.1：40 cm +2 cm）。
+ * 小於內半徑，中心才過得了洞；擦到框仍會被擋。
+ * 多人若伺服器下發 shieldR，以 field.ts 的生效值為準，這份是 fallback。
  */
-export const SOCCER_BALL_R = 0.12;
+export const SOCCER_BALL_R = F9A_A.shieldR;
 
 /**
- * 足球模式縮小飛機，讓視覺落進上面的保護框（不改推力／阻力手感）。
- * 未縮放機臂約到 1.6m，0.05 倍後對角約 11cm，與 12cm 框同量級。
+ * 舊版教室機縮放係數。足球機體改由 createSoccerDrone 依護罩半徑畫，
+ * 不再用這個係數決定護罩大小。
  */
 export const SOCCER_DRONE_SCALE = 0.05;
 
