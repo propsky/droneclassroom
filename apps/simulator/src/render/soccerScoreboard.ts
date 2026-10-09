@@ -1,6 +1,8 @@
-// 吊在球館中央的雙面七段計分板。數字畫在貼圖上（七段），兩面各一塊，兩隊都看得到。
+// 端牆上方的七段計分板。數字畫在貼圖上，面朝場內。
+// 板身是薄邊框加貼圖，不在球場中央放實心殼（舊的 soccerBoardShell 會擋穿環與鏡頭）。
 import {
   Scene,
+  Mesh,
   MeshBuilder,
   StandardMaterial,
   DynamicTexture,
@@ -8,6 +10,7 @@ import {
   TransformNode,
 } from '@babylonjs/core';
 import { SEVEN_SEG, formatClock, type BroadcastView } from '../soccer/broadcast';
+import type { ScoreboardPose } from '../soccer/scoreboardPose';
 import { hex } from './scene';
 
 export interface SoccerScoreboard {
@@ -19,9 +22,10 @@ export interface SoccerScoreboard {
 const W = 1024;
 const H = 512;
 
-export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboard {
+export function createSoccerScoreboard(scene: Scene, pose: ScoreboardPose): SoccerScoreboard {
   const root = new TransformNode('soccerScoreboard', scene);
-  root.position.set(0, y, 0);
+  root.position.set(pose.x, pose.y, pose.z);
+  if (pose.faceSign < 0) root.rotation.y = Math.PI;
 
   const tex = new DynamicTexture('soccerBoardTex', { width: W, height: H }, scene, false);
   tex.hasAlpha = false;
@@ -31,53 +35,70 @@ export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboar
   mat.emissiveColor = Color3.White();
   mat.specularColor = Color3.Black();
   mat.disableLighting = true;
-  mat.backFaceCulling = true;
+  // 右手座標下面會翻面；關掉剔除，場內才看得到數字，不會只剩一塊灰殼。
+  mat.backFaceCulling = false;
+  mat.twoSidedLighting = true;
 
-  const faceW = 3.5;
-  const faceH = faceW * (H / W);
-  const front = MeshBuilder.CreatePlane('soccerBoardFront', { width: faceW, height: faceH }, scene);
+  const faceW = pose.width;
+  const faceH = pose.height;
+  const front = MeshBuilder.CreatePlane(
+    'soccerBoardFront',
+    { width: faceW, height: faceH, sideOrientation: Mesh.DOUBLESIDE },
+    scene,
+  );
   front.parent = root;
-  front.position.z = 0.04;
+  front.position.z = pose.depth * 0.5;
   front.material = mat;
   front.isPickable = false;
-  const back = MeshBuilder.CreatePlane('soccerBoardBack', { width: faceW, height: faceH }, scene);
+  const back = MeshBuilder.CreatePlane(
+    'soccerBoardBack',
+    { width: faceW, height: faceH, sideOrientation: Mesh.DOUBLESIDE },
+    scene,
+  );
   back.parent = root;
-  back.position.z = -0.04;
+  back.position.z = -pose.depth * 0.5;
   back.rotation.y = Math.PI;
   back.material = mat;
   back.isPickable = false;
 
-  // 吊桿：天花板到板子上緣
+  // 吊桿：天花板到板子上緣（呼叫端再依場高拉長）
   const rodMat = new StandardMaterial('soccerBoardRod', scene);
   rodMat.diffuseColor = hex(0x8ea3b6);
   rodMat.emissiveColor = hex(0x7d93a8);
   rodMat.specularColor = Color3.Black();
   rodMat.disableLighting = true;
-  for (const x of [-1.2, 1.2]) {
+  for (const x of [-faceW * 0.34, faceW * 0.34]) {
     const rod = MeshBuilder.CreateCylinder(
       `soccerBoardRod-${x}`,
-      { diameter: 0.03, height: 0.7, tessellation: 8 },
+      { diameter: 0.02, height: 0.4, tessellation: 8 },
       scene,
     );
     rod.parent = root;
-    rod.position.set(x, faceH / 2 + 0.35, 0);
+    rod.position.set(x, faceH / 2 + 0.2, 0);
     rod.material = rodMat;
     rod.isPickable = false;
   }
 
-  const shell = MeshBuilder.CreateBox(
-    'soccerBoardShell',
-    { width: faceW + 0.08, height: faceH + 0.08, depth: 0.06 },
-    scene,
-  );
-  shell.parent = root;
-  const shellMat = new StandardMaterial('soccerBoardShellMat', scene);
-  shellMat.diffuseColor = hex(0x6d8196);
-  shellMat.emissiveColor = hex(0x62778c);
-  shellMat.specularColor = Color3.Black();
-  shellMat.disableLighting = true;
-  shell.material = shellMat;
-  shell.isPickable = false;
+  // 細邊框，中間留空給貼圖。不要用整片實心盒子當板面。
+  const bezelMat = new StandardMaterial('soccerBoardBezelMat', scene);
+  bezelMat.diffuseColor = hex(0x1a2836);
+  bezelMat.emissiveColor = hex(0x243848);
+  bezelMat.specularColor = Color3.Black();
+  bezelMat.disableLighting = true;
+  const lip = 0.04;
+  const bars: Array<[number, number, number, number, number]> = [
+    [faceW + lip, lip, pose.depth, 0, faceH / 2],
+    [faceW + lip, lip, pose.depth, 0, -faceH / 2],
+    [lip, faceH + lip, pose.depth, -faceW / 2, 0],
+    [lip, faceH + lip, pose.depth, faceW / 2, 0],
+  ];
+  for (const [w, h, d, x, y] of bars) {
+    const bar = MeshBuilder.CreateBox('soccerBoardBezel', { width: w, height: h, depth: d }, scene);
+    bar.parent = root;
+    bar.position.set(x, y, 0);
+    bar.material = bezelMat;
+    bar.isPickable = false;
+  }
 
   let lastKey = '';
 
@@ -157,14 +178,14 @@ export function createSoccerScoreboard(scene: Scene, y: number): SoccerScoreboar
   };
 }
 
-/** 讓吊桿在建好後能接到天花板（呼叫端知道場高） */
-export function stretchScoreboardRods(root: TransformNode, ceilingY: number): void {
-  const faceH = 3.5 * (H / W);
+/** 讓吊桿在建好後能接到天花板（呼叫端知道場高與板高） */
+export function stretchScoreboardRods(root: TransformNode, ceilingY: number, faceH: number): void {
   const gap = ceilingY - (root.position.y + faceH / 2);
-  const height = Math.max(0.2, gap);
+  const height = Math.max(0.12, gap);
+  const built = 0.4;
   for (const child of root.getChildMeshes()) {
     if (!child.name.startsWith('soccerBoardRod')) continue;
-    child.scaling.y = height / 0.7;
+    child.scaling.y = height / built;
     child.position.y = faceH / 2 + height / 2;
   }
 }

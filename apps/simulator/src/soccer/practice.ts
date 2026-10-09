@@ -1,5 +1,5 @@
 // ⚽ 無人機足球 — 單人練習（7 個 drill、過中線退半場、窄邊定點視角）。
-// 穿門看護罩後緣有沒有離開環的出口面。最佳紀錄 localStorage（沿用 legacy key 'creafly_soccer_<id>'）。
+// 穿環用 advanceRingPassage：整顆護罩、行進方向、環厚。最佳紀錄 localStorage（沿用 legacy key 'creafly_soccer_<id>'）。
 // 視覺（場地 / 球門 / 門框碰撞 / 球形保護框 / 假人）在 render/soccerField.ts；HUD 在 ui/soccerHud.ts。
 // P-5 假人是球，碰撞用護罩半徑，不走教室 DRONE_RADIUS 的方塊路徑。
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
@@ -8,7 +8,7 @@ import { clearLevel } from '../core/level';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { SOCCER_FIELD } from './constants';
-import { shieldPassesRing } from './crossing';
+import { advanceRingPassage, createRingPassage, type RingCross, type RingPassage } from './crossing';
 import { bounceSoccerWalls, pushOutOfSphere } from './contact';
 import { activeSoccerField, resetSoccerField } from './field';
 import {
@@ -32,13 +32,19 @@ export interface SoccerDrill {
   record?: boolean;
   /** 門前擺防守假人（P-5） */
   dummies?: boolean;
-  /** 穿完要回到中線、進入自己半場，下一次穿環才算（P-3、P-7；P-6 用 shuttle） */
+  /** 穿完要回到中線、進入自己半場，下一次穿遠端環才算（P-3、P-7）。P-6 用 shuttle 改攻另一端。 */
   mustReturn?: boolean;
 }
 
 export const SOCCER_DRILLS: readonly SoccerDrill[] = [
-  { id: 'P-1', name: '熟悉場地', type: 'free', desc: '自由飛，熟悉場地與兩端球門。' },
-  { id: 'P-2', name: '單次穿門', type: 'pass', target: 1, desc: '飛到對面，穿過遠端球門 1 次。' },
+  { id: 'P-1', name: '熟悉場地', type: 'free', desc: '自由飛，熟悉場地、兩端球門與中線。沒有穿環次數。' },
+  {
+    id: 'P-2',
+    name: '單次穿門',
+    type: 'pass',
+    target: 1,
+    desc: '從自己半場出發，整顆護罩沿進攻方向穿過遠端環 1 次。',
+  },
   {
     id: 'P-3',
     name: '連續穿門×3',
@@ -46,18 +52,31 @@ export const SOCCER_DRILLS: readonly SoccerDrill[] = [
     target: 3,
     timeLimit: 60,
     mustReturn: true,
-    desc: '60 秒內穿過遠端門 3 次。每穿一次都要先回到中線、進入自己半場。',
+    desc: '60 秒內進攻遠端環 3 次。每次得分後要先過中線回到自己半場，從同一環反方向穿回不算。',
   },
-  { id: 'P-4', name: '計時單穿', type: 'pass', target: 1, record: true, desc: '計時：穿過遠端門，挑戰最快！' },
+  {
+    id: 'P-4',
+    name: '計時單穿',
+    type: 'pass',
+    target: 1,
+    record: true,
+    desc: '計時：整顆護罩沿進攻方向穿過遠端環才算，只飛過某個高度不算。',
+  },
   {
     id: 'P-5',
     name: '繞過防守',
     type: 'pass',
     target: 1,
     dummies: true,
-    desc: '遠端門前有球形假人，有的會左右巡邏。繞過去穿門。',
+    desc: '遠端環前有球形假人（半徑等於護罩），有的會左右巡邏。繞過去，整顆護罩穿環。',
   },
-  { id: 'P-6', name: '兩端來回×3', type: 'shuttle', target: 3, desc: '穿遠端門→退回過中線→再穿，來回 3 次。' },
+  {
+    id: 'P-6',
+    name: '兩端來回×3',
+    type: 'shuttle',
+    target: 3,
+    desc: '攻一端的環得分，回到這次該回的半場，再攻另一端的環。同一環前來回抖不算。',
+  },
   {
     id: 'P-7',
     name: '限時多穿',
@@ -66,7 +85,7 @@ export const SOCCER_DRILLS: readonly SoccerDrill[] = [
     timeLimit: 180,
     record: true,
     mustReturn: true,
-    desc: '3 分鐘內盡量多穿門。每穿一次都要先回到中線、進入自己半場。',
+    desc: '3 分鐘內盡量多次進攻遠端環。每次得分後要先過中線回到自己半場，下一次才算。',
   },
 ] as const;
 
@@ -99,11 +118,14 @@ export function practiceDummySpheres(
   ];
 }
 
-export type PracticeCrossKind = 'free' | 'open' | 'return';
+export type PracticeCrossKind = 'free' | 'open' | 'return' | 'alternate';
+
+export type PracticeEnd = 'far' | 'near';
 
 export function practiceCrossKind(d: SoccerDrill): PracticeCrossKind {
   if (d.type === 'free') return 'free';
-  if (d.type === 'shuttle' || d.mustReturn) return 'return';
+  if (d.type === 'shuttle') return 'alternate';
+  if (d.mustReturn) return 'return';
   return 'open';
 }
 
@@ -111,6 +133,10 @@ export interface PracticeCrossInput {
   kind: PracticeCrossKind;
   returned: boolean;
   crossed: boolean;
+  /** 這段穿的是哪一端。沒穿時可省略。open／return 只接受 far。 */
+  end?: PracticeEnd;
+  /** alternate 下一趟要攻的端。預設 far（從自己半場先攻遠端）。 */
+  nextEnd?: PracticeEnd;
   /** 目前 z。練習起飛在 +z，自己半場是 z > 0 */
   z: number;
   count: number;
@@ -123,31 +149,93 @@ export interface PracticeCrossResult {
   done: boolean;
   scored: boolean;
   cameBack: boolean;
+  nextEnd: PracticeEnd;
 }
 
-/** 穿遠端門。return：穿完要 z>0（過中線、進入自己半場）才算下一次。 */
+/**
+ * 穿環計分。
+ * open：遠端、進攻方向、整顆護罩一次。
+ * return（P-3、P-7）：同樣只算遠端；得分後要 z>0（過中線回到自己半場）下一次才算。反方向穿回不會把 crossed 設真。
+ * alternate（P-6）：遠端與近端交替。攻遠端後回到 +z，攻近端後回到 -z。同一端連穿不算下一次。
+ */
 export function scorePracticeCross(input: PracticeCrossInput): PracticeCrossResult {
-  const stay = {
+  const end = input.end ?? 'far';
+  const nextEnd = input.nextEnd ?? 'far';
+  const stay: PracticeCrossResult = {
     returned: input.returned,
     count: input.count,
     done: false,
     scored: false,
     cameBack: false,
+    nextEnd,
   };
   if (input.kind === 'free') return stay;
+  const farOnly = input.kind === 'open' || input.kind === 'return';
+  const endOk = farOnly ? end === 'far' : end === nextEnd;
   if (input.kind === 'open') {
-    if (!input.crossed) return stay;
+    if (!input.crossed || !endOk) return stay;
     const count = input.count + 1;
-    return { returned: true, count, done: count >= input.target, scored: true, cameBack: false };
+    return { returned: true, count, done: count >= input.target, scored: true, cameBack: false, nextEnd };
   }
-  if (input.returned && input.crossed) {
+  if (input.returned && input.crossed && endOk) {
     const count = input.count + 1;
-    return { returned: false, count, done: count >= input.target, scored: true, cameBack: false };
+    const done = count >= input.target;
+    const after: PracticeEnd = input.kind === 'alternate' && nextEnd === 'far' ? 'near' : input.kind === 'alternate' ? 'far' : 'far';
+    return { returned: false, count, done, scored: true, cameBack: false, nextEnd: after };
   }
-  if (!input.returned && input.z > 0) {
-    return { ...stay, returned: true, cameBack: true };
+  if (!input.returned) {
+    // 剛攻完遠端（下一趟是近端，或 return 練習）要回到 +z。剛攻完近端要回到 -z。
+    const needPositive = input.kind !== 'alternate' || nextEnd === 'near';
+    const back = needPositive ? input.z > 0 : input.z < 0;
+    if (back) return { ...stay, returned: true, cameBack: true };
   }
   return stay;
+}
+
+/** 畫面上「現在要做什麼」。 */
+export function practiceNowText(
+  drill: SoccerDrill,
+  returned: boolean,
+  nextEnd: PracticeEnd,
+): string {
+  const kind = practiceCrossKind(drill);
+  if (kind === 'free') return '自由飛，看兩端球門與中線';
+  if (kind === 'return' && !returned) return '現在：先過中線，回到自己半場（反方向穿回不算）';
+  if (kind === 'alternate' && !returned) {
+    return nextEnd === 'near'
+      ? '現在：先過中線，回到自己半場，再攻近端環'
+      : '現在：先過中線，回到對面半場，再攻遠端環';
+  }
+  if (kind === 'alternate' && nextEnd === 'near') return '現在：攻近端環，整顆護罩要往前穿過';
+  if (drill.id === 'P-4') return '現在：整顆護罩穿過遠端環才算，只飛過高度不算';
+  if (drill.id === 'P-5') return '現在：繞過球形假人，整顆護罩穿過遠端環';
+  if (drill.id === 'P-2') return '現在：整顆護罩沿進攻方向穿過遠端環';
+  return '現在：整顆護罩沿進攻方向穿過遠端環';
+}
+
+export function formatPracticeStatus(input: {
+  drill: SoccerDrill | null;
+  status: PracticeStatus;
+  count: number;
+  returned: boolean;
+  nextEnd: PracticeEnd;
+  elapsedSec: number;
+}): string {
+  const d = input.drill;
+  if (!d) return '選一個練習開始';
+  const head = `${d.id} ${d.name}`;
+  if (input.status === 'countdown') return `${head} ｜ 準備…`;
+  if (input.status === 'done') return `${head} ｜ ✓ 完成`;
+  if (input.status !== 'running') return head;
+  const clock = d.timeLimit
+    ? `剩 ${Math.max(0, Math.ceil(d.timeLimit - input.elapsedSec))}s`
+    : `${input.elapsedSec.toFixed(1)}s`;
+  const now = practiceNowText(d, input.returned, input.nextEnd);
+  if (d.type === 'free') return `${head} ｜ ${now} ｜ ${clock}`;
+  const target = d.target ?? 1;
+  const label = practiceCrossKind(d) === 'alternate' ? '兩端進攻' : '穿遠端環';
+  const n = `${input.count}${target < 99 ? `/${target}` : ''}`;
+  return `${head} ｜ ${label} ${n} ｜ ${now} ｜ ${clock}`;
 }
 
 /** 最佳紀錄 localStorage key 前綴（沿用 legacy → 舊紀錄無縫帶過來） */
@@ -161,8 +249,10 @@ export const practiceState = {
   drill: null as SoccerDrill | null,
   /** 已穿門次數 */
   count: 0,
-  /** 已退回自己半場、可再計下一趟（P-3／P-6／P-7） */
+  /** 已回到這次進攻該回的半場、可再計下一趟（P-3／P-6／P-7） */
   shuttleReturned: true,
+  /** P-6 下一趟要攻的端。遠端 = -z 那顆環。 */
+  nextEnd: 'far' as PracticeEnd,
   startTime: 0,
   /** 上一 tick 的位置（穿環看護罩後緣與行進方向） */
   prevX: 0,
@@ -273,6 +363,9 @@ export function startDrill(idx: number): void {
   practiceState.drill = d;
   practiceState.count = 0;
   practiceState.shuttleReturned = true;
+  practiceState.nextEnd = 'far';
+  farPassage = createRingPassage();
+  nearPassage = createRingPassage();
   dummyPhase = 0;
   setSolidObstacles([]);
   publishPracticeDummies(!!d.dummies, false);
@@ -304,6 +397,8 @@ export function startDrill(idx: number): void {
       practiceState.prevX = droneState.position.x;
       practiceState.prevY = droneState.position.y;
       practiceState.prevZ = droneState.position.z;
+      farPassage = createRingPassage();
+      nearPassage = createRingPassage();
       stateHud(`⚽ ${d.name}：開始！`);
     }
   };
@@ -315,6 +410,20 @@ export function startDrill(idx: number): void {
 // =============================================================================
 let dummyPhase = 0;
 let dummyBumpAt = 0;
+let farPassage: RingPassage = createRingPassage();
+let nearPassage: RingPassage = createRingPassage();
+
+function practiceRing(attackSign: 1 | -1): RingCross {
+  const F = activeSoccerField();
+  return {
+    goalZ: attackSign * F.goalZ,
+    goalY: F.goalY,
+    goalR: F.goalR,
+    shieldR: F.shieldR,
+    halfThick: F.goalTube,
+    attackSign,
+  };
+}
 
 function publishPracticeDummies(on: boolean, advance: boolean): void {
   if (!on) {
@@ -347,43 +456,40 @@ export function tickSoccerPractice(): void {
   }
   const p = droneState.position;
   const z = p.z;
-  const F = activeSoccerField();
-  // 遠端門在 -z。整顆護罩要離開環的出口面才算，不看機頭、不只看球心。
-  const crossedFar = shieldPassesRing(
-    { x: practiceState.prevX, y: practiceState.prevY, z: practiceState.prevZ },
-    p,
-    {
-      goalZ: -F.goalZ,
-      goalY: F.goalY,
-      goalR: F.goalR,
-      shieldR: F.shieldR,
-      halfThick: F.goalTube,
-      attackSign: -1,
-    },
-  );
+  const prev = { x: practiceState.prevX, y: practiceState.prevY, z: practiceState.prevZ };
+  const farStep = advanceRingPassage(farPassage, prev, p, practiceRing(-1));
+  const nearStep = advanceRingPassage(nearPassage, prev, p, practiceRing(1));
+  farPassage = farStep.state;
+  nearPassage = nearStep.state;
+  let end: PracticeEnd | null = null;
+  if (farStep.passed && nearStep.passed) end = practiceState.nextEnd;
+  else if (farStep.passed) end = 'far';
+  else if (nearStep.passed) end = 'near';
 
   const target = d.target ?? 1;
   const scored = scorePracticeCross({
     kind: practiceCrossKind(d),
     returned: practiceState.shuttleReturned,
-    crossed: crossedFar,
+    crossed: end !== null,
+    end: end ?? undefined,
+    nextEnd: practiceState.nextEnd,
     z,
     count: practiceState.count,
     target,
   });
   practiceState.shuttleReturned = scored.returned;
   practiceState.count = scored.count;
+  practiceState.nextEnd = scored.nextEnd;
   if (scored.scored) {
     sound('ring');
     if (scored.done) drillDone(false);
-    else if (practiceCrossKind(d) === 'return') {
-      toast(`⚽ 穿門 ${practiceState.count}${target < 99 ? `/${target}` : ''}，退回過中線`, 'success');
-      stateHud('↩ 退回中線，進入自己半場');
-    } else {
-      toast(`⚽ 穿門 ${practiceState.count}${target < 99 ? `/${target}` : ''}`, 'success');
+    else {
+      const hint = practiceNowText(d, practiceState.shuttleReturned, practiceState.nextEnd);
+      toast(`⚽ 得分 ${practiceState.count}${target < 99 ? `/${target}` : ''}。${hint}`, 'success');
+      stateHud(hint);
     }
   } else if (scored.cameBack) {
-    stateHud('↗ 再去穿遠端門！');
+    stateHud(practiceNowText(d, practiceState.shuttleReturned, practiceState.nextEnd));
   }
   if (
     practiceState.status === 'running' &&
@@ -438,25 +544,17 @@ function drillDone(timeUp: boolean): void {
   updatePracticeHud();
 }
 
-/** 練習狀態列（drill 名 + 進度 + 計時 / 倒數剩餘） */
+/** 練習狀態列（drill 名 + 現在要做什麼 + 進度 + 計時） */
 function updatePracticeHud(): void {
-  const d = practiceState.drill;
-  if (!d) {
-    setPracticeStatus('選一個練習開始');
-    return;
-  }
-  let s = `${d.id} ${d.name}`;
-  if (practiceState.status === 'running') {
-    const t = ((Date.now() - practiceState.startTime) / 1000).toFixed(1);
-    const target = d.target ?? 1;
-    const back =
-      practiceCrossKind(d) === 'return' && !practiceState.shuttleReturned ? ' ｜ 先回自己半場' : '';
-    if (d.type === 'free') s += ` ｜ ${t}s`;
-    else if (d.timeLimit) {
-      const rem = Math.max(0, Math.ceil(d.timeLimit - (Date.now() - practiceState.startTime) / 1000));
-      s += ` ｜ 穿門 ${practiceState.count}${target < 99 ? `/${target}` : ''}${back} ｜ 剩 ${rem}s`;
-    } else s += ` ｜ 穿門 ${practiceState.count}/${target}${back} ｜ ${t}s`;
-  } else if (practiceState.status === 'countdown') s += ' ｜ 準備…';
-  else if (practiceState.status === 'done') s += ' ｜ ✓ 完成';
-  setPracticeStatus(s);
+  const elapsedSec = practiceState.drill ? (Date.now() - practiceState.startTime) / 1000 : 0;
+  setPracticeStatus(
+    formatPracticeStatus({
+      drill: practiceState.drill,
+      status: practiceState.status,
+      count: practiceState.count,
+      returned: practiceState.shuttleReturned,
+      nextEnd: practiceState.nextEnd,
+      elapsedSec,
+    }),
+  );
 }
