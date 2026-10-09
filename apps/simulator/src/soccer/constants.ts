@@ -136,10 +136,10 @@ export const SOCCER_GOAL_INSET = F9A_A.goalInset;
 export const SOCCER_BALL_R = F9A_A.shieldR;
 
 /**
- * 舊版教室機縮放係數。足球機體改由 createSoccerDrone 依護罩半徑畫，
- * 不再用這個係數決定護罩大小。
+ * ball 模式黃球半徑。與 apps/api/app/games/soccer.py 的 BALL_RADIUS 同一份。
+ * 伺服器有下發 r 時以封包為準；缺 r 時用這個，不要再寫另一個 fallback。
  */
-export const SOCCER_DRONE_SCALE = 0.05;
+export const SOCCER_PUSH_BALL_R = 0.6;
 
 /** 隊色（與 legacy SOCCER_TEAM_COLORS 相同） */
 export const SOCCER_TEAM_COLORS: Record<SoccerTeam, number> = {
@@ -186,8 +186,6 @@ export function soccerGoalTorusThickness(tubeR: number = SOCCER_FIELD.goalTube):
 // ---- 機對機碰撞（對齊視覺護罩；互推與牆面反彈在 soccer/contact.ts）----
 /** 護罩碰撞半徑（兩機最小間距 = 2×此值，與 SOCCER_BALL_R 相同才不會視覺穿模） */
 export const SOCCER_CONTACT_R = SOCCER_BALL_R;
-/** 舊版推出後的速度衰減。階段二改走彈性反彈，常數留著避免外部還引用時壞掉。 */
-export const SOCCER_CONTACT_DAMP = 0.55;
 
 /** 多人：窄邊隊伍視角的 z 端符號（紅站 +z 看 -z、藍站 -z 看 +z） */
 export function soccerCameraSign(team: SoccerTeam | null): number {

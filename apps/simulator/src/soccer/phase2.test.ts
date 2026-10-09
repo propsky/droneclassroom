@@ -18,6 +18,7 @@ const ring = {
   goalY: SOCCER_FIELD.goalY,
   goalR: SOCCER_FIELD.goalR,
   shieldR: SOCCER_BALL_R,
+  halfThick: SOCCER_FIELD.goalTube,
   attackSign: 1,
 };
 
@@ -39,6 +40,11 @@ describe('F9A 階段二穿環', () => {
       shieldPassesRing({ x: graze, y, z: before }, { x: graze, y, z: through }, ring),
     ).toBe(false);
     expect(shieldPassesRing({ x: 0, y, z: through }, { x: 0, y, z: before }, ring)).toBe(false);
+  });
+
+  it('後緣過了門面中心、還沒離開環厚，不算穿', () => {
+    const partial = SOCCER_FIELD.goalZ + SOCCER_BALL_R + SOCCER_FIELD.goalTube * 0.4;
+    expect(shieldPassesRing({ x: 0, y, z: before }, { x: 0, y, z: partial }, ring)).toBe(false);
   });
 });
 
@@ -107,6 +113,34 @@ describe('F9A 階段二手感', () => {
     for (let i = 0; i < 25; i++) applySoccerFeel(stick(0), { enabled: true, locked: false });
     const beginnerLeft = soccerAttitude().pitch / bHold;
     expect(beginnerLeft).toBeLessThan(proLeft);
+  });
+
+  it('無定高不改 18／30／42，飛行中鬆開上升會變負的', () => {
+    expect(SOCCER_FEELS.beginner.maxTiltDeg).toBe(18);
+    expect(SOCCER_FEELS.sim.maxTiltDeg).toBe(30);
+    expect(SOCCER_FEELS.pro.maxTiltDeg).toBe(42);
+    expect(SOCCER_FEELS.beginner.altitudeHold).toBe(true);
+    expect(SOCCER_FEELS.sim.altitudeHold).toBe(true);
+    expect(SOCCER_FEELS.pro.altitudeHold).toBe(true);
+    expect(SOCCER_FEELS.angle.altitudeHold).toBe(false);
+    expect(SOCCER_FEELS.angle.maxTiltDeg).toBe(30);
+
+    resetDroneState();
+    droneState.isFlying = true;
+    setSoccerFeel('angle');
+    resetSoccerAttitude();
+    const sunk = applySoccerFeel(stick(0), { enabled: true, locked: false });
+    expect(sunk.lift).toBeLessThan(0);
+
+    setSoccerFeel('sim');
+    const held = applySoccerFeel(stick(0), { enabled: true, locked: false });
+    expect(held.lift).toBe(0);
+
+    droneState.isFlying = false;
+    setSoccerFeel('angle');
+    const grounded = applySoccerFeel(stick(0), { enabled: true, locked: false });
+    expect(grounded.lift).toBe(0);
+    setSoccerFeel('sim');
   });
 });
 

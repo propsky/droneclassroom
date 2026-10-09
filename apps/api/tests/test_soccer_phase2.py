@@ -16,10 +16,14 @@ def test_護罩整顆穿過才算_擦框與只到球心都不算() -> None:
         "goal_r": F9A_A.goal_r,
         "attack_sign": 1.0,
         "shield_r": F9A_A.shield_r,
+        "half_thick": F9A_A.goal_tube,
     }
     assert shield_passes_ring((0, y, z0), (0, y, z1), **kw)
     # 球心到了門面，後緣還沒過
     assert not shield_passes_ring((0, y, z0), (0, y, gz), **kw)
+    # 後緣過了門面中心，還沒離開環厚
+    partial = gz + F9A_A.shield_r + F9A_A.goal_tube * 0.4
+    assert not shield_passes_ring((0, y, z0), (0, y, partial), **kw)
     # 徑向大於淨空（內半徑 − 護罩），護罩擦到框
     graze = F9A_A.goal_r - F9A_A.shield_r + 0.05
     assert not shield_passes_ring((graze, y, z0), (graze, y, z1), **kw)

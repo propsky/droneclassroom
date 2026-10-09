@@ -62,6 +62,45 @@ export function resolveShieldContact(
   return { separated: true, impact: vDot < 0 ? -vDot : 0 };
 }
 
+/**
+ * 本機護罩撞上一顆靜態球（練習假人）。最小間距 = 護罩半徑 + 假人半徑。
+ * 重疊時沿法線推出，朝內的速度改成輕彈。selfR 要傳護罩半徑，不要傳教室 DRONE_RADIUS。
+ */
+export function pushOutOfSphere(
+  pos: { x: number; y: number; z: number },
+  vel: { x: number; y: number; z: number },
+  sphere: { x: number; y: number; z: number; r: number },
+  selfR: number,
+  restitution: number = SOCCER_WALL_RESTITUTION,
+): boolean {
+  let dx = pos.x - sphere.x;
+  let dy = pos.y - sphere.y;
+  let dz = pos.z - sphere.z;
+  let d = Math.hypot(dx, dy, dz);
+  const minDist = selfR + sphere.r;
+  if (d >= minDist) return false;
+  if (d < 1e-6) {
+    dx = 1;
+    dy = 0;
+    dz = 0;
+    d = 1;
+  }
+  const nx = dx / d;
+  const ny = dy / d;
+  const nz = dz / d;
+  pos.x = sphere.x + nx * minDist;
+  pos.y = sphere.y + ny * minDist;
+  pos.z = sphere.z + nz * minDist;
+  const vDot = vel.x * nx + vel.y * ny + vel.z * nz;
+  if (vDot < 0) {
+    const bounce = -(1 + restitution) * vDot;
+    vel.x += bounce * nx;
+    vel.y += bounce * ny;
+    vel.z += bounce * nz;
+  }
+  return true;
+}
+
 /** 側牆與天花板：夾回護罩內側，朝外的速度改成反向輕彈。地板仍由物理落地處理。 */
 export function bounceSoccerWalls(
   pos: { x: number; y: number; z: number },

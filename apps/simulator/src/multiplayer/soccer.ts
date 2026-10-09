@@ -27,7 +27,7 @@ import { clearLevel } from '../core/level';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
-import { soccerCameraSign } from '../soccer/constants';
+import { SOCCER_PUSH_BALL_R, soccerCameraSign } from '../soccer/constants';
 import { shieldPassesRing } from '../soccer/crossing';
 import {
   SOCCER_IMPACT_TICK,
@@ -534,7 +534,12 @@ function applyServerBall(ball: SoccerBallState | null | undefined): void {
   if (!ball || soccerState.mode !== 'ball') return;
   let b = soccerState.ball;
   if (!b) {
-    b = { r: ball.r || 0.6, target: null, pos: { x: ball.x, y: ball.y, z: ball.z }, hasPos: false };
+    b = {
+      r: ball.r || SOCCER_PUSH_BALL_R,
+      target: null,
+      pos: { x: ball.x, y: ball.y, z: ball.z },
+      hasPos: false,
+    };
     soccerState.ball = b;
   }
   if (ball.r) b.r = ball.r;
@@ -795,6 +800,7 @@ function detectGoal(): void {
       goalY: F.goalY,
       goalR: F.goalR,
       shieldR: F.shieldR,
+      halfThick: F.goalTube,
       attackSign,
     },
   );

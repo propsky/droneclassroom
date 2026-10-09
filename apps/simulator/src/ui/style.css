@@ -1602,11 +1602,12 @@ body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #joystick-layer
 }
 .soccer-feel-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   margin-top: 6px;
 }
 .soccer-feel-row button {
-  flex: 1;
+  flex: 1 1 46%;
   border: 1px solid var(--line);
   background: var(--bg-2);
   color: var(--text-1);

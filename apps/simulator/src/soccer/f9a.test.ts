@@ -7,6 +7,7 @@ import {
   SOCCER_FIELD,
   SOCCER_GOAL_INSET,
   SOCCER_START_DEPTH,
+  SOCCER_PUSH_BALL_R,
   SOCCER_START_WIDTH,
   soccerGoalInnerDiameter,
   soccerGoalOuterDiameter,
@@ -14,6 +15,7 @@ import {
   soccerGoalTorusDiameter,
   soccerGoalTorusThickness,
 } from './constants';
+import { soccerBoundaryMarkSize } from './field';
 import { formatSoccerMatchLine, type SoccerHudInput } from '../ui/soccerHud';
 
 describe('F9A-A 場地與圓環', () => {
@@ -37,6 +39,7 @@ describe('F9A-A 場地與圓環', () => {
     expect(SOCCER_GOAL_INSET).toBe(1.5);
     expect(SOCCER_FIELD.goalZ).toBe(SOCCER_FIELD.halfZ - SOCCER_GOAL_INSET);
     expect(SOCCER_FIELD.goalZ).toBeCloseTo(5.5);
+    expect(soccerBoundaryMarkSize(F9A_A.halfX, F9A_A.halfZ)).toEqual({ width: 7, length: 14 });
     // 環心直徑 = 內半徑 + 管半徑，洞才對得上穿環判定
     expect(soccerGoalTorusDiameter()).toBeCloseTo(0.8);
     expect(soccerGoalTorusThickness()).toBeCloseTo(0.2);
@@ -55,6 +58,7 @@ describe('F9A-A 場地與圓環', () => {
     expect(SOCCER_BALL_R).toBeCloseTo(0.2);
     expect(SOCCER_BALL_R).toBeLessThan(SOCCER_FIELD.goalR);
     expect(SOCCER_BALL_R * 2).toBeLessThan(soccerGoalInnerDiameter());
+    expect(SOCCER_PUSH_BALL_R).toBe(0.6);
   });
 });
 
@@ -76,6 +80,7 @@ describe('F9A-B 預設', () => {
     expect(F9A_B.startDepth).toBe(1);
     expect(F9A_B.maxPlayers).toBe(3);
     expect(F9A_B.halfZ - F9A_B.goalInset).toBeCloseTo(2);
+    expect(soccerBoundaryMarkSize(F9A_B.halfX, F9A_B.halfZ)).toEqual({ width: 3, length: 6 });
   });
 });
 
