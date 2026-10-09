@@ -15,8 +15,11 @@ import type {
   SoccerGoalOkMsg,
   SoccerPenaltyMsg,
   SoccerPlayersMsg,
+  SoccerSafetyMsg,
   SoccerScoresMsg,
   SoccerStateMsg,
+  SoccerTimeoutNotice,
+  SoccerWarningMsg,
   StudentInfo,
   TeacherBroadcastPayload,
   TeacherToServer,
@@ -29,7 +32,8 @@ export type TeacherArenaMsg = ArenaStateMsg | ArenaScoresMsg | ArenaEndMsg;
 /** 老師端會收到的足球訊息（快照 / 名單 / 比分 / 進球 / 結束） */
 export type TeacherSoccerMsg =
   | SoccerStateMsg | SoccerPlayersMsg | SoccerScoresMsg | SoccerGoalOkMsg | SoccerFoulMsg
-  | SoccerPenaltyMsg | SoccerCardMsg | SoccerEndMsg;
+  | SoccerPenaltyMsg | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg
+  | SoccerTimeoutNotice | SoccerEndMsg;
 
 export interface TeacherWsHandlers {
   /** 連線狀態變化（頂列狀態燈） */
@@ -56,7 +60,7 @@ const ROOM_SCOPED_TYPES = new Set<TeacherToServer['type']>([
   'broadcast',
   'arena_start', 'arena_state_req', 'arena_stop',
   'soccer_start', 'soccer_state_req', 'soccer_stop',
-  'soccer_set_striker', 'soccer_set_team', 'soccer_reset',
+  'soccer_set_striker', 'soccer_set_team', 'soccer_reset', 'soccer_warn',
   'room_move_student', // roomCode = 來源房（名冊顯示的就是選定房）
 ]);
 
@@ -216,6 +220,9 @@ export class TeacherWs {
       case 'soccer_foul':
       case 'soccer_penalty':
       case 'soccer_card':
+      case 'soccer_warning':
+      case 'soccer_safety':
+      case 'soccer_timeout':
       case 'soccer_end':
         this.handlers.onSoccer(msg);
         break;

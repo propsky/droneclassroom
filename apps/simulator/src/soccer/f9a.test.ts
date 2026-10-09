@@ -42,10 +42,13 @@ describe('F9A-A 場地與圓環', () => {
     expect(soccerGoalTorusThickness()).toBeCloseTo(0.2);
   });
 
-  it('起飛區是底線中段約 1m 窄帶', () => {
-    expect(SOCCER_START_WIDTH).toBe(1);
-    expect(SOCCER_START_DEPTH).toBe(1);
+  it('起飛區進深 1.5m，單人長度是一顆球徑', () => {
+    expect(SOCCER_START_DEPTH).toBe(1.5);
+    expect(F9A_A.startDepth).toBe(1.5);
+    expect(F9A_A.maxPlayers).toBe(5);
+    expect(SOCCER_START_WIDTH).toBeCloseTo(SOCCER_BALL_R * 2);
     expect(SOCCER_FIELD.startZ).toBe(SOCCER_FIELD.halfZ - SOCCER_START_DEPTH / 2);
+    expect(SOCCER_FIELD.startZ).toBeCloseTo(6.25);
   });
 
   it('護罩直徑 40cm，小於內徑 60cm', () => {
@@ -70,6 +73,8 @@ describe('F9A-B 預設', () => {
     expect(F9A_B.innerBottom).toBeCloseTo(2);
     expect(F9A_B.goalY).toBeCloseTo(2.2);
     expect(F9A_B.shieldR).toBeCloseTo(0.1);
+    expect(F9A_B.startDepth).toBe(1);
+    expect(F9A_B.maxPlayers).toBe(3);
     expect(F9A_B.halfZ - F9A_B.goalInset).toBeCloseTo(2);
   });
 });
@@ -114,7 +119,7 @@ describe('F9A 階段一 HUD 賽制', () => {
     expect(line).toContain('局數 0:0');
     expect(line).toContain('第1局 藍 1 : 0 紅');
     expect(line).toContain('1:00');
-    expect(line).toContain('先退回半場');
+    expect(line).toContain('全隊先退回半場');
   });
 
   it('局間休息、黃金進球、PK 各有自己的一行', () => {

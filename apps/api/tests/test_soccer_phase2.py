@@ -115,7 +115,7 @@ def test_搶跑罰球後才開局(
             t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
             assert recv_until(s1, "soccer_countdown")["n"] == 3
 
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 0.4, "z": -6.5, "yaw": 3.14})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 0.4, "z": -6.25, "yaw": 3.14})
             settle(client)
             clock.advance(500)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1.2, "z": -4.0, "yaw": 3.14})
@@ -186,20 +186,21 @@ def test_教學選項開啟時接近速度仍發黃牌再紅牌(
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0, "yaw": 0})
             s2.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0.1, "yaw": 0})
             tick(client)
-            card = recv_until(s2, "soccer_card")
-            assert card["card"] == "yellow"
-            assert card["by"] == "s2"
+            warn = recv_until(s2, "soccer_warning")
+            assert warn["reason"] == "contact"
+            assert warn["count"] == 1
+            assert soccer.players[_gkey("小華")].card is None
             assert soccer.players[_gkey("小華")].disabled is False
 
-            # 分開時要先 tick，接觸鎖才會放開；再撞一次才升級紅牌
+            # 分開時要先 tick，接觸鎖才會放開；同理由第二次警告升黃牌，本局出場
             clock.advance(400)
             s2.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 1.2, "yaw": 0})
             tick(client)
             clock.advance(300)
             s2.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0.1, "yaw": 0})
             tick(client)
-            card2 = recv_until(s2, "soccer_card")
-            assert card2["card"] == "red"
+            card = recv_until(s2, "soccer_card")
+            assert card["card"] == "yellow"
             assert soccer.players[_gkey("小華")].disabled is True
             assert soccer.players[_gkey("小華")].striker is False
 
@@ -229,9 +230,11 @@ def test_墜機本局排除下一局恢復(
             _countdown_to_go(client, clock, s1)
 
             s1.send_json({"type": "soccer_crash"})
-            settle(client)
+            safety = recv_until(s1, "soccer_safety")
+            assert safety["reason"] == "crash"
+            assert safety["by"] == "s1"
             assert soccer.players[_gkey("小明")].disabled is True
-            assert soccer.players[_gkey("小明")].card == "red"
+            assert soccer.players[_gkey("小明")].card is None
             assert soccer.players[_gkey("小明")].striker is False
 
             clock.advance(5_000)
@@ -242,3 +245,161 @@ def test_墜機本局排除下一局恢復(
             assert soccer.status == "running"
             assert soccer.players[_gkey("小明")].disabled is False
             assert soccer.players[_gkey("小明")].striker is True
+
+
+def test_得分後全員回半場_隊友沒回就再攻判罰球且不算分(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    """F9A.8.4：得分隊任何一人沒回己方半場，前鋒再穿門 → 罰球，比分不加。"""
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with (
+            client.websocket_connect("/") as s1,
+            client.websocket_connect("/") as s2,
+            client.websocket_connect("/") as s3,
+        ):
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _register(s3, t, "小美")
+            _join_soccer(s1)
+            _join_soccer(s2)
+            _join_soccer(s3)
+            t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+
+            y, _gz, z0, z1 = f9a_cross()
+            # 藍隊防守先飛到對方半場
+            clock.advance(3000)
+            s3.send_json({"type": "soccer_pos", "x": 0.2, "y": 1, "z": 2, "yaw": 0})
+            settle(client)
+
+            clock.advance(400)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
+            settle(client)
+            clock.advance(400)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
+            s1.send_json({"type": "soccer_goal"})
+            settle(client)
+            assert soccer.scores["blue"] == 1
+            assert soccer.players[_gkey("小明")].needs_return is True
+            assert soccer.players[_gkey("小美")].needs_return is True
+            assert soccer.armed["blue"] is False
+
+            # 前鋒回家，防守還在對方半場
+            clock.advance(3000)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": -1, "yaw": 0})
+            tick(client)
+            assert soccer.players[_gkey("小明")].needs_return is False
+            assert soccer.armed["blue"] is False
+
+            clock.advance(400)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
+            settle(client)
+            clock.advance(400)
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
+            settle(client)
+            assert soccer.status == "penalty"
+            assert soccer.penalty_reason == "no_return"
+            assert soccer.scores["blue"] == 1
+
+
+def test_兩次警告升黃牌_兩張黃牌升紅牌(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with (
+            client.websocket_connect("/") as s1,
+            client.websocket_connect("/") as s2,
+            client.websocket_connect("/") as s3,
+        ):
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _register(s3, t, "小美")
+            _join_soccer(s1)
+            _join_soccer(s2)
+            _join_soccer(s3)
+            t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+            ming = soccer.players[_gkey("小明")]
+            mei = soccer.players[_gkey("小美")]
+
+            t.send_json({"type": "soccer_warn", "studentId": ming.record.id, "reason": "conduct"})
+            settle(client)
+            assert soccer.warnings["blue"]["conduct"] == 1
+            assert ming.card is None
+
+            t.send_json({"type": "soccer_warn", "studentId": ming.record.id, "reason": "conduct"})
+            card = recv_until(s1, "soccer_card")
+            assert card["card"] == "yellow"
+            assert recv_until(s3, "soccer_card")["card"] == "yellow"
+            assert ming.disabled is True
+            assert ming.ejected_match is False
+            assert soccer.team_yellows["blue"] == 1
+
+            t.send_json({"type": "soccer_warn", "studentId": mei.record.id, "reason": "conduct"})
+            settle(client)
+            t.send_json({"type": "soccer_warn", "studentId": mei.record.id, "reason": "conduct"})
+            card2 = recv_until(s3, "soccer_card")
+            assert card2["card"] == "red"
+            assert mei.disabled is True
+            assert mei.ejected_match is True
+            assert soccer.team_yellows["blue"] == 2
+
+
+def test_前鋒墜機可暫停換人每局一次(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with (
+            client.websocket_connect("/") as s1,
+            client.websocket_connect("/") as s2,
+            client.websocket_connect("/") as s3,
+        ):
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _register(s3, t, "小美")
+            _join_soccer(s1)
+            _join_soccer(s2)
+            _join_soccer(s3)
+            t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
+
+            s1.send_json({"type": "soccer_crash"})
+            recv_until(s1, "soccer_safety")
+            assert soccer.players[_gkey("小明")].striker is False
+
+            mei_id = soccer.players[_gkey("小美")].record.id
+            s3.send_json({"type": "soccer_timeout", "strikerId": mei_id})
+            notice = recv_until(s3, "soccer_timeout")
+            assert notice["strikerId"] == soccer.players[_gkey("小美")].record.id
+            assert soccer.players[_gkey("小美")].striker is True
+            assert soccer.timeout_used["blue"] is True
+
+            s3.send_json({"type": "soccer_timeout"})
+            settle(client)
+            assert soccer.players[_gkey("小美")].striker is True
+
+
+def test_F9A_B每隊最多3人() -> None:
+    from app.games.soccer import SoccerField, SoccerGame, SoccerPlayer
+    from app.games.soccer_presets import F9A_B
+    from app.roster import Roster, StudentRecord
+
+    roster = Roster(known_levels=frozenset())
+    game = SoccerGame(roster, field=SoccerField.from_spec(F9A_B))
+    game._active = lambda: [p for p in game.players.values() if p.active and not p.disconnected]  # type: ignore[method-assign]
+    for i in range(7):
+        rec = StudentRecord(id=f"s{i}", ws=None, name=f"生{i}", emoji="🐱")
+        p = SoccerPlayer(record=rec, active=True)
+        game.players[f"k{i}"] = p
+        game._auto_assign_team(p)
+    blue = sum(1 for p in game.players.values() if p.team == "blue")
+    red = sum(1 for p in game.players.values() if p.team == "red")
+    none = sum(1 for p in game.players.values() if p.team is None)
+    assert blue == 3 and red == 3 and none == 1
+    assert F9A_B.max_players == 3

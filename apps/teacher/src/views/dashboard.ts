@@ -1355,9 +1355,18 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           break;
         case 'soccer_card':
           toast(
-            `${msg.card === 'red' ? '紅牌' : '黃牌'}：${msg.byName || '?'}${msg.reason === 'crash' ? '（墜機）' : ''}`,
+            `${msg.card === 'red' ? '紅牌・整場出場' : '黃牌・本局出場'}：${msg.byName || '?'}`,
             'error',
           );
+          break;
+        case 'soccer_warning':
+          toast(`警告：${msg.byName || '?'}（${msg.reason || '警告'} 第 ${msg.count} 次）`, 'error');
+          break;
+        case 'soccer_safety':
+          toast(`安全事件：${msg.byName || '?'} 本局少一人`, 'error');
+          break;
+        case 'soccer_timeout':
+          toast(`暫停換前鋒：${msg.byName || '?'}`, 'success');
           break;
         case 'soccer_goal_ok': {
           soccer.scores = msg.scores;

@@ -21,8 +21,6 @@ import { bus, toast } from '../core/events';
 import { droneState, DRONE_RADIUS, type Vec3 } from '../core/droneState';
 import { setMeshCollisionBackend } from '../core/physics';
 import {
-  SOCCER_START_DEPTH,
-  SOCCER_START_WIDTH,
   SOCCER_TEAM_COLORS,
   soccerGoalTorusDiameter,
   soccerGoalTorusThickness,
@@ -730,8 +728,8 @@ export class SoccerFieldVisuals {
 
   private buildStartZone(sign: number, color: number): void {
     const F = activeSoccerField();
-    const w = SOCCER_START_WIDTH;
-    const d = SOCCER_START_DEPTH;
+    const w = F.startWidth;
+    const d = F.startDepth;
     const centerZ = sign * (F.halfZ - d / 2);
     const fill = MeshBuilder.CreateGround(`soccerStart-${centerZ}`, { width: w, height: d }, this.scene);
     fill.position.set(0, 0.05, centerZ);

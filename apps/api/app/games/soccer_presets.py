@@ -39,10 +39,14 @@ class SoccerClassSpec:
     goal_inset: float
     # 內圈底部離地。圓心高 = 底部 + 內半徑
     inner_bottom: float
-    # 球形護罩半徑
+    # 球形護罩半徑（球半徑；出生點間距用這個，不拿推球模式的 BALL_RADIUS）
     shield_r: float
     # F9A.3.1 標的最大厚度 T（公尺）
     thickness_max: float
+    # 起飛區進深（沿 z、往場內）。F9A.2.2：A 約 1.5 m，B 不超過 1 m
+    start_depth: float
+    # 每隊同時上場人數上限。WDSC 2.1：A 為 5、B 為 3（V2 F9A.4.1 寫 3 到 5，人數以 WDSC 為準）
+    max_players: int
 
     @property
     def goal_tube(self) -> float:
@@ -74,6 +78,8 @@ F9A_A = SoccerClassSpec(
     inner_bottom=3.0,
     shield_r=0.20,
     thickness_max=0.20,
+    start_depth=1.5,
+    max_players=5,
 )
 
 # F9A-B：場地 6×3×3（F9A.2.2）；內半徑 0.20、外半徑 0.35（F9A.3.1 內徑 40／外徑 70）；
@@ -89,6 +95,8 @@ F9A_B = SoccerClassSpec(
     inner_bottom=2.0,
     shield_r=0.10,
     thickness_max=0.10,
+    start_depth=1.0,
+    max_players=3,
 )
 
 PRESETS: dict[str, SoccerClassSpec] = {F9A_A.code: F9A_A, F9A_B.code: F9A_B}

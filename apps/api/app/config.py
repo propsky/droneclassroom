@@ -83,8 +83,10 @@ class Settings(BaseSettings):
     game_tick_interval: float = 0.08
     # 足球子類。尺寸見 games/soccer_presets.py，不在這裡再寫一組數字。
     soccer_class: Literal["F9A-A", "F9A-B"] = "F9A-A"
-    # 空中接近速度罰牌（教學用）。預設關。
+    # 空中接近速度罰牌（教學用）。預設關。打開後走警告，不是直接發牌。
     soccer_air_contact_cards: bool = False
+    # 局數打平之後的順序。預設照 WDSC：先各罰 3 球 PK，仍平手再黃金進球。
+    soccer_tiebreak: Literal["pk_then_golden", "golden_then_pk"] = "pk_then_golden"
     room_code_length: int = 4
     room_code_alphabet: str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     default_room_code: str = "MAIN"

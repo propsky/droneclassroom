@@ -156,9 +156,22 @@ class SoccerGoalMsg(_StrictModel):
 
 
 class SoccerCrashMsg(_StrictModel):
-    """墜機自報：伺服器把這一台標成紅牌並排除本局。"""
+    """墜機自報：伺服器記安全事件，本局少一人，不發紅牌。"""
 
     type: Literal["soccer_crash"]
+
+
+class SoccerTimeoutMsg(_StrictModel):
+    """前鋒失能時喊暫停換前鋒。strikerId 空著就換隊上第一位還能飛的。"""
+
+    type: Literal["soccer_timeout"]
+    strikerId: str = ""
+
+
+class SoccerPkClaimMsg(_StrictModel):
+    """PK 這一記改由自己來罰。"""
+
+    type: Literal["soccer_pk_claim"]
 
 
 StudentMessage = Annotated[
@@ -176,7 +189,9 @@ StudentMessage = Annotated[
     | SoccerLeaveMsg
     | SoccerPosMsg
     | SoccerGoalMsg
-    | SoccerCrashMsg,
+    | SoccerCrashMsg
+    | SoccerTimeoutMsg
+    | SoccerPkClaimMsg,
     Field(discriminator="type"),
 ]
 STUDENT_MESSAGE_ADAPTER: TypeAdapter[
@@ -195,6 +210,8 @@ STUDENT_MESSAGE_ADAPTER: TypeAdapter[
     | SoccerPosMsg
     | SoccerGoalMsg
     | SoccerCrashMsg
+    | SoccerTimeoutMsg
+    | SoccerPkClaimMsg
 ] = TypeAdapter(StudentMessage)
 
 # ---------- 老師 → 伺服器 ----------
@@ -307,6 +324,7 @@ class SoccerStartMsg(_RoomScopedModel):
     type: Literal["soccer_start"]
     durationSec: FiniteFloat
     mode: Literal["ball", "striker"] = "striker"
+    tieBreak: Literal["pk_then_golden", "golden_then_pk"] | None = None
 
 
 class SoccerStateReqMsg(_RoomScopedModel):
@@ -334,6 +352,14 @@ class SoccerSetTeamMsg(_RoomScopedModel):
     type: Literal["soccer_set_team"]
     studentId: str
     team: Literal["blue", "red"]
+
+
+class SoccerWarnMsg(_RoomScopedModel):
+    """老師記一次警告。同理由兩次升黃牌。"""
+
+    type: Literal["soccer_warn"]
+    studentId: str
+    reason: str = "conduct"
 
 
 class SoccerResetMsg(_RoomScopedModel):
@@ -447,6 +473,7 @@ TeacherMessage = Annotated[
     | SoccerSetStrikerMsg
     | SoccerSetTeamMsg
     | SoccerResetMsg
+    | SoccerWarnMsg
     | RoomCreateMsg
     | RoomCloseMsg
     | RoomUpdateMsg
@@ -470,6 +497,7 @@ TEACHER_MESSAGE_ADAPTER: TypeAdapter[
     | SoccerSetStrikerMsg
     | SoccerSetTeamMsg
     | SoccerResetMsg
+    | SoccerWarnMsg
     | RoomCreateMsg
     | RoomCloseMsg
     | RoomUpdateMsg

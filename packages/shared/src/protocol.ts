@@ -65,13 +65,18 @@ export interface SoccerPosMsg {
   x: number; y: number; z: number; yaw: number;
 }
 export interface SoccerGoalMsg { type: 'soccer_goal' }
-/** 墜機：學生端自報（伺服器只排除報到的那一台，不能替別人宣告） */
+/** 墜機：學生端自報。伺服器記安全事件，本局少一人，不發紅牌。 */
 export interface SoccerCrashMsg { type: 'soccer_crash' }
+/** 前鋒失能時，未失能的隊員喊暫停換前鋒。strikerId 空著就換隊上第一位還能飛的。 */
+export interface SoccerTimeoutMsg { type: 'soccer_timeout'; strikerId?: string }
+/** PK 這一記改由自己來罰（要輪到自己的隊）。 */
+export interface SoccerPkClaimMsg { type: 'soccer_pk_claim' }
 
 export type StudentToServer =
   | RegisterMsg | ProgressMsg | LevelStartMsg | LevelLoadReqMsg | PingMsg | CompleteLevelMsg
   | ArenaJoinMsg | ArenaLeaveMsg | ArenaPosMsg | ArenaPopMsg
-  | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg | SoccerCrashMsg;
+  | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg | SoccerCrashMsg
+  | SoccerTimeoutMsg | SoccerPkClaimMsg;
 
 // ---------- Teacher → Server ----------
 
@@ -107,7 +112,16 @@ export interface ArenaStopMsg { type: 'arena_stop' }
  * 'ball' = 推球進門（隱藏選配：預設流程不提供，僅明確指定 mode 時啟用）。
  */
 export type SoccerMode = 'ball' | 'striker';
-export interface SoccerStartMsg { type: 'soccer_start'; durationSec: number; mode?: SoccerMode }
+/** 局數打平之後怎麼走。預設 pk_then_golden（WDSC：先各 3 球 PK，再黃金進球）。 */
+export type SoccerTieBreak = 'pk_then_golden' | 'golden_then_pk';
+export interface SoccerStartMsg {
+  type: 'soccer_start';
+  durationSec: number;
+  mode?: SoccerMode;
+  tieBreak?: SoccerTieBreak;
+}
+/** 老師記一次警告（同理由兩次升黃牌）。 */
+export interface SoccerWarnMsg { type: 'soccer_warn'; studentId: string; reason?: string }
 export interface SoccerStateReqMsg { type: 'soccer_state_req' }
 /** 老師手動停止足球（伺服器廣播 soccer_end reason:'teacher_stop'） */
 export interface SoccerStopMsg { type: 'soccer_stop' }
@@ -189,6 +203,7 @@ export type TeacherToServer =
   | (ArenaStartMsg & RoomScoped) | (ArenaStateReqMsg & RoomScoped) | (ArenaStopMsg & RoomScoped)
   | (SoccerStartMsg & RoomScoped) | (SoccerStateReqMsg & RoomScoped) | (SoccerStopMsg & RoomScoped)
   | (SoccerSetStrikerMsg & RoomScoped) | (SoccerSetTeamMsg & RoomScoped) | (SoccerResetMsg & RoomScoped)
+  | (SoccerWarnMsg & RoomScoped)
   | RoomCreateMsg | RoomCloseMsg | RoomUpdateMsg | RoomKickMsg | RoomSelectMsg | RoomListReqMsg
   | RoomOpenTeamMsg | RoomArchiveTeamMsg
   | RoomCreateSubMsg | (RoomMoveStudentMsg & RoomScoped);
@@ -368,6 +383,10 @@ export interface SoccerFieldDef {
   goalZ?: number;
   /** 護罩半徑（m）。沒帶時客戶端用 F9A-A fallback */
   shieldR?: number;
+  /** 起飛區進深（m，沿 z）。沒帶時客戶端用 F9A-A 的 1.5 */
+  startDepth?: number;
+  /** 起飛區長度（m，沿 x）= 人數 × 球徑。沒帶時客戶端用 1 人份 */
+  startWidth?: number;
 }
 
 /** 賽制階段。正規局進行中 status 仍是 'running'；休息／黃金／PK 用同名 status */
@@ -386,6 +405,14 @@ export interface SoccerMatchMeta {
   pkTurn: SoccerTeam | null;
   /** PK 輪次（1 起）；非 PK 為 0 */
   pkRound: number;
+  /** 擲硬幣贏的那一隊先罰；非 PK 為 null／缺省 */
+  pkFirst?: SoccerTeam | null;
+  /** 這一記的主罰；可以不是開賽時的前鋒 */
+  pkShooterId?: string | null;
+  /** 這一記的守方 */
+  pkDefenderId?: string | null;
+  /** 這場的平手順序 */
+  tieBreak?: SoccerTieBreak;
 }
 
 /** 推球模式的球狀態（伺服器模擬，~12.5Hz 廣播；客戶端內插渲染） */
@@ -469,14 +496,40 @@ export interface SoccerPenaltyMsg {
   spawns?: SoccerSpawn[];
 }
 
-/** 黃牌／紅牌（碰撞）或墜機紅牌 */
+/** 黃牌（本局出場）或紅牌（整場出場）。按隊伍累計，不是墜機。 */
 export interface SoccerCardMsg {
   type: 'soccer_card';
   card: 'yellow' | 'red';
   by: string;
   byName: string;
   team: SoccerTeam | null;
-  reason: 'contact' | 'crash';
+  reason: string;
+}
+/** 同理由警告。count 是這一理由目前累計（升黃牌後會歸零再重數）。 */
+export interface SoccerWarningMsg {
+  type: 'soccer_warning';
+  by: string;
+  byName: string;
+  team: SoccerTeam | null;
+  reason: string;
+  count: number;
+}
+/** 墜機等安全事件：本局少一人，不發牌。 */
+export interface SoccerSafetyMsg {
+  type: 'soccer_safety';
+  by: string;
+  byName: string;
+  team: SoccerTeam | null;
+  reason: 'crash';
+}
+/** 前鋒失能，隊長喊了暫停並換上新前鋒。 */
+export interface SoccerTimeoutNotice {
+  type: 'soccer_timeout';
+  team: SoccerTeam;
+  by: string;
+  byName: string;
+  strikerId: string;
+  spawns?: SoccerSpawn[];
 }
 export interface SoccerEndMsg {
   type: 'soccer_end';
@@ -496,7 +549,7 @@ export interface SoccerResumeMsg {
 export type SoccerServerMsg =
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
   | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerPenaltyMsg
-  | SoccerCardMsg | SoccerEndMsg
+  | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg;
 
 export type ServerToClient =
@@ -509,7 +562,7 @@ export type ServerToClient =
   | ArenaResumeMsg
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
   | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerPenaltyMsg
-  | SoccerCardMsg | SoccerEndMsg
+  | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg;
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */
