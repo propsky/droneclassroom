@@ -35,6 +35,13 @@ import {
   type BroadcastView,
 } from '../soccer/broadcast';
 import { activeSoccerField } from '../soccer/field';
+import {
+  enclosureFaceVisible,
+  SOCCER_CEIL_DROP,
+  SOCCER_CEIL_THICKNESS,
+  SOCCER_SHELL_OUTSET,
+  SOCCER_SHELL_THICKNESS,
+} from '../soccer/enclosureView';
 import { soccerState, type SoccerOther } from '../multiplayer/soccer';
 import { practiceState } from '../soccer/practice';
 import { getHavokBackend, type HavokBackend } from './havokBackend';
@@ -73,6 +80,14 @@ interface GoalVisual {
   baseEmissive: Color3;
 }
 
+/** 球館實心殼的一面。鏡頭不在場內側時不畫，避免外殼擋住飛行視線。 */
+interface EnclosureFace {
+  mesh: Mesh;
+  axis: 'x' | 'y' | 'z';
+  sign: 1 | -1;
+  inner: number;
+}
+
 interface SavedOutdoor {
   clear: Color4;
   fogDensity: number;
@@ -100,6 +115,8 @@ export class SoccerFieldVisuals {
   private readonly backend: HavokBackend;
   private readonly shadows: ShadowGenerator | null;
   private fieldMeshes: Mesh[] = [];
+  /** 牆、天花、護墊、端牆色塊：只在鏡頭的場內側繪製 */
+  private enclosure: EnclosureFace[] = [];
   private dummyMeshes: Mesh[] = [];
   private goalMeshes: Mesh[] = [];
   private goals: GoalVisual[] = [];
@@ -331,17 +348,58 @@ export class SoccerFieldVisuals {
     this.addSidePad(-1, 0x2a4c86, 0x6e96c8, 0x16243f);
     const skirt = this.gymMat('soccerEndSkirt', 0x2c333c, 0.14, 0.05);
     const skirtLen = F.halfX * 2 - 0.55;
-    addBox('soccerEndSkirt', skirtLen, 1.05, 0.12, 0, 0.68, -F.halfZ + 0.1, skirt, false);
-    addBox('soccerEndSkirt', skirtLen, 1.05, 0.12, 0, 0.68, F.halfZ - 0.1, skirt, false);
+    const skirtDepth = 0.12;
+    const skirtFarZ = -F.halfZ + 0.1;
+    const skirtNearZ = F.halfZ - 0.1;
+    this.trackFace(
+      addBox('soccerEndSkirt', skirtLen, 1.05, skirtDepth, 0, 0.68, skirtFarZ, skirt, false),
+      'z',
+      -1,
+      skirtFarZ,
+      skirtDepth,
+    );
+    this.trackFace(
+      addBox('soccerEndSkirt', skirtLen, 1.05, skirtDepth, 0, 0.68, skirtNearZ, skirt, false),
+      'z',
+      1,
+      skirtNearZ,
+      skirtDepth,
+    );
     this.addEndBlocks(-1, [0x1e4f92, 0xb83a34, 0x243044, 0xd4cbb8, 0x1e4f92]);
     this.addEndBlocks(1, [0xb83a34, 0x243044, 0x1e4f92, 0xd4cbb8, 0xb83a34]);
 
-    // 外殼深色擋板（網後面），避免看到戶外天空
-    const shellA = 0.02;
-    addBox('soccerShell', F.halfX * 2, F.top, shellA, 0, F.top / 2, -F.halfZ - 0.08, darkMat, false);
-    addBox('soccerShell', F.halfX * 2, F.top, shellA, 0, F.top / 2, F.halfZ + 0.08, darkMat, false);
-    addBox('soccerShell', shellA, F.top, F.halfZ * 2, -F.halfX - 0.08, F.top / 2, 0, darkMat, false);
-    addBox('soccerShell', shellA, F.top, F.halfZ * 2, F.halfX + 0.08, F.top / 2, 0, darkMat, false);
+    // 外殼深色擋板（網後面），避免看到戶外天空。
+    // 鏡頭若在某一面的外側（跟隨視角貼邊就會），那一面不畫，視線穿進場內；其餘面仍擋住天空。
+    const shellCenterZ = F.halfZ + SOCCER_SHELL_OUTSET;
+    const shellCenterX = F.halfX + SOCCER_SHELL_OUTSET;
+    this.trackFace(
+      addBox('soccerShell', F.halfX * 2, F.top, SOCCER_SHELL_THICKNESS, 0, F.top / 2, -shellCenterZ, darkMat, false),
+      'z',
+      -1,
+      -shellCenterZ,
+      SOCCER_SHELL_THICKNESS,
+    );
+    this.trackFace(
+      addBox('soccerShell', F.halfX * 2, F.top, SOCCER_SHELL_THICKNESS, 0, F.top / 2, shellCenterZ, darkMat, false),
+      'z',
+      1,
+      shellCenterZ,
+      SOCCER_SHELL_THICKNESS,
+    );
+    this.trackFace(
+      addBox('soccerShell', SOCCER_SHELL_THICKNESS, F.top, F.halfZ * 2, -shellCenterX, F.top / 2, 0, darkMat, false),
+      'x',
+      -1,
+      -shellCenterX,
+      SOCCER_SHELL_THICKNESS,
+    );
+    this.trackFace(
+      addBox('soccerShell', SOCCER_SHELL_THICKNESS, F.top, F.halfZ * 2, shellCenterX, F.top / 2, 0, darkMat, false),
+      'x',
+      1,
+      shellCenterX,
+      SOCCER_SHELL_THICKNESS,
+    );
     // 天花板單獨用藍灰、不吃光，避免燈一弱就整片死黑
     const ceilMat = new StandardMaterial('soccerCeilMat', scene);
     ceilMat.diffuseColor = hex(0x7e96ae);
@@ -349,7 +407,9 @@ export class SoccerFieldVisuals {
     ceilMat.specularColor = Color3.Black();
     ceilMat.disableLighting = true;
     ceilMat.backFaceCulling = false;
-    const ceil = addBox('soccerCeil', F.halfX * 2, 0.08, F.halfZ * 2, 0, F.top - 0.02, 0, ceilMat, false);
+    const ceilY = F.top - SOCCER_CEIL_DROP;
+    const ceil = addBox('soccerCeil', F.halfX * 2, SOCCER_CEIL_THICKNESS, F.halfZ * 2, 0, ceilY, 0, ceilMat, false);
+    this.trackFace(ceil, 'y', 1, ceilY, SOCCER_CEIL_THICKNESS);
     ceil.receiveShadows = false;
 
     const inset = 0.2;
@@ -455,17 +515,29 @@ export class SoccerFieldVisuals {
       pz: number,
       mat: StandardMaterial,
       cast = true,
-    ): void => {
+    ): Mesh => {
       const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, this.scene);
       m.position.set(px, py, pz);
       m.material = mat;
       m.isPickable = false;
       if (cast) this.cast(m);
       this.fieldMeshes.push(m);
+      return m;
     };
-    add('soccerSidePad', 0.16, 1.05, len, x, 0.68, 0, mainMat);
-    add('soccerSideStripe', 0.05, 0.16, len - 0.15, x - sign * 0.09, 0.78, 0, stripeMat, false);
-    add('soccerSideCap', 0.18, 0.08, len, x, 1.24, 0, capMat);
+    const face: 1 | -1 = sign > 0 ? 1 : -1;
+    const mainW = 0.16;
+    const stripeW = 0.05;
+    const capW = 0.18;
+    this.trackFace(add('soccerSidePad', mainW, 1.05, len, x, 0.68, 0, mainMat), 'x', face, x, mainW);
+    const stripeX = x - sign * 0.09;
+    this.trackFace(
+      add('soccerSideStripe', stripeW, 0.16, len - 0.15, stripeX, 0.78, 0, stripeMat, false),
+      'x',
+      face,
+      stripeX,
+      stripeW,
+    );
+    this.trackFace(add('soccerSideCap', capW, 0.08, len, x, 1.24, 0, capMat), 'x', face, x, capW);
   }
 
   /** 端牆色塊（球館內牆，不是戶外天空，也不是廣告字） */
@@ -487,6 +559,7 @@ export class SoccerFieldVisuals {
       m.material = mat;
       m.isPickable = false;
       this.fieldMeshes.push(m);
+      this.trackFace(m, 'z', sign > 0 ? 1 : -1, z, 0.06);
       x += bw + gap;
     });
   }
@@ -801,6 +874,7 @@ export class SoccerFieldVisuals {
   /** 插值後的自機姿態（主迴圈在渲染前呼叫） */
   present(x: number, y: number, z: number, yaw: number, visible: boolean): void {
     if (!this.active || !this.myDrone) return;
+    this.applyEnclosureVisibility();
     const pitch = -(droneState.attitudePitch ?? 0);
     const roll = -(droneState.attitudeRoll ?? 0);
     this.myDrone.pose(x, y, z, yaw, pitch, roll, droneState.propellerRotation);
@@ -1143,6 +1217,33 @@ export class SoccerFieldVisuals {
     this.casters.push(mesh);
   }
 
+  /** 記下朝場內的那一面。center／thickness 沿 axis。 */
+  private trackFace(
+    mesh: Mesh,
+    axis: 'x' | 'y' | 'z',
+    sign: 1 | -1,
+    center: number,
+    thickness: number,
+  ): Mesh {
+    this.enclosure.push({
+      mesh,
+      axis,
+      sign,
+      inner: center - sign * (thickness / 2),
+    });
+    return mesh;
+  }
+
+  /** 鏡頭在場內側才畫這面殼；貼邊或在外側時讓視線穿過去看到場地。 */
+  private applyEnclosureVisibility(): void {
+    const cam = this.scene.activeCamera?.position;
+    if (!cam) return;
+    for (const face of this.enclosure) {
+      const coord = face.axis === 'x' ? cam.x : face.axis === 'y' ? cam.y : cam.z;
+      face.mesh.isVisible = enclosureFaceVisible(coord, face.sign, face.inner);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 清理
   // ---------------------------------------------------------------------------
@@ -1159,6 +1260,7 @@ export class SoccerFieldVisuals {
 
     for (const mesh of this.casters) this.shadows?.removeShadowCaster(mesh);
     this.casters = [];
+    this.enclosure = [];
     this.fieldMeshes.forEach((m) => m.dispose(false, true));
     this.fieldMeshes = [];
     this.goalMeshes = [];
