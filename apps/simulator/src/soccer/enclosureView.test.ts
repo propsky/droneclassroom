@@ -59,11 +59,12 @@ describe('球館外殼不要擋住飛行鏡頭', () => {
     expect(clampSoccerCameraY(1.3, SOCCER_FIELD.top)).toBeCloseTo(1.3);
   });
 
-  it('第一人稱穿出邊界時收回場內，場內的位置不動', () => {
+  it('第一人稱水平收回場內；飛高時天花不擋，場內的位置不動', () => {
     const out = clampSoccerFpv(9, 8, 12, SOCCER_FIELD);
     expect(out.x).toBeLessThan(SOCCER_FIELD.halfX);
     expect(out.z).toBeLessThan(SOCCER_FIELD.halfZ);
-    expect(out.y).toBeLessThan(ceil);
+    expect(out.y).toBeGreaterThan(ceil);
+    expect(enclosureFaceVisible(out.y, 1, ceil)).toBe(false);
     expect(enclosureFaceVisible(out.z, 1, nearZ)).toBe(true);
     expect(enclosureFaceVisible(out.x, 1, posX)).toBe(true);
     expect(clampSoccerFpv(0.2, 1.2, -1, SOCCER_FIELD)).toEqual({ x: 0.2, y: 1.2, z: -1 });

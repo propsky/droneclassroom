@@ -16,7 +16,7 @@ export const SOCCER_CEIL_DROP = 0.02;
 
 /** 鏡頭離內側面少於這個距離就當成會埋進板裡，這面不畫（近裁面 0.1m） */
 export const ENCLOSURE_FACE_MARGIN = 0.15;
-/** 第三人稱／第一人稱鏡頭至少留在天花內側這麼遠，天花才繼續看得到 */
+/** 鏡頭至少留在天花板內側這麼遠，才不會埋進板厚（全場視角用；跟隨視角可飛到天花外側） */
 export const SOCCER_CAM_CEIL_CLEARANCE = 0.4;
 /** 鏡頭不要穿進草地 */
 export const SOCCER_CAM_MIN_Y = 0.35;
@@ -54,13 +54,13 @@ export function enclosureFaceVisible(
   return cam > inner + margin;
 }
 
-/** 第三人稱高度收到天花內側，避免鏡頭埋進藍灰天花或飛到殼外 */
+/** 全場視角收到天花板內側，避免鏡頭埋進藍灰天花 */
 export function clampSoccerCameraY(y: number, top: number): number {
   const maxY = ceilInner(top) - SOCCER_CAM_CEIL_CLEARANCE;
   return Math.min(Math.max(y, SOCCER_CAM_MIN_Y), maxY);
 }
 
-/** 第一人稱收到場內，牆面仍在鏡頭前方，不會穿出外殼看到一片實心板 */
+/** 第一人稱的水平位置收到場內，避免機頭埋進端牆；高度可略高於天花，天花那時不畫 */
 export function clampSoccerFpv(
   x: number,
   y: number,
@@ -71,6 +71,6 @@ export function clampSoccerFpv(
   return {
     x: Math.min(Math.max(x, -field.halfX + inset), field.halfX - inset),
     z: Math.min(Math.max(z, -field.halfZ + inset), field.halfZ - inset),
-    y: clampSoccerCameraY(y, field.top),
+    y: Math.min(Math.max(y, SOCCER_CAM_MIN_Y), field.top + 0.9),
   };
 }

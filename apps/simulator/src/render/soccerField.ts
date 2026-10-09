@@ -454,15 +454,22 @@ export class SoccerFieldVisuals {
       netLo,
       netHi,
     );
-    this.addNet(
-      'soccerNetCeil',
-      new Vector3(-F.halfX + inset, F.top - 0.16, -F.halfZ + inset),
-      new Vector3((F.halfX - inset) * 2, 0, 0),
-      new Vector3(0, 0, (F.halfZ - inset) * 2),
-      Math.round(((F.halfX - inset) * 2) / cell),
-      Math.round(((F.halfZ - inset) * 2) / cell),
-      new Color3(0.55, 0.62, 0.7),
-      0.55,
+    const ceilNetY = F.top - 0.16;
+    this.trackFace(
+      this.addNet(
+        'soccerNetCeil',
+        new Vector3(-F.halfX + inset, ceilNetY, -F.halfZ + inset),
+        new Vector3((F.halfX - inset) * 2, 0, 0),
+        new Vector3(0, 0, (F.halfZ - inset) * 2),
+        Math.round(((F.halfX - inset) * 2) / cell),
+        Math.round(((F.halfZ - inset) * 2) / cell),
+        new Color3(0.55, 0.62, 0.7),
+        0.55,
+      ),
+      'y',
+      1,
+      ceilNetY,
+      0.02,
     );
 
     this.addCeilingTruss();
@@ -478,13 +485,22 @@ export class SoccerFieldVisuals {
     lampMat.disableLighting = true;
     for (const t of [-0.62, -0.2, 0.2, 0.62]) {
       const z = t * F.halfZ;
-      addBox('soccerLampHouse', 1.25, 0.1, 0.48, 0, F.top - 0.7, z, housing, false);
+      const houseY = F.top - 0.7;
+      this.trackFace(
+        addBox('soccerLampHouse', 1.25, 0.1, 0.48, 0, houseY, z, housing, false),
+        'y',
+        1,
+        houseY,
+        0.1,
+      );
       const lamp = MeshBuilder.CreateBox(
         `soccerLamp-${z}`,
         { width: 1.02, height: 0.04, depth: 0.32 },
         scene,
       );
-      lamp.position.set(0, F.top - 0.76, z);
+      const lampY = F.top - 0.76;
+      lamp.position.set(0, lampY, z);
+      this.trackFace(lamp, 'y', 1, lampY, 0.04);
       lamp.material = lampMat;
       lamp.isPickable = false;
       this.fieldMeshes.push(lamp);
@@ -579,6 +595,8 @@ export class SoccerFieldVisuals {
       m.material = trussMat;
       m.isPickable = false;
       this.fieldMeshes.push(m);
+      // 鏡頭飛到鋼架上方時，格子不要擋往下看的視線
+      this.trackFace(m, 'y', 1, py, h);
     };
     for (const t of [-0.72, -0.36, 0, 0.36, 0.72]) {
       add('soccerTrussZ', 0.22, 0.16, F.halfZ * 2 - 0.45, t * F.halfX, y, 0);
@@ -623,7 +641,7 @@ export class SoccerFieldVisuals {
     cellsV: number,
     color: Color3,
     alpha: number,
-  ): void {
+  ): Mesh {
     const lines: Vector3[][] = [];
     const cu = Math.max(2, cellsU);
     const cv = Math.max(2, cellsV);
@@ -640,6 +658,7 @@ export class SoccerFieldVisuals {
     g.alpha = alpha;
     g.isPickable = false;
     this.fieldMeshes.push(g);
+    return g;
   }
 
   private buildMarkings(variant: SoccerVariant): void {
