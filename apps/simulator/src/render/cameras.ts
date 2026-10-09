@@ -12,6 +12,14 @@ import { levelState } from '../core/level';
 import { DRAW_HEIGHT_DEFAULT } from '../core/pen';
 import { bus, toast } from '../core/events';
 import { activeSoccerField } from '../soccer/field';
+import {
+  clampSoccerCameraY,
+  clampSoccerFpv,
+  SOCCER_CAM_MIN_Y,
+  SOCCER_FOLLOW_DISTANCE,
+  SOCCER_FOLLOW_HEIGHT,
+  SOCCER_TEAM_END_INSET,
+} from '../soccer/enclosureView';
 
 // ---- 俯視（topdown）取景常數 ----
 /** 邊距係數：取景半徑 = guide bbox 半徑 × 此係數（>1 = 圖形四周留白） */
@@ -85,6 +93,8 @@ export class CameraRig {
   private fixedCamLift = 0;
   /** ⚽ 足球視角模式：'follow' 跟隨（預設 — 定點視角會被門環/球/其他飛機擋住）｜'team' 窄邊全場 */
   private soccerCam: 'follow' | 'team' = 'follow';
+  /** 進足球或切回跟隨時直接貼到目標，避免從教室鏡頭插值時整段穿在外殼上 */
+  private soccerSnap = false;
 
   constructor(scene: Scene) {
     this.camera = new FreeCamera('cam', new Vector3(0, 15, 30), scene);
@@ -100,6 +110,7 @@ export class CameraRig {
     bus.on('soccer-view-changed', ({ sign }) => {
       this.soccerSign = sign;
       if (sign === null) this.soccerCam = 'follow';
+      else this.soccerSnap = true;
     });
   }
 
@@ -116,6 +127,7 @@ export class CameraRig {
       } else {
         this.fpv = false;
         this.soccerCam = 'follow';
+        this.soccerSnap = true;
         label = '🎥 跟隨視角';
       }
     } else {
@@ -132,6 +144,11 @@ export class CameraRig {
       // 第一視角：相機在機身、看機頭方向（略往下，像 FPV 眼鏡）
       const f = forwardVec(yaw);
       const eye = new Vector3(pos.x + f.x * 0.35, pos.y + 0.45, pos.z + f.z * 0.35);
+      // 足球：機頭貼牆時眼位會穿出外殼，收回歸在牆內側，才不會埋進實心板
+      if (this.soccerSign !== null) {
+        const c = clampSoccerFpv(eye.x, eye.y, eye.z, activeSoccerField());
+        eye.set(c.x, c.y, c.z);
+      }
       this.camera.position.copyFrom(eye);
       this.tmpTarget.set(eye.x + f.x * 10, eye.y - 1.2, eye.z + f.z * 10);
       this.camera.setTarget(this.tmpTarget);
@@ -145,21 +162,32 @@ export class CameraRig {
       const sign = this.soccerSign;
       const F = activeSoccerField();
       // 站在端牆內側、略高於近端圓環，才看得到天花鋼架，也不會被圓環擋滿
-      const dist = F.halfZ - 0.75;
-      const camY = Math.min(F.top - 0.95, 4.05);
+      const dist = F.halfZ - SOCCER_TEAM_END_INSET;
+      const camY = clampSoccerCameraY(Math.min(F.top - 0.95, 4.05), F.top);
       this.camera.position.set(0, camY, sign * dist);
       this.tmpTarget.set(0, 1.7, -sign * F.halfZ * 0.45);
       this.camera.setTarget(this.tmpTarget);
       return true;
     }
 
-    // 足球跟隨：護罩直徑約 24cm，機位 2.6m 才看得到螺旋槳與 LED
+    // 足球跟隨：護罩直徑約 24cm，機位退後才看得到螺旋槳與 LED。
+    // 貼邊時機位會落在牆或天花外側；那一面由場地視覺關掉，不擋視線。
     if (this.soccerSign !== null && this.soccerCam === 'follow') {
-      const dist = 2.6;
+      const dist = SOCCER_FOLLOW_DISTANCE;
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
-      const target = new Vector3(pos.x + dist * sin, pos.y + 0.9, pos.z + dist * cos);
-      Vector3.LerpToRef(this.camera.position, target, 0.28, this.camera.position);
+      const target = new Vector3(
+        pos.x + dist * sin,
+        Math.max(SOCCER_CAM_MIN_Y, pos.y + SOCCER_FOLLOW_HEIGHT),
+        pos.z + dist * cos,
+      );
+      if (this.soccerSnap) {
+        this.camera.position.copyFrom(target);
+        this.soccerSnap = false;
+      } else {
+        Vector3.LerpToRef(this.camera.position, target, 0.28, this.camera.position);
+        this.camera.position.y = Math.max(SOCCER_CAM_MIN_Y, this.camera.position.y);
+      }
       this.tmpTarget.set(pos.x, pos.y + 0.02, pos.z);
       this.camera.setTarget(this.tmpTarget);
       return true;
