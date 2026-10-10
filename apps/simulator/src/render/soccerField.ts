@@ -47,6 +47,7 @@ import { makeNameLabel } from './clones';
 import { hex } from './scene';
 import type { DroneVisual } from './drone';
 import { createSoccerDrone, type SoccerDroneModel } from './soccerDrone';
+import { soccerScoreboardPoses } from '../soccer/scoreboardPose';
 import { createSoccerScoreboard, stretchScoreboardRods, type SoccerScoreboard } from './soccerScoreboard';
 import { setSoccerArenaAudio } from '../ui/audio';
 import { setSoccerEndScreen, setSoccerFlag } from '../ui/soccerHud';
@@ -118,7 +119,7 @@ export class SoccerFieldVisuals {
   private goalMeshes: Mesh[] = [];
   private goals: GoalVisual[] = [];
   private myDrone: SoccerDroneModel | null = null;
-  private scoreboard: SoccerScoreboard | null = null;
+  private scoreboards: SoccerScoreboard[] = [];
   private lights: PointLight[] = [];
   private sharedBall: Mesh | null = null;
   private sharedBallMat: StandardMaterial | null = null;
@@ -223,9 +224,13 @@ export class SoccerFieldVisuals {
       0,
     );
 
-    const boardY = Math.min(F.top - 1.15, F.goalY + 0.55);
-    this.scoreboard = createSoccerScoreboard(scene, boardY);
-    stretchScoreboardRods(this.scoreboard.root, F.top - 0.05);
+    // 計分板掛在兩端牆上方。舊位置 (0, goalY+0.55, 0) 的 soccerBoardShell
+    // 是一塊約 3.5×1.8 m 的灰殼，正好擋在中線穿環高度。
+    for (const pose of soccerScoreboardPoses(F)) {
+      const board = createSoccerScoreboard(scene, pose);
+      stretchScoreboardRods(board.root, F.top - 0.05, pose.height);
+      this.scoreboards.push(board);
+    }
     this.syncBroadcast();
   }
 
@@ -925,7 +930,7 @@ export class SoccerFieldVisuals {
 
   private syncBroadcast(): void {
     const view = this.broadcastView();
-    this.scoreboard?.update(view);
+    for (const board of this.scoreboards) board.update(view);
     setSoccerFlag(view.flag);
     setSoccerEndScreen({
       show: view.ended,
@@ -989,11 +994,17 @@ export class SoccerFieldVisuals {
     }
     const drill = practiceState.drill;
     const elapsed = practiceState.startTime ? (Date.now() - practiceState.startTime) / 1000 : 0;
+    const waitHalf =
+      !!drill &&
+      (drill.mustReturn || drill.type === 'shuttle') &&
+      practiceState.status === 'running' &&
+      practiceState.count > 0 &&
+      !practiceState.shuttleReturned;
     return readPracticeBroadcast({
       running: practiceState.status === 'running',
       goals: practiceState.count,
       elapsedSec: elapsed,
-      needReturn: drill?.type === 'shuttle' && !practiceState.shuttleReturned && practiceState.count > 0,
+      needReturn: waitHalf,
       scoredDrill: drill?.type === 'pass' || drill?.type === 'shuttle',
     });
   }
@@ -1298,8 +1309,8 @@ export class SoccerFieldVisuals {
     this.dummyKey = '';
     this.myDrone?.dispose();
     this.myDrone = null;
-    this.scoreboard?.dispose();
-    this.scoreboard = null;
+    for (const board of this.scoreboards) board.dispose();
+    this.scoreboards = [];
     for (const light of this.lights) light.dispose();
     this.lights = [];
     for (const s of this.sparks) s.mesh.dispose(false, true);
