@@ -99,4 +99,8 @@ export class SimpleBackend implements PhysicsBackend {
   clear(): void {
     this.boxes.clear();
   }
+
+  size(): number {
+    return this.boxes.size;
+  }
 }

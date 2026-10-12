@@ -96,9 +96,8 @@ export interface CoreEventMap {
   'level-cleared': Record<string, never>;
   // ---- ⚽ 足球（soccer/practice.ts、multiplayer/soccer.ts ↔ render/soccerField.ts）----
   /**
-   * 遊戲模式接管：進入任一接管型模式（大亂鬥 / 足球練習 / 足球對戰）前發出，
-   * 其他模式收到後自行退出 —— 模組間互斥不互相 import（避免循環依賴）。
-   * 'level' = 老師廣播切關 / 比賽 / 重置（智能切關）：所有接管型模式都退出。
+   * 遊戲模式接管（保留型別）。實際互斥改由 GameSession.enter／exit 負責，
+   * 各模式用 GameSession.onExit 登記退出，不再靠這個事件互相呼叫。
    */
   'mode-takeover': { mode: 'arena' | 'soccer-practice' | 'soccer-match' | 'level' };
   /** 伺服器 soccer_* 訊息（ws 只分派、不處理） */
@@ -149,6 +148,13 @@ export class EventBus<M> {
     }
     set.add(fn as Handler<never>);
     return () => set.delete(fn as Handler<never>);
+  }
+
+  /** 目前登記的處理器總數（測試用來確認換關沒有一直疊監聽器） */
+  handlerCount(): number {
+    let n = 0;
+    for (const set of this.handlers.values()) n += set.size;
+    return n;
   }
 
   emit<K extends keyof M>(type: K, payload: M[K]): void {

@@ -4,10 +4,11 @@
 // 視覺（他人分身 / 名牌 / 氣球 / 光環）在 render/clones.ts；HUD 在 ui/arenaHud.ts。
 import type { ArenaPlayerState, ArenaRole, ArenaServerMsg, ArenaEndMsg } from '@creafly/shared';
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
-import { setSolidObstacles, type SolidObstacle } from '../core/physics';
+import { setMeshCollisionBackend, setSolidObstacles, type SolidObstacle } from '../core/physics';
 import { clearLevel } from '../core/level';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
+import { GameSession } from '../core/session';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
 import {
   initArenaHud,
@@ -71,6 +72,8 @@ export const arenaState = {
 };
 
 let posTimer: ReturnType<typeof setInterval> | null = null;
+/** 鬼抓人結算的延遲 toast；離場要取消，避免切關後還跳出來 */
+let resultToast: ReturnType<typeof setTimeout> | null = null;
 
 // =============================================================================
 // 初始化 / 進出場
@@ -80,10 +83,6 @@ export function initArena(): void {
   // 斷線重連成功 → 自動補送 arena_join（server 重連後視為新 session）
   bus.on('ws-connected', () => {
     if (arenaState.active) sendToServer({ type: 'arena_join' });
-  });
-  // 模式互斥：足球（練習 / 對戰）接管時自動退出大亂鬥（server 端 soccer_join 也會互斥）
-  bus.on('mode-takeover', ({ mode }) => {
-    if (mode !== 'arena' && arenaState.active) exitArena();
   });
   initArenaHud(() => (arenaState.active ? exitArena() : enterArena()));
 
@@ -95,7 +94,8 @@ export function initArena(): void {
 
 export function enterArena(): void {
   if (arenaState.active) return;
-  bus.emit('mode-takeover', { mode: 'arena' }); // 足球模式收到後自行退出
+  // 先退出關卡／足球（GameSession 呼叫各自的 onExit），再建立大亂鬥
+  GameSession.enter('arena');
   arenaState.active = true;
   arenaState.status = 'idle';
   arenaState.mode = 'balloon';
@@ -124,21 +124,34 @@ export function enterArena(): void {
 
   connectToTeacher();
   sendToServer({ type: 'arena_join' }); // 未連線時靜默丟棄；ws-connected 後會補送
-  if (posTimer) clearInterval(posTimer);
-  posTimer = setInterval(sendArenaPos, POS_SEND_MS);
+  if (posTimer) GameSession.clearTracked(posTimer);
+  posTimer = GameSession.trackInterval(sendArenaPos, POS_SEND_MS);
 
   stateHud('🏟️ 大亂鬥：等待老師開始…');
   toast('🏟️ 進入大亂鬥！等老師按開始', 'success');
 }
 
 export function exitArena(): void {
+  if (GameSession.active === 'arena') {
+    GameSession.exit('arena');
+    return;
+  }
+  teardownArena();
+}
+
+/** 拆掉大亂鬥：計時器、碰撞、氣球資料、場景事件。由 GameSession.onExit 呼叫。 */
+function teardownArena(): void {
   if (!arenaState.active) return;
   arenaState.active = false;
   flags.multiplayerLock = false;
   sendToServer({ type: 'arena_leave' });
   if (posTimer) {
-    clearInterval(posTimer);
+    GameSession.clearTracked(posTimer);
     posTimer = null;
+  }
+  if (resultToast) {
+    GameSession.clearTracked(resultToast);
+    resultToast = null;
   }
   arenaState.balloons.clear();
   arenaState.pendingPop.clear();
@@ -147,13 +160,16 @@ export function exitArena(): void {
   arenaState.stunUntil = 0;
   arenaState.invincibleUntil = 0;
   setSolidObstacles([]);
-  bus.emit('arena-exited', {}); // render 清分身 / 氣球 / 光環 / 掩體（dispose）
+  setMeshCollisionBackend(null); // playground 的 Havok 網格；render dispose 也會再卸一次
+  bus.emit('arena-exited', {}); // render 清分身 / 氣球 / 光環 / 掩體／遊樂場（dispose）
   showArenaHud(false);
   resetDroneState();
   bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
   stateHud('待命');
   toast('已離開大亂鬥 — 從關卡選單挑一關繼續飛', 'success');
 }
+
+GameSession.onExit('arena', teardownArena);
 
 // =============================================================================
 // 伺服器訊息處理（對齊 legacy handleArenaMessage）
@@ -320,7 +336,14 @@ function showArenaResult(msg: ArenaEndMsg): void {
     const parts: string[] = [];
     if (topGhost) parts.push(`👻 抓鬼王：${topGhost.emoji || ''}${topGhost.name}（抓到 ${topGhost.score || 0} 次）`);
     if (topRunner) parts.push(`🏃 逃脫達人：${topRunner.emoji || ''}${topRunner.name}（只被抓 ${topRunner.caughtCount || 0} 次）`);
-    if (parts.length) setTimeout(() => toast(parts.join('｜'), 'success'), 1800);
+    if (parts.length) {
+      if (resultToast) GameSession.clearTracked(resultToast);
+      resultToast = GameSession.trackTimeout(() => {
+        resultToast = null;
+        if (!arenaState.active) return;
+        toast(parts.join('｜'), 'success');
+      }, 1800);
+    }
   } else {
     const top = msg.ranking?.[0];
     toast(top ? `🏆 冠軍：${top.emoji || ''}${top.name}（${top.score} 顆）` : '🏁 結束', 'success');

@@ -16,6 +16,7 @@ import {
   type GreasedLineBaseMesh,
 } from '@babylonjs/core';
 import { bus } from '../core/events';
+import { SceneLedger } from '../core/sceneLedger';
 
 // ---- 墨水線視覺常數 ----
 /**
@@ -75,11 +76,19 @@ export class InkVisual {
       this.scene,
     );
     stroke.mesh.isPickable = false;
+    this.syncLedger();
+  }
+
+  private syncLedger(): void {
+    let n = 0;
+    for (const s of this.strokes.values()) if (s.mesh) n++;
+    SceneLedger.set('ink', n);
   }
 
   private clear(): void {
     for (const s of this.strokes.values()) s.mesh?.dispose();
     this.strokes.clear();
     this.currentId = null;
+    SceneLedger.set('ink', 0);
   }
 }

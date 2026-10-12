@@ -3,8 +3,9 @@
 // 視覺（場地 / 球門 / 門框碰撞 / 球形保護框 / 假人）在 render/soccerField.ts；HUD 在 ui/soccerHud.ts。
 // P-5 假人是球，碰撞用護罩半徑，不走教室 DRONE_RADIUS 的方塊路徑。
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
-import { setSolidObstacles } from '../core/physics';
+import { setMeshCollisionBackend, setSolidObstacles } from '../core/physics';
 import { clearLevel } from '../core/level';
+import { GameSession } from '../core/session';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { SOCCER_FIELD } from './constants';
@@ -280,10 +281,6 @@ const soccerSaveBest = (id: string, v: number): void => {
 // 初始化 / 進出場
 // =============================================================================
 export function initSoccerPractice(): void {
-  // 模式互斥：大亂鬥 / 足球對戰接管 → 自動退出練習
-  bus.on('mode-takeover', ({ mode }) => {
-    if (mode !== 'soccer-practice' && practiceState.active) exitSoccerPractice();
-  });
   // 開發後門：?soccer=1 自動進練習場（headless 驗收 / demo 用；對齊 ?arena=1）。
   // 等關卡清單載完再進場，避免預設關卡晚到把練習場蓋回教室。
   if (new URLSearchParams(location.search).get('soccer') === '1') {
@@ -299,7 +296,7 @@ export function initSoccerPractice(): void {
 
 export function enterSoccerPractice(): void {
   if (practiceState.active) return;
-  bus.emit('mode-takeover', { mode: 'soccer-practice' }); // 大亂鬥 / 對戰收到後自行退出
+  GameSession.enter('soccer-practice');
   practiceState.active = true;
   practiceState.status = 'idle';
   practiceState.drill = null;
@@ -323,12 +320,26 @@ export function enterSoccerPractice(): void {
 }
 
 export function exitSoccerPractice(): void {
+  if (GameSession.active === 'soccer-practice') {
+    GameSession.exit('soccer-practice');
+    return;
+  }
+  teardownSoccerPractice();
+}
+
+/** 拆掉足球練習：假人、碰撞、場地事件。由 GameSession.onExit 呼叫。 */
+function teardownSoccerPractice(): void {
   if (!practiceState.active) return;
   practiceState.active = false;
   practiceState.status = 'idle';
   practiceState.drill = null;
   dummyPhase = 0;
+  if (drillTimer) {
+    GameSession.clearTracked(drillTimer);
+    drillTimer = null;
+  }
   setSolidObstacles([]);
+  setMeshCollisionBackend(null);
   bus.emit('soccer-dummies-changed', { spheres: [] });
   bus.emit('soccer-view-changed', { sign: null });
   bus.emit('soccer-exited', {}); // render 清場地 / 碰撞、還原機體大小與地面
@@ -339,6 +350,8 @@ export function exitSoccerPractice(): void {
   stateHud('待命');
   toast('已離開足球練習', 'success');
 }
+
+GameSession.onExit('soccer-practice', teardownSoccerPractice);
 
 /** 飛機回到起始區地面（藍隊起始區中心 z=+startZ、機頭朝遠端門） */
 function resetPracticeDronePos(): void {
@@ -364,6 +377,10 @@ export function startDrill(idx: number): void {
   practiceState.count = 0;
   practiceState.shuttleReturned = true;
   practiceState.nextEnd = 'far';
+  if (drillTimer) {
+    GameSession.clearTracked(drillTimer);
+    drillTimer = null;
+  }
   farPassage = createRingPassage();
   nearPassage = createRingPassage();
   dummyPhase = 0;
@@ -383,12 +400,13 @@ export function startDrill(idx: number): void {
   toast(d.desc);
   let n = 3;
   const tick = (): void => {
+    drillTimer = null;
     if (!practiceState.active || practiceState.drill !== d) return; // 中途切 drill / 離場 → 作廢
     if (n > 0) {
       bus.emit('countdown', { n });
       sound('beep');
       n--;
-      setTimeout(tick, 700);
+      drillTimer = GameSession.trackTimeout(tick, 700);
     } else {
       bus.emit('countdown', { n: 0 }); // GO!
       sound('go');
@@ -410,6 +428,8 @@ export function startDrill(idx: number): void {
 // =============================================================================
 let dummyPhase = 0;
 let dummyBumpAt = 0;
+/** 練習 3-2-1；離場／換 drill 要取消 */
+let drillTimer: ReturnType<typeof setTimeout> | null = null;
 let farPassage: RingPassage = createRingPassage();
 let nearPassage: RingPassage = createRingPassage();
 

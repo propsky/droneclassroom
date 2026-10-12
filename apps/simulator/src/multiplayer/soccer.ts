@@ -23,7 +23,9 @@ import type {
   SoccerFoulReason,
 } from '@creafly/shared';
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
+import { setMeshCollisionBackend, setSolidObstacles } from '../core/physics';
 import { clearLevel } from '../core/level';
+import { GameSession } from '../core/session';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
@@ -146,10 +148,6 @@ export function initSoccerMatch(): void {
   bus.on('ws-connected', () => {
     if (soccerState.active) sendToServer({ type: 'soccer_join' });
   });
-  // 模式互斥：大亂鬥 / 足球練習接管 → 自動退出對戰
-  bus.on('mode-takeover', ({ mode }) => {
-    if (mode !== 'soccer-match' && soccerState.active) exitSoccerMatch();
-  });
   soccerState.contactEnabled =
     new URLSearchParams(location.search).get('nocontact') !== '1';
   window.addEventListener('keydown', (e) => {
@@ -214,7 +212,7 @@ function previewPhase2(kind: 'arm' | 'penalty' | 'card'): void {
 
 export function enterSoccerMatch(): void {
   if (soccerState.active) return;
-  bus.emit('mode-takeover', { mode: 'soccer-match' }); // 大亂鬥 / 練習收到後自行退出
+  GameSession.enter('soccer-match');
   soccerState.active = true;
   soccerState.status = 'idle';
   soccerState.mode = 'striker'; // 伺服器 soccer_state / soccer_go 會再告知實際玩法
@@ -263,8 +261,8 @@ export function enterSoccerMatch(): void {
   showSoccerFeel(true);
   connectToTeacher();
   sendToServer({ type: 'soccer_join' }); // 未連線時靜默丟棄；ws-connected 後會補送
-  if (posTimer) clearInterval(posTimer);
-  posTimer = setInterval(sendSoccerPos, POS_SEND_MS);
+  if (posTimer) GameSession.clearTracked(posTimer);
+  posTimer = GameSession.trackInterval(sendSoccerPos, POS_SEND_MS);
 
   updateMatchHud();
   stateHud('⚽ 多人足球：等待老師開始…');
@@ -272,17 +270,28 @@ export function enterSoccerMatch(): void {
 }
 
 export function exitSoccerMatch(): void {
+  if (GameSession.active === 'soccer-match') {
+    GameSession.exit('soccer-match');
+    return;
+  }
+  teardownSoccerMatch();
+}
+
+/** 拆掉足球對戰：上報計時器、網格碰撞、場地事件。由 GameSession.onExit 呼叫。 */
+function teardownSoccerMatch(): void {
   if (!soccerState.active) return;
   soccerState.active = false;
   sendToServer({ type: 'soccer_leave' });
   if (posTimer) {
-    clearInterval(posTimer);
+    GameSession.clearTracked(posTimer);
     posTimer = null;
   }
   soccerState.others.clear();
   soccerState.ball = null;
   soccerState.ballNear = false;
   resetSoccerField(); // 不把伺服器場地殘留給下一個模式（單人練習用 fallback）
+  setSolidObstacles([]);
+  setMeshCollisionBackend(null);
   bus.emit('soccer-view-changed', { sign: null });
   bus.emit('soccer-exited', {}); // render 清場地 / 分身 / 彩帶 / 共用球（dispose）、還原機體
   showSoccerMatchHud(false);
@@ -293,6 +302,8 @@ export function exitSoccerMatch(): void {
   stateHud('待命');
   toast('已離開足球對戰', 'success');
 }
+
+GameSession.onExit('soccer-match', teardownSoccerMatch);
 
 // =============================================================================
 // 伺服器訊息處理（對齊 legacy handleSoccerMessage）

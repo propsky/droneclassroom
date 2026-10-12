@@ -33,6 +33,17 @@ export function resumeGame(): void {
   toast('▶ 繼續', 'success');
 }
 
+/**
+ * 換關／離場時拆掉暫停，不播「繼續」toast、也不把暫停時長補進成績
+ * （這一關已經結束，計時不該再往前推）。
+ */
+export function releasePauseForSwitch(): void {
+  const was = flags.paused || levelState.pausedAt !== 0;
+  flags.paused = false;
+  levelState.pausedAt = 0;
+  if (was) bus.emit('level-paused', { paused: false });
+}
+
 export function togglePause(): void {
   if (flags.paused) resumeGame();
   else pauseGame();
