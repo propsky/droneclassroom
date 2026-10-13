@@ -22,6 +22,8 @@ import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState'
 import { setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
 import { finalizeRecording, recordAction } from './recordingSession';
+import { releasePauseForSwitch } from './pause';
+import { GameSession } from './session';
 
 export interface MissionRing {
   x: number;
@@ -78,6 +80,9 @@ export const levelState = {
 let ringFaceHintAt = 0; // 「機頭沒對準圈」提示節流
 let lastFaceAligned: boolean | null = null;
 let lastFaceRing = -1;
+/** 3-2-1 倒數世代：切關／離場遞增，舊的 setTimeout 回呼直接作廢 */
+let countdownToken = 0;
+let countdownTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** 關卡載入前檢查（由 main 注入；core 不依賴 net/） */
 let levelLoadGuard: ((levelId: string) => boolean) | null = null;
@@ -205,6 +210,9 @@ export function applyLoadLevel(levelId: string): void {
     console.warn('找不到關卡：', levelId);
     return;
   }
+  // 先退出目前場次（大亂鬥／足球／上一關，含切回同一關），再寫入新關。
+  // 學生自己點關卡與老師廣播都走這裡，避免只更新關卡資料、場景卻留在舊模式。
+  GameSession.enter('level');
   const s = levelState;
   s.current = level;
   s.rings = (level.rings ?? []).map((r) => ({ ...r, passed: false }));
@@ -296,17 +304,31 @@ export function armLevelStart(): void {
   });
 }
 
+/** 作廢進行中的 3-2-1（切關、離場）。舊回呼不得再改 startTime／countdownActive。 */
+export function cancelCountdown(): void {
+  countdownToken++;
+  if (countdownTimer) {
+    GameSession.clearTracked(countdownTimer);
+    countdownTimer = null;
+  }
+  flags.countdownActive = false;
+}
+
 /** 3 → 2 → 1 → GO! 倒數（期間鎖操控、不判定過關） */
 export function runCountdown(onGo?: () => void): void {
+  cancelCountdown();
+  const token = countdownToken;
   flags.countdownActive = true;
   let n = 3;
   const tick = (): void => {
+    if (token !== countdownToken) return;
     if (n > 0) {
       bus.emit('countdown', { n });
       sound('beep');
       n--;
-      setTimeout(tick, 700);
+      countdownTimer = GameSession.trackTimeout(tick, 700);
     } else {
+      countdownTimer = null;
       bus.emit('countdown', { n: 0 });
       sound('go');
       flags.countdownActive = false;
@@ -315,6 +337,15 @@ export function runCountdown(onGo?: () => void): void {
   };
   tick();
 }
+
+/** 離開一般關卡：倒數、暫停、關卡物件與判定全部停下。進大亂鬥／足球／換關都走這裡。 */
+function exitLevel(): void {
+  cancelCountdown();
+  releasePauseForSwitch();
+  clearLevel();
+}
+
+GameSession.onExit('level', exitLevel);
 
 /** 重置無人機 + 圈圈狀態（對齊 legacy resetDrone：不清 passZones/氣球進度） */
 export function resetMission(): void {

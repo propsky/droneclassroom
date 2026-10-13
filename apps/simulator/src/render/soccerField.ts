@@ -18,6 +18,7 @@ import {
   type AbstractMesh,
 } from '@babylonjs/core';
 import { bus, toast } from '../core/events';
+import { SceneLedger } from '../core/sceneLedger';
 import { droneState, DRONE_RADIUS, type Vec3 } from '../core/droneState';
 import { setMeshCollisionBackend } from '../core/physics';
 import {
@@ -232,6 +233,21 @@ export class SoccerFieldVisuals {
       this.scoreboards.push(board);
     }
     this.syncBroadcast();
+    this.syncLedger();
+  }
+
+  private syncLedger(): void {
+    SceneLedger.set(
+      'soccer',
+      this.fieldMeshes.length +
+        this.dummyMeshes.length +
+        this.lights.length +
+        this.scoreboards.length +
+        this.sparks.length +
+        this.clones.size +
+        (this.myDrone ? 1 : 0) +
+        (this.sharedBall ? 1 : 0),
+    );
   }
 
   /** 草皮：深草綠割紋＋細葉，整面鋪一次，不要淺色或發白 */
@@ -1326,6 +1342,7 @@ export class SoccerFieldVisuals {
     this.drone.setScaleFactor(1);
     this.setDefaultGroundVisible(true);
     this.leaveIndoor();
+    SceneLedger.set('soccer', 0);
   }
 
   private setDefaultGroundVisible(on: boolean): void {

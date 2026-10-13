@@ -26,6 +26,7 @@ import { levelState, armLevelStart, resetMission } from '../core/level';
 import { loadLevel } from '../net/levelLoad';
 import { setMode, runProgram, stopProgram, programState } from '../core/program';
 import { togglePause, resumeGame } from '../core/pause';
+import { GameSession } from '../core/session';
 import { goHome } from '../core/physics';
 import { iconHtml, mountIcons } from './icons';
 
@@ -672,7 +673,7 @@ export function initPlayer(onJoin: () => void): void {
     setRoomError(null);
     if (roomChanged) {
       // 換房：先退出大亂鬥 / 足球等接管型模式（賽局屬於舊房）
-      bus.emit('mode-takeover', { mode: 'level' });
+      GameSession.exitTransient();
       setRoomTag(null);
     }
     if (!code) {

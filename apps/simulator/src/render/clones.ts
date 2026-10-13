@@ -15,6 +15,7 @@ import {
   TransformNode,
 } from '@babylonjs/core';
 import { bus } from '../core/events';
+import { SceneLedger } from '../core/sceneLedger';
 import { droneState } from '../core/droneState';
 import {
   arenaState,
@@ -314,6 +315,7 @@ export class ArenaCloneVisuals {
       this.myAura.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
       applyAuraDanger(this.myAura, this.myAuraMat as StandardMaterial, droneState.position, runnerPos, now);
     } else this.myAura?.setEnabled(false);
+    this.syncLedger();
   }
 
   // ---------------------------------------------------------------------------
@@ -334,6 +336,7 @@ export class ArenaCloneVisuals {
         this.balloons.delete(id);
       }
     }
+    this.syncLedger();
   }
 
   private syncClones(): void {
@@ -349,6 +352,7 @@ export class ArenaCloneVisuals {
         this.clones.delete(id);
       }
     }
+    this.syncLedger();
   }
 
   // ---------------------------------------------------------------------------
@@ -418,6 +422,7 @@ export class ArenaCloneVisuals {
       mesh.material = mat;
       this.obstacles.push(mesh);
     });
+    this.syncLedger();
   }
 
   /** 離場清理：分身 / 氣球 / 光環 / 掩體全部 dispose，並還原自機外觀 */
@@ -439,6 +444,14 @@ export class ArenaCloneVisuals {
     this.drone.setScaleFactor(1);
     this.drone.setOpacityFactor(1);
     this.myAppliedScale = 1;
+    this.syncLedger();
+  }
+
+  private syncLedger(): void {
+    SceneLedger.set(
+      'arena',
+      this.clones.size + this.balloons.size + this.obstacles.length + (this.myAura ? 1 : 0),
+    );
   }
 }
 

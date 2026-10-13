@@ -234,8 +234,12 @@ function buildGrid(scene: Scene): void {
   grid.isPickable = false;
 }
 
+/** 地板貼圖世代：切關後舊的非同步載入不得再把地板打開 */
+let floorGeneration = 0;
+
 /** 關卡場地地板：有圖才顯示，鋪在中央 EDITOR_WORLD 公尺。 */
 export function applyLevelFloor(scene: Scene, url: string | null): void {
+  const gen = ++floorGeneration;
   let mesh = scene.getMeshByName('levelFloor');
   let mat = scene.getMaterialByName('levelFloorMat') as StandardMaterial | null;
   if (!mesh) {
@@ -253,7 +257,12 @@ export function applyLevelFloor(scene: Scene, url: string | null): void {
   }
   mesh.metadata = { ...(mesh.metadata ?? {}), hasFloor: false };
   mesh.isVisible = false;
-  if (!url || !mat) return;
+  if (!url || !mat) {
+    const current = mat?.diffuseTexture ?? null;
+    if (mat) mat.diffuseTexture = null;
+    current?.dispose();
+    return;
+  }
   const previous = mat.diffuseTexture;
   const tex = new Texture(
     url,
@@ -262,12 +271,17 @@ export function applyLevelFloor(scene: Scene, url: string | null): void {
     false,
     Texture.TRILINEAR_SAMPLINGMODE,
     () => {
+      if (gen !== floorGeneration) {
+        tex.dispose();
+        return;
+      }
       mesh.metadata = { ...(mesh.metadata ?? {}), hasFloor: true };
       mesh.isVisible = true;
-      previous?.dispose();
+      if (previous && previous !== tex) previous.dispose();
     },
     () => {
       tex.dispose();
+      if (gen !== floorGeneration) return;
       mesh.isVisible = false;
     },
   );

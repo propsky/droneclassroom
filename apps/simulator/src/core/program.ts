@@ -19,10 +19,13 @@ import { inkPenDown, inkPenUp, inkSetColor, inkRandomColor } from './pen';
 import { bus, toast, sound, stateHud } from './events';
 import { buildCreaflyMotionApi, registerSimMotionRuntime } from './execution/mode';
 import { recordAction } from './recordingSession';
+import { GameSession } from './session';
 
 export const programState = {
   running: false,
   abort: false,
+  /** 換關／離場中斷：不要再跳「已中斷」toast，也不要拿殘留的程式去判定新關過關 */
+  quiet: false,
   /**
    * cf_elapsed / cf_timerReset 的基準（模擬時間 ms，見 droneState.simNowMs）。
    * G-04：程式流程控制（forever/every/elapsed 條件）必須跟著模擬 tick 走
@@ -47,6 +50,8 @@ interface MotionPlan {
 }
 
 let activePlan: MotionPlan | null = null;
+/** 換關中斷後，舊程式的 then/catch 不得再收掉新一輪執行 */
+let programGen = 0;
 
 function startPlan(
   duration: number,
@@ -276,6 +281,7 @@ export const CREAFLY_API = {
 // =============================================================================
 export function runProgram(code: string): void {
   if (programState.running) return;
+  const gen = ++programGen;
 
   resetMission();
   // 程式模式可能沒按過關卡的「開始」（intro 直接切程式模式）→ 補上關卡計時基準，
@@ -290,6 +296,7 @@ export function runProgram(code: string): void {
   recordAction({ a: 'run', code });
   programState.running = true;
   programState.abort = false;
+  programState.quiet = false;
   programState.startTime = simNowMs();
   flags.programRunning = true;
   bus.emit('program-running', { running: true });
@@ -313,6 +320,12 @@ export function runProgram(code: string): void {
 
   promise
     .then(() => {
+      if (gen !== programGen) return;
+      // 換關時已安靜中斷：不得用新關的狀態判定過關
+      if (programState.abort || programState.quiet) {
+        finishProgram();
+        return;
+      }
       const r = checkProgramCompletion();
       if (r.passed) {
         const msg = r.allRings
@@ -328,13 +341,15 @@ export function runProgram(code: string): void {
       finishProgram();
     })
     .catch((e: unknown) => {
+      if (gen !== programGen) return;
       const msg = e instanceof Error ? e.message : String(e);
       if (msg !== ABORT_MSG) {
         toast(`執行錯誤：${msg}`, 'error');
         console.error(e);
-      } else {
+      } else if (!programState.quiet) {
         toast('已中斷');
       }
+      programState.quiet = false;
       finishProgram();
     });
 }
@@ -344,6 +359,22 @@ export function stopProgram(): void {
   recordAction({ a: 'stop' });
   programState.abort = true;
 }
+
+/** 換關／離場：立刻拆掉 motion plan，不寫錄製、不跳中斷 toast */
+function abortProgramSilently(): void {
+  if (!programState.running && !activePlan) return;
+  programGen++;
+  programState.quiet = true;
+  programState.abort = true;
+  programState.running = false;
+  flags.programRunning = false;
+  const plan = activePlan;
+  activePlan = null;
+  plan?.reject(new Error(ABORT_MSG));
+  bus.emit('program-running', { running: false });
+}
+
+GameSession.onExit('level', abortProgramSilently);
 
 function finishProgram(): void {
   programState.running = false;

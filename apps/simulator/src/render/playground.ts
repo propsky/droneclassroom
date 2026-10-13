@@ -20,6 +20,7 @@ import {
 } from '@babylonjs/core';
 import { registerBuiltInLoaders } from '@babylonjs/loaders/dynamic';
 import { bus, toast } from '../core/events';
+import { SceneLedger } from '../core/sceneLedger';
 import { setMeshCollisionBackend } from '../core/physics';
 import { DRONE_RADIUS, type Vec3 } from '../core/droneState';
 import { HavokBackend, getHavokBackend } from './havokBackend';
@@ -113,6 +114,7 @@ export class PlaygroundScene {
       });
       // 先讓原始 mesh 掛著（碰撞烤圖用），合併後再換成合併版
       this.meshes = result.meshes;
+      SceneLedger.set('playground', this.meshes.length);
 
       // 載入期間已離場 / 切回格線 → 直接收掉，不掛碰撞
       if (gen !== this.generation) {
@@ -136,6 +138,7 @@ export class PlaygroundScene {
 
       // ---- 靜態幾何合併：764 顆小 mesh → 依材質分組成數十顆（draw call / 逐 mesh 更新成本大減）----
       this.meshes = mergeStaticMeshes(root, result.meshes);
+      SceneLedger.set('playground', this.meshes.length);
       toast('🌆 遊樂場場景就緒！', 'success');
     } catch (e) {
       this.loading = false;
@@ -162,6 +165,7 @@ export class PlaygroundScene {
       [...this.meshes].reverse().forEach((m) => m.dispose(false, true));
       this.meshes = null;
     }
+    SceneLedger.set('playground', 0);
   }
 
   /** 場景顯示與格線地面互斥（對齊 legacy：ground / groundGrid 跟著切） */

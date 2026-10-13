@@ -64,6 +64,11 @@ export function setMeshCollisionBackend(
   meshRadius = radius;
 }
 
+/** 是否還掛著網格碰撞（playground / 足球離場後應為 false） */
+export function meshCollisionActive(): boolean {
+  return meshBackend !== null;
+}
+
 export function setSolidObstacles(list: SolidObstacle[]): void {
   simpleBackend.clear();
   list.forEach((o, i) =>
@@ -73,6 +78,11 @@ export function setSolidObstacles(list: SolidObstacle[]): void {
       { x: o.half, y: o.half, z: o.half },
     ),
   );
+}
+
+/** 目前註冊的實心 AABB 數量（離場後應為 0，或等於新關卡的實心障礙數） */
+export function solidObstacleCount(): number {
+  return simpleBackend.size();
 }
 
 /** 緊急停止（空中按 Space）：凍結、速度歸零；任何輸入解凍 */

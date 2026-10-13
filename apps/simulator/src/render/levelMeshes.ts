@@ -19,6 +19,7 @@ import {
 } from '@creafly/shared';
 import { bus } from '../core/events';
 import { ringWorldY } from '../core/level';
+import { SceneLedger } from '../core/sceneLedger';
 import { CREAFLY_COLOR, hex } from './scene';
 
 const RING_COLORS: Record<string, number> = {
@@ -77,6 +78,7 @@ export class LevelVisuals {
     this.obstacles = [];
     this.balloons = [];
     this.zoneDiscs = [];
+    SceneLedger.set('level', 0);
   }
 
   private track<T extends { dispose(): void }>(x: T): T {
@@ -183,6 +185,7 @@ export class LevelVisuals {
       disc.material = mat;
       this.zoneDiscs.push(disc);
     });
+    SceneLedger.set('level', this.disposables.length);
   }
 
   private setRingVisible(index: number, visible: boolean): void {

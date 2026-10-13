@@ -5,6 +5,7 @@ import { Scene, Vector3, MeshBuilder, type LinesMesh } from '@babylonjs/core';
 import type { LevelDef } from '@creafly/shared';
 import { bus } from '../core/events';
 import { DRAW_HEIGHT_DEFAULT } from '../core/pen';
+import { SceneLedger } from '../core/sceneLedger';
 import { hex } from './scene';
 
 // ---- 參考線視覺常數（出處：legacy LineDashedMaterial 參數）----
@@ -30,12 +31,14 @@ export class GuideVisual {
     bus.on('level-cleared', () => {
       this.mesh?.dispose();
       this.mesh = null;
+      SceneLedger.set('guide', 0);
     });
   }
 
   private build(level: LevelDef): void {
     this.mesh?.dispose();
     this.mesh = null;
+    SceneLedger.set('guide', 0);
     if (!level.draw || !Array.isArray(level.guide) || level.guide.length < 2) return;
 
     const gy = (level.drawHeight ?? DRAW_HEIGHT_DEFAULT) + GUIDE_Y_OFFSET;
@@ -63,5 +66,6 @@ export class GuideVisual {
     this.mesh.color = hex(GUIDE_COLOR);
     this.mesh.alpha = GUIDE_ALPHA;
     this.mesh.isPickable = false;
+    SceneLedger.set('guide', 1);
   }
 }

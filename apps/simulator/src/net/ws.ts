@@ -12,6 +12,7 @@ import { handleLevelLoadResponse } from './levelLoad';
 import { handleCompleteAck, handleProgressSync, initProgressQueue, reportComplete } from './progressQueue';
 import { getStudentToken } from './studentAuth';
 import { armLevelStart, levelState, resetMission } from '../core/level';
+import { GameSession } from '../core/session';
 import { loadLevel } from './levelLoad';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
@@ -248,7 +249,7 @@ function onRoomLeft(reason: 'closed' | 'kicked'): void {
       /* ignore */
     }
   }
-  bus.emit('mode-takeover', { mode: 'level' }); // 大亂鬥 / 足球中被踢 → 先退出多人模式
+  GameSession.exitTransient(); // 大亂鬥 / 足球中被踢 → 先退出多人模式
   toast(reason === 'kicked' ? '🚪 你已被移出房間' : '🚪 老師已關閉房間', 'warning');
   bus.emit('room-left', { reason });
 }
@@ -266,12 +267,12 @@ function scheduleReconnect(): void {
 
 /**
  * 智能切關：老師廣播切關 / 比賽 / 重置時，若正在大亂鬥 / 足球（練習或對戰）中，
- * 先讓各模式走自己既有的 exit 路徑退出（mode-takeover 事件 → 不 import 多人模組，避免循環依賴）。
- * 伺服器通常會先送 arena_end / soccer_end 再送廣播，但 client 不依賴順序 —
- * 單獨收到 load_level 也能正確退出並載入關卡。
+ * 先走 GameSession 退出。伺服器通常會先送 arena_end / soccer_end 再送廣播，
+ * 但 client 不依賴順序 — 單獨收到 load_level 時 applyLoadLevel 也會再退出一次。
  */
 function exitMultiplayerForLevel(): void {
-  bus.emit('mode-takeover', { mode: 'level' });
+  // 載入關卡時 applyLoadLevel 也會再退出一次；這裡先退，重置當下沒有關卡可重載時才不會留在賽局
+  GameSession.exitTransient();
 }
 
 /** 處理老師廣播；arena_* / soccer_* 分派給 multiplayer/（ws 只分派、不處理） */
@@ -292,7 +293,7 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
         void mergeStudentCurriculum();
       }
       if (moved) {
-        bus.emit('mode-takeover', { mode: 'level' });
+        GameSession.exitTransient();
         toast(`🚪 老師把你移到「${msg.room.name || msg.room.code}」`, 'success');
       }
       bus.emit('room-joined', { room: msg.room });

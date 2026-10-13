@@ -136,6 +136,12 @@ bus.on('level-loaded', ({ level }) => {
     floor && floor.startsWith('/api/levels/') ? `${API_BASE}${floor}` : null;
   applyLevelFloor(world.scene, floorUrl);
 });
+// 離開關卡（進大亂鬥／足球／換關）：收起上一關地板與展場霧，避免貼圖晚到又把舊地板打開
+bus.on('level-cleared', () => {
+  applyLevelFloor(world.scene, null);
+  const urlEnv = parseSceneEnv(new URLSearchParams(location.search).get('scene'));
+  applySceneEnv(world.scene, urlEnv ?? 'default');
+});
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進；預覽模式在 initPlayer 內略過 WS
