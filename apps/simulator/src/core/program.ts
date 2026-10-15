@@ -17,7 +17,7 @@ import { easeInOut } from './physics';
 import { resetMission, checkProgramCompletion, levelState } from './level';
 import { inkPenDown, inkPenUp, inkSetColor, inkRandomColor } from './pen';
 import { bus, toast, sound, stateHud } from './events';
-import { buildCreaflyMotionApi, registerSimMotionRuntime } from './execution/mode';
+import { buildCreaflyMotionApi, notifyMotionStop, registerSimMotionRuntime } from './execution/mode';
 import { recordAction } from './recordingSession';
 import { GameSession } from './session';
 
@@ -358,6 +358,7 @@ export function stopProgram(): void {
   if (!programState.running) return;
   recordAction({ a: 'stop' });
   programState.abort = true;
+  notifyMotionStop();
 }
 
 /** 換關／離場：立刻拆掉 motion plan，不寫錄製、不跳中斷 toast */
@@ -366,6 +367,7 @@ function abortProgramSilently(): void {
   programGen++;
   programState.quiet = true;
   programState.abort = true;
+  notifyMotionStop();
   programState.running = false;
   flags.programRunning = false;
   const plan = activePlan;
