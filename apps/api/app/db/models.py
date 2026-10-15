@@ -285,10 +285,9 @@ class Student(Base):
         CheckConstraint("invite_status IN ('none', 'sent', 'accepted')", name="invite_status"),
         CheckConstraint("status IN ('active', 'disabled', 'removed')", name="status"),
         CheckConstraint("progress_mode IN ('personal', 'class')", name="progress_mode"),
-        # 有 email 者隊內唯一（大小寫不敏感）：部分唯一索引
+        # 有 email 者全站唯一（大小寫不敏感）。一人一帳號，班級用 student_memberships。
         Index(
-            "uq_students_team_id_lower_email",
-            text("team_id"),
+            "uq_students_lower_email",
             func.lower(text("email")),
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
@@ -329,7 +328,9 @@ class StudentMembership(Base):
     __tablename__ = "student_memberships"
     __table_args__ = (
         UniqueConstraint("student_id", "team_id"),
+        UniqueConstraint("team_id", "student_code"),
         CheckConstraint("status IN ('active', 'left')", name="status"),
+        CheckConstraint("origin IN ('created', 'linked')", name="origin"),
         Index("ix_student_memberships_team_id", "team_id"),
     )
 
@@ -340,6 +341,8 @@ class StudentMembership(Base):
     )
     student_code: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    # created = 本班新建的帳號；linked = 沿用已經存在的學生帳號
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default="created")
     joined_at: Mapped[datetime] = _created_at()
     left_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

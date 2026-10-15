@@ -12,6 +12,7 @@ import type {
   StudentLoginResponse,
   StudentMe,
   StudentMeResponse,
+  StudentProgressResponse,
 } from '@creafly/shared';
 import { API_BASE } from './backend';
 
@@ -169,6 +170,13 @@ export function setProgressContext(
   teamId?: number,
 ): Promise<AuthResult<StudentMeResponse>> {
   return authPost(token, '/auth/student/progress-context', { mode, teamId });
+}
+
+/** 目前這一份進度（個人或指定班）。切換班級後用它整份換掉勾勾，不跟其他班混。 */
+export function fetchStudentProgress(token: string): Promise<AuthResult<StudentProgressResponse>> {
+  return request<StudentProgressResponse>('/auth/student/progress', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 /** 驗 token 是否仍有效 + 取最新身分（伺服器同時滑動延長） */

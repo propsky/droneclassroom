@@ -25,7 +25,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .config import Settings
-from .db.models import PlatformAdmin, Session, Student, Teacher, Team
+from .db.models import PlatformAdmin, Session, Student, StudentMembership, Teacher, Team
 from .licensing import license_expired
 
 _hasher = PasswordHasher()
@@ -148,13 +148,48 @@ async def resolve_student_session(
         return None
     if license_expired(student.licensed_until, now):
         return None
-    team: Team | None = None
-    room_team_id = student.active_team_id or student.team_id
-    if room_team_id is not None:
-        found = await session.get(Team, room_team_id)
-        if found is not None and found.archived_at is None:
-            team = found
+    team = await active_class_team(session, student)
     return row, student, team
+
+
+async def active_class_team(session: AsyncSession, student: Student) -> Team | None:
+    """目前要進的班：須有 active 成員。退出的班不再當成進房班級。"""
+
+    async def member_team(team_id: int | None) -> Team | None:
+        if team_id is None:
+            return None
+        mem = (
+            await session.execute(
+                select(StudentMembership.id).where(
+                    StudentMembership.student_id == student.id,
+                    StudentMembership.team_id == team_id,
+                    StudentMembership.status == "active",
+                )
+            )
+        ).first()
+        if mem is None:
+            return None
+        found = await session.get(Team, team_id)
+        if found is None or found.archived_at is not None:
+            return None
+        return found
+
+    preferred = await member_team(student.active_team_id or student.team_id)
+    if preferred is not None:
+        return preferred
+    return (
+        await session.execute(
+            select(Team)
+            .join(StudentMembership, StudentMembership.team_id == Team.id)
+            .where(
+                StudentMembership.student_id == student.id,
+                StudentMembership.status == "active",
+                Team.archived_at.is_(None),
+            )
+            .order_by(StudentMembership.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 async def revoke_session(session: AsyncSession, row: Session, now: datetime | None = None) -> None:

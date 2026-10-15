@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.db.models import AuditEvent, Progress
+from app.db.models import AuditEvent, ClassProgress, Progress, Student
 from app.db.session import create_engine, create_sessionmaker
 from tests.db_cleanup import cleanup_test_teachers
 from tests.test_accounts import (
@@ -47,7 +47,24 @@ def db_client(tmp_path: Path) -> Iterator[TestClient]:
     asyncio.run(_cleanup())
 
 
-async def _progress_row(student_id: int, level_id: str) -> Progress | None:
+async def _progress_row(student_id: int, level_id: str) -> Progress | ClassProgress | None:
+    """老師新建的名單預設記在班級帳本；自行註冊仍是個人帳本。"""
+    assert DATABASE_URL
+    engine = create_engine(DATABASE_URL)
+    maker = create_sessionmaker(engine)
+    async with maker() as s:
+        student = await s.get(Student, student_id)
+        if student is not None and student.progress_mode == "class" and student.active_team_id:
+            row = await s.get(
+                ClassProgress, (student_id, student.active_team_id, level_id)
+            )
+        else:
+            row = await s.get(Progress, (student_id, level_id))
+    await engine.dispose()
+    return row
+
+
+async def _personal_row(student_id: int, level_id: str) -> Progress | None:
     assert DATABASE_URL
     engine = create_engine(DATABASE_URL)
     maker = create_sessionmaker(engine)
@@ -127,7 +144,10 @@ def test_帳號過關_入庫收ack_更快更新best_重送去重_重連progress_
         assert s.receive_json() == {"type": "complete_ack", "clientEventId": eid1}
         row = asyncio.run(_progress_row(student_id, "1-1"))
         assert row is not None
+        assert isinstance(row, ClassProgress)
         assert row.best_time_ms == 30000 and row.attempts == 1
+        # 班級成績不寫進個人帳本
+        assert asyncio.run(_personal_row(student_id, "1-1")) is None
         assert row.suspect is False
         assert row.first_completed_at is not None and row.last_completed_at is not None
         first_at = row.first_completed_at
@@ -239,3 +259,106 @@ def test_訪客過關_不入庫_不回ack(db_client: TestClient) -> None:
         s.send_json({"type": "register", "name": "小訪", "emoji": "🐱"})
         assert s.receive_json()["type"] == "room_joined"
     assert asyncio.run(_audit_by_dedupe(eid)) is None  # 沒有稽核事件 = 沒走入庫路徑
+
+
+@needs_db
+def test_切換班級只看到該班進度_個人帳本分開(db_client: TestClient) -> None:
+    """同一帳號加入兩班：甲班的關卡不會出現在乙班，也不會寫進個人帳本。"""
+    from sqlalchemy import func
+    from sqlalchemy import select as sa_select
+
+    from tests.test_students import FakeMailer
+
+    ticket = _register(db_client, _email("prgCls"))["ticket"]
+    headers = _bearer(ticket)
+    with db_client.websocket_connect(f"/teacher?ticket={ticket}") as ws:
+        t = TeacherWS(ws)
+        code_a = t.create_room({"name": "甲班"})
+        code_b = t.create_room({"name": "乙班"})
+        rooms = t.room_list(
+            lambda lst: code_a in _rooms_by_code(lst) and code_b in _rooms_by_code(lst)
+        )
+        by = _rooms_by_code(rooms)
+        team_a = by[code_a]["teamId"]
+        team_b = by[code_b]["teamId"]
+    email = f"multi-{uuid.uuid4().hex[:8]}@students-test.invalid"
+    reg = db_client.post(
+        "/auth/student/register",
+        json={"name": "小多", "email": email, "password": "kid-pass-123"},
+    )
+    assert reg.status_code == 201, reg.text
+    token = reg.json()["token"]
+    sid = reg.json()["me"]["id"]
+    assert reg.json()["me"]["progressMode"] == "personal"
+    mailer = FakeMailer()
+    db_client.app.state.mailer = mailer
+    added_a = _create_students(
+        db_client, headers, team_a, [{"name": "名單別名", "email": email}]
+    )
+    assert added_a["created"] == []
+    assert added_a["joined"][0]["id"] == sid
+    assert added_a["joined"][0]["accountKind"] == "linked"
+    assert "已被加入" in mailer.sent[-1]["subject"]
+    assert "invite=" not in mailer.sent[-1]["html"]
+    assert "設定密碼並加入" not in mailer.sent[-1]["html"]
+    added_b = _create_students(
+        db_client, headers, team_b, [{"name": "乙班別名", "email": email.upper()}]
+    )
+    assert added_b["created"] == [] and added_b["joined"][0]["id"] == sid
+
+    async def _email_rows() -> int:
+        assert DATABASE_URL
+        engine = create_engine(DATABASE_URL)
+        maker = create_sessionmaker(engine)
+        async with maker() as s:
+            n = await s.scalar(
+                sa_select(func.count())
+                .select_from(Student)
+                .where(func.lower(Student.email) == email)
+            )
+        await engine.dispose()
+        return int(n or 0)
+
+    assert asyncio.run(_email_rows()) == 1
+    auth = {"Authorization": f"Bearer {token}"}
+    ctx_a = db_client.post(
+        "/auth/student/progress-context",
+        headers=auth,
+        json={"mode": "class", "teamId": team_a},
+    )
+    assert ctx_a.status_code == 200, ctx_a.text
+    assert ctx_a.json()["teamId"] == team_a and ctx_a.json()["progressMode"] == "class"
+    eid_a, eid_b = str(uuid.uuid4()), str(uuid.uuid4())
+    with _account_ws(db_client, token) as (s, sync):
+        assert sync["progress"] == {}
+        _complete(s, "1-1", 11111, eid_a)
+        assert s.receive_json()["type"] == "complete_ack"
+    ctx_b = db_client.post(
+        "/auth/student/progress-context",
+        headers=auth,
+        json={"mode": "class", "teamId": team_b},
+    )
+    assert ctx_b.status_code == 200 and ctx_b.json()["teamId"] == team_b
+    with _account_ws(db_client, token) as (s, sync):
+        assert sync["progress"] == {}
+        _complete(s, "1-2", 22222, eid_b)
+        assert s.receive_json()["type"] == "complete_ack"
+    back = db_client.post(
+        "/auth/student/progress-context",
+        headers=auth,
+        json={"mode": "class", "teamId": team_a},
+    )
+    assert back.status_code == 200
+    prog_a = db_client.get("/auth/student/progress", headers=auth)
+    assert prog_a.status_code == 200, prog_a.text
+    assert prog_a.json()["mode"] == "class" and prog_a.json()["teamId"] == team_a
+    assert set(prog_a.json()["progress"]) == {"1-1"}
+    personal = db_client.post(
+        "/auth/student/progress-context", headers=auth, json={"mode": "personal"}
+    )
+    assert personal.status_code == 200 and personal.json()["progressMode"] == "personal"
+    prog_me = db_client.get("/auth/student/progress", headers=auth)
+    assert prog_me.json()["mode"] == "personal"
+    assert prog_me.json()["progress"] == {}
+    assert asyncio.run(_personal_row(sid, "1-1")) is None
+    assert asyncio.run(_personal_row(sid, "1-2")) is None

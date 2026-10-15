@@ -248,13 +248,15 @@ export function createStudents(
 }
 
 /** POST /api/students/{id}/reinvite（Bearer）— 重寄邀請信 */
-export function reinviteStudent(id: number): Promise<ReinviteResponse> {
-  return request<ReinviteResponse>(`/api/students/${id}/reinvite`, { method: 'POST', auth: true });
+export function reinviteStudent(id: number, teamId?: number): Promise<ReinviteResponse> {
+  const q = teamId != null ? `?teamId=${teamId}` : '';
+  return request<ReinviteResponse>(`/api/students/${id}/reinvite${q}`, { method: 'POST', auth: true });
 }
 
 /** DELETE /api/students/{id}（Bearer）— 移除（status=removed，進度保留） */
-export function removeStudent(id: number): Promise<void> {
-  return request<void>(`/api/students/${id}`, { method: 'DELETE', auth: true });
+export function removeStudent(id: number, teamId?: number): Promise<void> {
+  const q = teamId != null ? `?teamId=${teamId}` : '';
+  return request<void>(`/api/students/${id}${q}`, { method: 'DELETE', auth: true });
 }
 
 // ---------- 教室資訊 ----------

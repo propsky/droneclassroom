@@ -72,7 +72,7 @@ async def save_completion(
             )
             if event_id is not None:
                 # 新事件才 upsert；dedupe 命中代表同一筆已入庫，attempts 不重複加。
-                # progress_mode=class 且有目前班級 → 寫該班帳本，否則寫個人帳本。
+                # 個人帳本與各班 ClassProgress 二擇一，不會各寫一份、也不會把各班併成一筆。
                 student = await session.get(Student, student_id)
                 if (
                     student is not None

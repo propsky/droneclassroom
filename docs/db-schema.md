@@ -68,7 +68,7 @@ organizations ─┬─ teachers ─┬─ sessions（老師/學生共用）
 | team_id | bigint NOT NULL FK teams | 索引 |
 | name | text NOT NULL | 顯示名 |
 | emoji | text NOT NULL DEFAULT '🙂' | 學生端頭像（沿用現有產品語言） |
-| email | text NULL | 有 email 才能走邀請信；`UNIQUE (team_id, LOWER(email))` 部分索引 WHERE email IS NOT NULL |
+| email | text NULL | 有 email 才能走邀請信；`UNIQUE (LOWER(email))` 部分索引 WHERE email IS NOT NULL（全站一人一帳，不分大小寫）。既有重複要先跑 `uv run python -m app.student_merge` dry-run，確認後才 `--apply`，migration 0009 不會自動合併 |
 | password_hash | text NULL | 設過密碼才有 |
 | student_code | text NOT NULL | 隊內學生碼（如 `03`）；`UNIQUE (team_id, student_code)`。無 email 學生用 `team_code + student_code` 登入 |
 | invite_status | text NOT NULL DEFAULT 'none' CHECK in ('none','sent','accepted') | 邀請信狀態 |

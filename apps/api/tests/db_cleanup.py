@@ -10,10 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
     AuditEvent,
+    ClassProgress,
     Level,
     Progress,
     Session,
     Student,
+    StudentMembership,
     Teacher,
     TeacherLevelKit,
     Team,
@@ -24,6 +26,7 @@ from app.rest import DEV_TEACHER_EMAIL
 
 # 與 tests/test_accounts.py 的 EMAIL_DOMAIN 一致
 TEST_TEACHER_EMAIL_DOMAIN = "accounts-test.invalid"
+TEST_STUDENT_EMAIL_DOMAIN = "students-test.invalid"
 
 
 async def cleanup_test_teachers(
@@ -66,6 +69,24 @@ async def _delete_test_data(
                 await s.execute(select(Student.id).where(Student.team_id.in_(team_ids)))
             ).scalars().all()
         )
+        member_ids = list(
+            (
+                await s.execute(
+                    select(StudentMembership.student_id).where(
+                        StudentMembership.team_id.in_(team_ids)
+                    )
+                )
+            ).scalars().all()
+        )
+        student_ids = list({*student_ids, *member_ids})
+    email_ids = list(
+        (
+            await s.execute(
+                select(Student.id).where(Student.email.ilike(f"%@{TEST_STUDENT_EMAIL_DOMAIN}"))
+            )
+        ).scalars().all()
+    )
+    student_ids = list({*student_ids, *email_ids})
 
     teacher_level_ids = list(
         (
@@ -74,7 +95,11 @@ async def _delete_test_data(
     )
 
     if student_ids:
+        await s.execute(delete(ClassProgress).where(ClassProgress.student_id.in_(student_ids)))
         await s.execute(delete(Progress).where(Progress.student_id.in_(student_ids)))
+        await s.execute(
+            delete(StudentMembership).where(StudentMembership.student_id.in_(student_ids))
+        )
 
     audit_parts = [
         (AuditEvent.actor_type == "teacher") & AuditEvent.actor_id.in_(teacher_ids),
