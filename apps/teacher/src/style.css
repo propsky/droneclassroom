@@ -122,7 +122,7 @@ body {
   gap: var(--sp-4);
   align-items: start;
 }
-.side-col { position: sticky; top: var(--sp-4); min-width: 0; }
+.side-col { position: sticky; top: var(--sp-4); min-width: 0; z-index: 2; }
 .work-col { min-width: 0; }
 @media (max-width: 1023px) {
   .layout { grid-template-columns: 1fr; padding: var(--sp-4); }
@@ -399,11 +399,79 @@ body {
   gap: var(--sp-2);
   max-width: 100%;
 }
-/* 停用鈕的 title 由外層 span 提供（disabled 元素不一定顯示 tooltip）。
-   停用鈕不吃滑鼠，滑過才會落在外層、游標也維持不可按。 */
-.tip-wrap { display: inline-flex; }
+/* 停用鈕不吃滑鼠，滑過才會落在外層、游標也維持不可按。
+   tooltip 不用 title（瀏覽器要等約一秒才出現）：hover / focus 當下就顯示。 */
+.tip-wrap { position: relative; display: inline-flex; }
+/* 說明掛在卡頭右側，不蓋住房碼與警告列（名冊欄只有 380px） */
+#manage-students-wrap { position: static; }
+.tip-wrap:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
 .tip-wrap:has(> :disabled) { cursor: not-allowed; }
 .tip-wrap > :disabled { pointer-events: none; }
+.instant-tip {
+  position: absolute;
+  z-index: var(--z-overlay-btn);
+  left: calc(100% + var(--sp-2));
+  top: var(--sp-3);
+  width: max-content;
+  max-width: 240px;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-1);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-1);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  display: none;
+}
+.tip-wrap[data-tip='open'] > .instant-tip,
+.tip-wrap:hover > .instant-tip,
+.tip-wrap:focus-within > .instant-tip {
+  display: block;
+}
+/* 工具列正下方：沒有班級時常駐，直接列出這間房做不到的功能 */
+.room-limit {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-1));
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--r-sm);
+}
+.room-limit[hidden] { display: none; }
+.room-limit-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--warn);
+}
+.room-limit-text {
+  margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-1);
+}
+.room-limit .btn { flex: 0 0 auto; align-self: center; }
+@media (max-width: 1023px) {
+  /* 單欄時卡頭右側沒有空間，改在按鈕下方展開 */
+  #manage-students-wrap { position: relative; }
+  .instant-tip {
+    left: 0;
+    top: calc(100% + var(--sp-1));
+  }
+}
 .room-pop {
   position: absolute;
   top: calc(100% - var(--sp-2));
