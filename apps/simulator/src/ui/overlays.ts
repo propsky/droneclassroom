@@ -8,6 +8,7 @@ import {
   clearStudentSession,
   fetchInviteInfo,
   fetchStudentMe,
+  fetchStudentProgress,
   loadStudentSession,
   saveStudentSession,
   joinTeam,
@@ -19,7 +20,7 @@ import {
   touchStudentSession,
   type StudentSession,
 } from '../net/studentAuth';
-import { progressState, refreshProgressFromCache } from '../net/progressQueue';
+import { handleProgressSync, progressState, refreshProgressFromCache } from '../net/progressQueue';
 import { canLoadLevel, isOnlineOnlyMode, loadEntitlement } from '../net/entitlement';
 import { flags } from '../core/droneState';
 import { levelState, armLevelStart, resetMission } from '../core/level';
@@ -366,17 +367,42 @@ function initLogout(): void {
           toast('已離開班級，進度改記在自己名下', 'success');
         }
       }
-      const useClass = window.confirm('進度要記在目前班級嗎？\n按「取消」則記在自己名下。');
       const who = loadStudentSession()?.me;
-      const switched = await setProgressContext(
-        token,
-        useClass && who?.teamId ? 'class' : 'personal',
-        who?.teamId ?? undefined,
-      );
+      const classes = who?.classes ?? [];
+      let mode: 'personal' | 'class' = 'personal';
+      let teamId: number | undefined;
+      const only = classes[0];
+      if (classes.length === 1 && only) {
+        const useClass = window.confirm(
+          `進度要記在「${only.teamName}」嗎？\n按「取消」則記在自己名下。`,
+        );
+        if (useClass) {
+          mode = 'class';
+          teamId = only.teamId;
+        }
+      } else if (classes.length > 1) {
+        const lines = classes.map((c) => `${c.teamCode}＝${c.teamName}`).join('、');
+        const code = window.prompt(
+          `要看哪個班級的進度？輸入班級碼（${lines}）。留空則記在自己名下。`,
+          who?.teamCode ?? '',
+        );
+        const found = classes.find((c) => c.teamCode === (code ?? '').trim().toUpperCase());
+        if (found) {
+          mode = 'class';
+          teamId = found.teamId;
+        }
+      }
+      const switched = await setProgressContext(token, mode, teamId);
       if (switched.ok) {
         saveStudentSession(token, switched.data, studentSession?.expiresInSec ?? 0);
         studentSession = loadStudentSession();
-        toast(switched.data.progressMode === 'class' ? '之後的成績記入班級' : '之後的成績記入自己', 'success');
+        const prog = await fetchStudentProgress(token);
+        if (prog.ok) handleProgressSync(prog.data.progress);
+        const label =
+          switched.data.progressMode === 'class'
+            ? `之後的成績記入「${switched.data.teamName || '班級'}」`
+            : '之後的成績記入自己';
+        toast(label, 'success');
       }
     };
     void run();

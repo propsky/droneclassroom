@@ -16,7 +16,8 @@
 
 設計取捨：
 - student_code 每班流水（'01' 起）：配號前 SELECT ... FOR UPDATE 鎖住 team 列，
-  同班併發建立序列化；(team_id, student_code) 唯一約束是 DB 層保險
+  同班併發建立序列化；(team_id, student_code) 在 student_memberships 唯一
+- email 全站唯一（不分大小寫）。已有學生帳號只加 StudentMembership，不另建帳號
 - 邀請 token = sessions 表一列（principal_type='student', purpose='invite', TTL 7 天）：
   不另開表（db-schema.md §3 的擴充點）；accept 用過即撤銷、完成即登入
 - 寄信永遠是加分項：寄失敗 invite_status 留 'none'、invitesSent=false，不擋建立；
@@ -28,17 +29,19 @@
 import html as html_escape
 import logging
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .accounts import (
     CurrentStudentSession,
     CurrentTeacher,
     DbSession,
+    active_class_team,
     bearer_token,
     hash_password,
     issue_session,
@@ -54,6 +57,7 @@ from .db.models import Session as SessionRow
 from .db.models import Student, StudentMembership, Teacher, Team
 from .licensing import license_expired
 from .mailer import Mailer
+from .progress import load_progress
 
 # 登入類端點共用前置（Origin 白名單 + 同 IP 限流）與 email 正規化沿用 rest.py
 from .rest import _login_guard, _normalize_email
@@ -95,6 +99,9 @@ class StudentEntry(BaseModel):
     studentCode: str  # noqa: N815
     email: str | None
     inviteStatus: Literal["none", "sent", "accepted"]  # noqa: N815
+    # code = 沒有 email，用班級碼＋學生碼；pending_password = 新帳號還沒設密碼；
+    # linked = 本來就有帳號，這班只是加入；password_set = 新帳號已設密碼
+    accountKind: Literal["code", "pending_password", "linked", "password_set"]  # noqa: N815
     status: Literal["active", "disabled", "removed"]
     createdAt: float  # noqa: N815 — epoch 毫秒（與 Date.now() 同制）
     lastSeenAt: float | None  # noqa: N815
@@ -104,7 +111,11 @@ class StudentsCreateResponse(BaseModel):
     """建立結果 + 邀請信寄送結果（email → true/false；停用寄信時全 false）。"""
 
     created: list[StudentEntry]
+    # 沿用既有帳號、只加入這個班（不是新建 Student）
+    joined: list[StudentEntry] = []
     invitesSent: dict[str, bool]  # noqa: N815
+    # 既有帳號的「你已被加入班級」通知（不是設密碼邀請）
+    noticesSent: dict[str, bool] = {}  # noqa: N815
 
 
 class StudentsListResponse(BaseModel):
@@ -113,6 +124,15 @@ class StudentsListResponse(BaseModel):
 
 class ReinviteResponse(BaseModel):
     sent: bool
+
+
+class StudentClassRef(BaseModel):
+    """學生目前加入的一個班（進度切換用）。"""
+
+    teamId: int  # noqa: N815
+    teamName: str  # noqa: N815
+    teamCode: str  # noqa: N815
+    studentCode: str  # noqa: N815
 
 
 class StudentMe(BaseModel):
@@ -126,6 +146,7 @@ class StudentMe(BaseModel):
     teamCode: str = ""  # noqa: N815
     studentCode: str = ""  # noqa: N815
     progressMode: Literal["personal", "class"] = "personal"  # noqa: N815
+    classes: list[StudentClassRef] = []
 
 
 class StudentLoginRequest(BaseModel):
@@ -171,21 +192,78 @@ def _epoch_ms(dt: datetime | None) -> float | None:
     return dt.timestamp() * 1000 if dt is not None else None
 
 
-def _entry(s: Student) -> StudentEntry:
+def _account_kind(
+    student: Student, origin: str
+) -> Literal["code", "pending_password", "linked", "password_set"]:
+    """名單上的帳號狀態。linked 優先：本來就有帳號，不當成新帳號待設密碼。"""
+    if origin == "linked":
+        return "linked"
+    if not student.email:
+        return "code"
+    if student.password_hash is None or student.invite_status != "accepted":
+        return "pending_password"
+    return "password_set"
+
+
+def _roster_status(student: Student, membership: StudentMembership) -> Literal[
+    "active", "disabled", "removed"
+]:
+    """這個班的名單視角：退出這個班就是 removed，帳號在別班仍可使用。"""
+    if student.status != "active":
+        return student.status  # type: ignore[return-value]
+    if membership.status != "active":
+        return "removed"
+    return "active"
+
+
+def _entry(student: Student, membership: StudentMembership) -> StudentEntry:
     return StudentEntry(
-        id=s.id,
-        name=s.name,
-        emoji=s.emoji,
-        studentCode=s.student_code or "",
-        email=s.email,
-        inviteStatus=s.invite_status,  # type: ignore[arg-type] — DB CHECK 已限定
-        status=s.status,  # type: ignore[arg-type]
-        createdAt=_epoch_ms(s.created_at) or 0,
-        lastSeenAt=_epoch_ms(s.last_seen_at),
+        id=student.id,
+        name=student.name,
+        emoji=student.emoji,
+        studentCode=membership.student_code,
+        email=student.email,
+        inviteStatus=student.invite_status,  # type: ignore[arg-type] — DB CHECK 已限定
+        accountKind=_account_kind(student, membership.origin),
+        status=_roster_status(student, membership),
+        createdAt=_epoch_ms(student.created_at) or 0,
+        lastSeenAt=_epoch_ms(student.last_seen_at),
     )
 
 
-def _me(student: Student, team: Team | None) -> StudentMe:
+async def _active_classes(
+    session: AsyncSession, student_id: int
+) -> list[tuple[StudentMembership, Team]]:
+    rows = (
+        await session.execute(
+            select(StudentMembership, Team)
+            .join(Team, Team.id == StudentMembership.team_id)
+            .where(
+                StudentMembership.student_id == student_id,
+                StudentMembership.status == "active",
+                Team.archived_at.is_(None),
+            )
+            .order_by(StudentMembership.student_code, Team.id)
+        )
+    ).all()
+    return list(rows)
+
+
+async def _me(session: AsyncSession, student: Student, team: Team | None) -> StudentMe:
+    """身分。studentCode / team 以「目前這個班」的成員列為準，不是永遠用原班級碼。"""
+    pairs = await _active_classes(session, student.id)
+    classes = [
+        StudentClassRef(
+            teamId=t.id,
+            teamName=t.name,
+            teamCode=t.team_code,
+            studentCode=mem.student_code,
+        )
+        for mem, t in pairs
+    ]
+    code = student.student_code or ""
+    if team is not None:
+        code = next((mem.student_code for mem, t in pairs if t.id == team.id), code)
     return StudentMe(
         id=student.id,
         name=student.name,
@@ -193,8 +271,9 @@ def _me(student: Student, team: Team | None) -> StudentMe:
         teamId=team.id if team is not None else None,
         teamName=team.name if team is not None else "",
         teamCode=team.team_code if team is not None else "",
-        studentCode=student.student_code or "",
+        studentCode=code,
         progressMode=student.progress_mode,  # type: ignore[arg-type]
+        classes=classes,
     )
 
 
@@ -215,15 +294,80 @@ async def _owned_team(
 
 
 async def _owned_student(
-    session: AsyncSession, teacher: Teacher, student_id: int
-) -> tuple[Student, Team]:
-    """該老師班上的學生（含 removed）；不是就 404。"""
+    session: AsyncSession,
+    teacher: Teacher,
+    student_id: int,
+    team_id: int | None = None,
+) -> tuple[Student, Team, StudentMembership]:
+    """老師某班的成員列（含已退出）。沒指定班級且只在一班時用那一班。"""
     student = await session.get(Student, student_id)
-    if student is not None:
-        team = await session.get(Team, student.team_id)
-        if team is not None and team.owner_teacher_id == teacher.id:
-            return student, team
-    raise HTTPException(status_code=404, detail="學生不存在")
+    if student is None:
+        raise HTTPException(status_code=404, detail="學生不存在")
+    stmt = (
+        select(StudentMembership, Team)
+        .join(Team, Team.id == StudentMembership.team_id)
+        .where(
+            StudentMembership.student_id == student.id,
+            Team.owner_teacher_id == teacher.id,
+            Team.archived_at.is_(None),
+        )
+        .order_by(StudentMembership.id)
+    )
+    if team_id is not None:
+        stmt = stmt.where(StudentMembership.team_id == team_id)
+    rows = (await session.execute(stmt)).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="學生不存在")
+    if team_id is None and len(rows) > 1:
+        raise HTTPException(status_code=422, detail="這位學生在多個班級，請指定班級")
+    mem, team = rows[0]
+    return student, team, mem
+
+
+async def _membership(
+    session: AsyncSession, student_id: int, team_id: int
+) -> StudentMembership | None:
+    return (
+        await session.execute(
+            select(StudentMembership).where(
+                StudentMembership.student_id == student_id,
+                StudentMembership.team_id == team_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _find_student_by_email(session: AsyncSession, email: str) -> Student | None:
+    """全站一個 email 一個帳號。重複尚未合併時不猜是哪一筆。"""
+    rows = (
+        (
+            await session.execute(
+                select(Student).where(func.lower(Student.email) == email).limit(2)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="這個 email 有多個學生帳號尚未合併，請先跑合併 dry-run",
+        )
+    return rows[0] if rows else None
+
+
+async def _next_student_code(session: AsyncSession, team_id: int, reserved: set[str]) -> str:
+    rows = (
+        await session.execute(
+            select(StudentMembership.student_code).where(StudentMembership.team_id == team_id)
+        )
+    ).scalars()
+    used = {c for c in rows if c}
+    used |= reserved
+    n = max((int(c) for c in used if c.isdigit()), default=0) + 1
+    code = f"{n:02d}"
+    reserved.add(code)
+    return code
 
 
 async def _revoke_invite_tokens(session: AsyncSession, student_id: int) -> None:
@@ -280,6 +424,49 @@ def _invite_mail(
     return subject, html, text
 
 
+def _added_mail(
+    *,
+    student_name: str,
+    team_name: str,
+    teacher_name: str,
+    team_code: str,
+    student_code: str,
+    has_password: bool,
+) -> tuple[str, str, str]:
+    """既有帳號加入班級的通知。不是設密碼邀請，連結裡沒有 invite token。"""
+    subject = f"CREAFLY 無人機教室 — 你已被加入「{team_name}」"
+    if has_password:
+        how = (
+            "請用你原本的帳號（email 與密碼）登入，不必重新設定密碼。\n"
+            f"也可以用班級碼 {team_code}、學生碼 {student_code} 登入（仍要輸入密碼）。"
+        )
+    else:
+        how = (
+            f"請用班級碼 {team_code}、學生碼 {student_code} 登入。\n"
+            "這個通知不是設密碼信；若要改用 email 登入，"
+            "請用原本那封設密碼邀請，或請原班級老師重寄。"
+        )
+    text = (
+        f"{student_name} 同學你好：\n\n"
+        f"{teacher_name} 老師已把你加入 CREAFLY 教室無人機模擬器的班級「{team_name}」。\n"
+        f"{how}\n\n"
+        "如果你不認識這位老師，忽略這封信即可。\n"
+    )
+    esc_student = html_escape.escape(student_name)
+    esc_team = html_escape.escape(team_name)
+    esc_teacher = html_escape.escape(teacher_name)
+    esc_how = html_escape.escape(how).replace("\n", "<br>")
+    html = (
+        f"<p>{esc_student} 同學你好：</p>"
+        f"<p>{esc_teacher} 老師已把你加入 CREAFLY 教室無人機模擬器的班級"
+        f"「<b>{esc_team}</b>」。</p>"
+        f"<p>{esc_how}</p>"
+        f"<p style=\"color:#666\">這封是加入班級通知，不用重新設定密碼。"
+        f"如果你不認識這位老師，忽略這封信即可。</p>"
+    )
+    return subject, html, text
+
+
 async def _send_invite(
     request: Request, session: AsyncSession, team: Team, student: Student, teacher: Teacher
 ) -> bool:
@@ -326,6 +513,26 @@ async def _send_invite(
     return sent
 
 
+async def _send_notice(
+    request: Request, team: Team, student: Student, teacher: Teacher, student_code: str
+) -> bool:
+    """既有帳號加入班級：只寄通知，不發邀請 token、不改 invite_status。"""
+    assert student.email
+    mailer: Mailer = request.app.state.mailer
+    subject, html, text = _added_mail(
+        student_name=student.name,
+        team_name=team.name,
+        teacher_name=teacher.name,
+        team_code=team.team_code,
+        student_code=student_code,
+        has_password=student.password_hash is not None,
+    )
+    if not mailer.enabled:
+        logger.info("[MAIL] 停用模式加入班級通知（%s）：%s", student.email, subject)
+        return False
+    return await mailer.send(to=student.email, subject=subject, html=html, text=text)
+
+
 # ---------- 老師端點 ----------
 
 
@@ -337,86 +544,147 @@ async def students_create(
     teacher: CurrentTeacher,
     session: DbSession,
 ) -> StudentsCreateResponse:
-    """批次建學生：student_code 每班流水（'01' 起）；班內重複 email 整批回滾 409。
+    """批次加名單。email 已有帳號 → 只加成員並寄加入通知；沒有才新建並寄設密碼邀請。
 
-    建立先 commit（寄信失敗不影響已建立的學生），邀請信另一筆交易寄送與記狀態。
+    沒填 email 的維持班級碼＋學生碼。班內已經有這個 email（含大小寫）整批回滾 409。
+    建立先 commit（寄信失敗不影響已建立的學生）。
     """
-    # FOR UPDATE 鎖 team 列：同班兩位老師分頁同時貼名單也不會配出重號
     team = await _owned_team(session, teacher, team_id, for_update=True)
-    existing = (
-        (await session.execute(select(Student).where(Student.team_id == team.id))).scalars().all()
-    )
-    existing_emails = {s.email for s in existing if s.email}
-    next_code = (
-        max((int(s.student_code) for s in existing if s.student_code.isdigit()), default=0) + 1
-    )
-    created: list[Student] = []
+    in_class = (
+        await session.execute(
+            select(Student, StudentMembership)
+            .join(StudentMembership, StudentMembership.student_id == Student.id)
+            .where(StudentMembership.team_id == team.id)
+        )
+    ).all()
+    active_emails = {
+        s.email.strip().lower()
+        for s, mem in in_class
+        if s.email and mem.status == "active"
+    }
+    reserved: set[str] = set()
+    created: list[tuple[Student, StudentMembership]] = []
+    joined: list[tuple[Student, StudentMembership]] = []
     batch_emails: set[str] = set()
     for i, item in enumerate(body.students, start=1):
         email = _normalize_email(item.email) if item.email else None
         if email is not None:
             if "@" not in email:
                 raise HTTPException(status_code=422, detail=f"第 {i} 列 email 格式不正確")
-            if email in existing_emails or email in batch_emails:
-                # 整批不建：HTTPException 讓交易回滾（含 FOR UPDATE 鎖釋放）
+            if email in batch_emails or email in active_emails:
                 raise HTTPException(
                     status_code=409, detail=f"第 {i} 列 email 已存在班內：{email}"
                 )
             batch_emails.add(email)
+            existing = await _find_student_by_email(session, email)
+            if existing is not None:
+                mem = await _membership(session, existing.id, team.id)
+                if mem is not None and mem.status == "active":
+                    raise HTTPException(
+                        status_code=409, detail=f"第 {i} 列 email 已存在班內：{email}"
+                    )
+                if existing.status != "active":
+                    existing.status = "active"
+                code = mem.student_code if mem is not None else await _next_student_code(
+                    session, team.id, reserved
+                )
+                if mem is None:
+                    mem = StudentMembership(
+                        student_id=existing.id,
+                        team_id=team.id,
+                        student_code=code,
+                        origin="linked",
+                    )
+                    session.add(mem)
+                else:
+                    mem.status = "active"
+                    mem.left_at = None
+                if existing.team_id is None:
+                    existing.team_id = team.id
+                    existing.student_code = code
+                if existing.active_team_id is None:
+                    existing.active_team_id = team.id
+                joined.append((existing, mem))
+                continue
+        elif email is None and item.email:
+            raise HTTPException(status_code=422, detail=f"第 {i} 列 email 格式不正確")
+        code = await _next_student_code(session, team.id, reserved)
         student = Student(
             team_id=team.id,
             name=item.name.strip(),
             email=email,
-            student_code=f"{next_code:02d}",
+            student_code=code,
+            active_team_id=team.id,
+            # 老師新建的名單從這一班記進度，不先寫進個人帳本
+            progress_mode="class",
         )
         if item.emoji:
             student.emoji = item.emoji
-        next_code += 1
         session.add(student)
-        created.append(student)
-    await session.flush()
-    for student in created:
-        if student.team_id is not None and student.student_code:
-            session.add(
-                StudentMembership(
-                    student_id=student.id,
-                    team_id=student.team_id,
-                    student_code=student.student_code,
-                )
-            )
-            student.active_team_id = student.team_id
-    await record_event(
-        session,
-        event_type="student.created",
-        actor_type="teacher",
-        actor_id=teacher.id,
-        org_id=team.org_id,
-        team_id=team.id,
-        payload={
-            "count": len(created),
-            "students": [
-                {"id": s.id, "name": s.name, "student_code": s.student_code, "email": s.email}
-                for s in created
-            ],
-        },
-    )
-    await session.commit()  # 建立落地；接下來寄信失敗不影響
+        await session.flush()
+        mem = StudentMembership(
+            student_id=student.id,
+            team_id=team.id,
+            student_code=code,
+            origin="created",
+        )
+        session.add(mem)
+        created.append((student, mem))
+    if created or joined:
+        await record_event(
+            session,
+            event_type="student.created",
+            actor_type="teacher",
+            actor_id=teacher.id,
+            org_id=team.org_id,
+            team_id=team.id,
+            payload={
+                "count": len(created),
+                "joined": len(joined),
+                "students": [
+                    {
+                        "id": s.id,
+                        "name": s.name,
+                        "student_code": m.student_code,
+                        "email": s.email,
+                        "origin": m.origin,
+                    }
+                    for s, m in [*created, *joined]
+                ],
+            },
+        )
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="email 已有學生帳號，請再試一次") from None
     invites_sent: dict[str, bool] = {}
+    notices_sent: dict[str, bool] = {}
     if body.sendInvites:
-        for student in created:
+        for student, _mem in created:
             if student.email:
                 invites_sent[student.email] = await _send_invite(
                     request, session, team, student, teacher
                 )
-        await session.commit()  # invite token / invite_status / audit 落地
+        for student, mem in joined:
+            if student.email:
+                notices_sent[student.email] = await _send_notice(
+                    request, team, student, teacher, mem.student_code
+                )
+        await session.commit()
     logger.info(
-        "[Students] 班級 #%d 建 %d 位學生（寄邀請 %d 封）",
+        "[Students] 班級 #%d 新建 %d、加入既有帳號 %d（邀請 %d、通知 %d）",
         team.id,
         len(created),
+        len(joined),
         sum(invites_sent.values()),
+        sum(notices_sent.values()),
     )
     return StudentsCreateResponse(
-        created=[_entry(s) for s in created], invitesSent=invites_sent
+        created=[_entry(s, m) for s, m in created],
+        joined=[_entry(s, m) for s, m in joined],
+        invitesSent=invites_sent,
+        noticesSent=notices_sent,
     )
 
 
@@ -424,32 +692,37 @@ async def students_create(
 async def students_list(
     team_id: int, teacher: CurrentTeacher, session: DbSession
 ) -> StudentsListResponse:
-    """全班學生（含 removed，前端自己篩）；依學生碼排序。"""
+    """這個班的成員（含已退出，前端自己篩）。依本班學生碼排序，不是原班級碼。"""
     team = await _owned_team(session, teacher, team_id)
-    students = (
-        (
-            await session.execute(
-                select(Student)
-                .where(Student.team_id == team.id)
-                .order_by(Student.student_code, Student.id)
-            )
+    rows = (
+        await session.execute(
+            select(Student, StudentMembership)
+            .join(StudentMembership, StudentMembership.student_id == Student.id)
+            .where(StudentMembership.team_id == team.id)
+            .order_by(StudentMembership.student_code, Student.id)
         )
-        .scalars()
-        .all()
-    )
-    return StudentsListResponse(students=[_entry(s) for s in students])
+    ).all()
+    return StudentsListResponse(students=[_entry(s, m) for s, m in rows])
 
 
 @router.post("/api/students/{student_id}/reinvite")
 async def student_reinvite(
-    request: Request, student_id: int, teacher: CurrentTeacher, session: DbSession
+    request: Request,
+    student_id: int,
+    teacher: CurrentTeacher,
+    session: DbSession,
+    teamId: Annotated[int | None, Query()] = None,  # noqa: N803
 ) -> ReinviteResponse:
-    """重寄邀請信：舊邀請 token 全撤、發新的一張再寄。"""
-    student, team = await _owned_student(session, teacher, student_id)
-    if student.status != "active":
+    """重寄設密碼邀請。已經有密碼的既有帳號不重寄（請他們用原本的 email 登入）。"""
+    student, team, mem = await _owned_student(session, teacher, student_id, teamId)
+    if student.status != "active" or mem.status != "active":
         raise HTTPException(status_code=404, detail="學生不存在")
     if not student.email:
         raise HTTPException(status_code=400, detail="該學生沒有 email，無法寄邀請信")
+    if student.password_hash is not None:
+        raise HTTPException(
+            status_code=400, detail="這位學生已經有密碼，請用原本的 email 登入"
+        )
     await _revoke_invite_tokens(session, student.id)
     sent = await _send_invite(request, session, team, student, teacher)
     await session.commit()
@@ -458,12 +731,47 @@ async def student_reinvite(
 
 @router.delete("/api/students/{student_id}", status_code=204)
 async def student_remove(
-    request: Request, student_id: int, teacher: CurrentTeacher, session: DbSession
+    request: Request,
+    student_id: int,
+    teacher: CurrentTeacher,
+    session: DbSession,
+    teamId: Annotated[int | None, Query()] = None,  # noqa: N803
 ) -> None:
-    """移除學生：status='removed'（進度保留）+ 撤銷該生所有 session + 在線就踢出（close 4001）。"""
-    student, team = await _owned_student(session, teacher, student_id)
-    student.status = "removed"
-    revoked = await revoke_all_sessions_for(session, "student", student.id)
+    """移出這個班。本班新建且沒有其他班 → 整帳停用；既有帳號只退出這一班。"""
+    student, team, mem = await _owned_student(session, teacher, student_id, teamId)
+    mem.status = "left"
+    mem.left_at = _now()
+    others = (
+        (
+            await session.execute(
+                select(StudentMembership).where(
+                    StudentMembership.student_id == student.id,
+                    StudentMembership.status == "active",
+                    StudentMembership.team_id != team.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    revoked = 0
+    # 本班新建、沒有其他班：沿用舊的整帳停用（班級碼登入也失效）
+    if mem.origin == "created" and not others:
+        student.status = "removed"
+        revoked = await revoke_all_sessions_for(session, "student", student.id)
+    else:
+        other = others[0] if others else None
+        if student.active_team_id == team.id:
+            student.active_team_id = other.team_id if other is not None else None
+            if student.active_team_id is None:
+                student.progress_mode = "personal"
+        if student.team_id == team.id:
+            if other is not None:
+                student.team_id = other.team_id
+                student.student_code = other.student_code
+            else:
+                student.team_id = None
+                student.student_code = None
     await record_event(
         session,
         event_type="student.removed",
@@ -472,17 +780,16 @@ async def student_remove(
         org_id=team.org_id,
         team_id=team.id,
         student_id=student.id,
-        payload={"revoked_sessions": revoked},
+        payload={"revoked_sessions": revoked, "origin": mem.origin},
     )
     await session.commit()
-    # 該班的房開著且本人在線 → 踢出（WS_CLOSE_KICKED=4001，學生端回進房畫面）
     rooms: RoomManager = request.app.state.rooms
     room = rooms.get_by_team(team.id)
     if room is not None:
         record = next((r for r in room.roster.students if r.student_id == student.id), None)
         if record is not None:
             await rooms.kick(room, record)
-    logger.info("[Students] 移除學生 #%d（撤銷 session %d 個）", student.id, revoked)
+    logger.info("[Students] 移出學生 #%d（撤銷 session %d 個）", student.id, revoked)
 
 
 # ---------- 學生認證端點 ----------
@@ -513,27 +820,33 @@ async def _login_by_code(
     code = student_code.strip()
     if code.isdigit():
         code = code.zfill(2)  # 學生打 '1' 也認得（配號固定兩位起）
-    student = (
+    # 以這個班的成員列為準。已退出的班不能再靠 students.team_id 登入。
+    mem = (
         await session.execute(
-            select(Student).where(
-                Student.team_id == team.id,
-                Student.student_code == code,
-                Student.status == "active",
+            select(StudentMembership).where(
+                StudentMembership.team_id == team.id,
+                StudentMembership.student_code == code,
+                StudentMembership.status == "active",
             )
         )
     ).scalar_one_or_none()
-    if student is None:
-        mem = (
+    student: Student | None = None
+    if mem is not None:
+        student = await session.get(Student, mem.student_id)
+    else:
+        student = (
             await session.execute(
-                select(StudentMembership).where(
-                    StudentMembership.team_id == team.id,
-                    StudentMembership.student_code == code,
-                    StudentMembership.status == "active",
+                select(Student).where(
+                    Student.team_id == team.id,
+                    Student.student_code == code,
+                    Student.status == "active",
                 )
             )
         ).scalar_one_or_none()
-        if mem is not None:
-            student = await session.get(Student, mem.student_id)
+        if student is not None:
+            any_mem = await _membership(session, student.id, team.id)
+            if any_mem is not None and any_mem.status != "active":
+                student = None
     if student is None or student.status != "active":
         return None, team, False
     if license_expired(student.licensed_until):
@@ -548,28 +861,26 @@ async def _login_by_code(
 async def _login_by_email(
     session: AsyncSession, email: str, password: str
 ) -> tuple[Student | None, Team | None, bool]:
-    """email + 密碼路徑。email 只保證班內唯一（跨班可重複）→ 逐一比對密碼，中者即身分。"""
-    candidates = (
+    """email + 密碼。全站一個 email 一個帳號，只核對這一筆，不逐一試其他同 email 帳號。"""
+    rows = (
         (
             await session.execute(
-                select(Student).where(
-                    func.lower(Student.email) == email,
-                    Student.status == "active",
-                    Student.password_hash.is_not(None),
-                )
+                select(Student)
+                .where(func.lower(Student.email) == email, Student.status == "active")
+                .limit(2)
             )
         )
         .scalars()
         .all()
     )
-    for student in candidates:
-        team = await session.get(Team, student.team_id) if student.team_id else None
-        if team is not None and team.archived_at is not None:
-            continue
-        assert student.password_hash is not None
-        if verify_password(student.password_hash, password):
-            return student, team, True
-    return None, None, False
+    if len(rows) != 1:
+        if len(rows) > 1:
+            logger.error("[AUTH] email 對到多個學生帳號，拒絕登入（請先合併）：%s", email)
+        return None, None, False
+    student = rows[0]
+    if student.password_hash is None or not verify_password(student.password_hash, password):
+        return None, None, False
+    return student, await active_class_team(session, student), True
 
 
 async def _issue_student_login(
@@ -585,8 +896,9 @@ async def _issue_student_login(
         user_agent=request.headers.get("user-agent"),
     )
     student.last_seen_at = _now()
+    me = await _me(session, student, team)
     return StudentLoginResponse(
-        token=token, expiresIn=settings.student_session_ttl_sec, me=_me(student, team)
+        token=token, expiresIn=settings.student_session_ttl_sec, me=me
     )
 
 
@@ -615,6 +927,9 @@ async def student_login(
         )
     if ok and student is not None and license_expired(student.licensed_until):
         raise HTTPException(status_code=403, detail="帳號授權已到期")
+    if ok and student is not None and method == "code" and team is not None:
+        # 用這個班的學生碼登入，之後進房與班級進度都看這個班
+        student.active_team_id = team.id
     if not ok or student is None or (method == "code" and team is None):
         await record_event(
             session,
@@ -729,7 +1044,7 @@ async def student_me(request: Request, session: DbSession) -> StudentMe:
         raise HTTPException(status_code=401, detail="請先登入")
     _, student, team = resolved
     await session.commit()  # 滑動延長（若有）落地
-    return _me(student, team)
+    return await _me(session, student, team)
 
 
 @router.post("/auth/student/logout")
@@ -776,10 +1091,23 @@ class LeaveTeamRequest(BaseModel):
 
 
 class ProgressContextRequest(BaseModel):
-    """personal = 自己的進度；class = 目前加入的那個班。"""
+    """personal = 自己的進度；class = 指定的那個班（不跟其他班混）。"""
 
     mode: Literal["personal", "class"]
     teamId: int | None = None  # noqa: N815
+
+
+class LevelProgressOut(BaseModel):
+    bestTimeMs: int | None  # noqa: N815
+    attempts: int
+
+
+class StudentProgressResponse(BaseModel):
+    """目前這份帳本。personal 與各班 ClassProgress 分開，切換後整份換掉。"""
+
+    mode: Literal["personal", "class"]
+    teamId: int | None  # noqa: N815
+    progress: dict[str, LevelProgressOut]
 
 
 @router.post("/auth/student/register", status_code=201)
@@ -866,7 +1194,10 @@ async def student_join_team(
     roster_code = mem.student_code if mem is not None else await _next_code(session, team.id)
     if mem is None:
         mem = StudentMembership(
-            student_id=student.id, team_id=team.id, student_code=roster_code
+            student_id=student.id,
+            team_id=team.id,
+            student_code=roster_code,
+            origin="linked",
         )
         session.add(mem)
     else:
@@ -877,7 +1208,7 @@ async def student_join_team(
         student.student_code = roster_code
     student.active_team_id = team.id
     await session.commit()
-    return _me(student, team)
+    return await _me(session, student, team)
 
 
 @router.post("/auth/student/teams/leave")
@@ -905,7 +1236,7 @@ async def student_leave_team(
         student.progress_mode = "personal"
     team = await session.get(Team, student.active_team_id) if student.active_team_id else None
     await session.commit()
-    return _me(student, team)
+    return await _me(session, student, team)
 
 
 @router.post("/auth/student/progress-context")
@@ -939,4 +1270,35 @@ async def student_progress_context(
     await session.commit()
     if team is None and student.active_team_id:
         team = await session.get(Team, student.active_team_id)
-    return _me(student, team)
+    return await _me(session, student, team)
+
+
+@router.get("/auth/student/progress")
+async def student_progress(
+    request: Request, session: DbSession
+) -> StudentProgressResponse:
+    """目前這份進度。personal 與指定班的 ClassProgress 分開，不會把各班併成一份。"""
+    settings: Settings = request.app.state.settings
+    resolved = await resolve_student_session(session, bearer_token(request), settings=settings)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="請先登入")
+    _, student, _team = resolved
+    await session.commit()
+    mode: Literal["personal", "class"] = (
+        "class" if student.progress_mode == "class" and student.active_team_id else "personal"
+    )
+    team_id = student.active_team_id if mode == "class" else None
+    rows = await load_progress(
+        request.app.state.db_sessionmaker,
+        student.id,
+        mode=mode,
+        team_id=team_id,
+    )
+    return StudentProgressResponse(
+        mode=mode,
+        teamId=team_id,
+        progress={
+            r.level_id: LevelProgressOut(bestTimeMs=r.best_time_ms, attempts=r.attempts)
+            for r in rows
+        },
+    )

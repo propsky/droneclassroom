@@ -514,3 +514,143 @@ def test_學生登出撤銷session(db_client: TestClient) -> None:
     assert db_client.get("/auth/student/me", headers=_bearer(token)).status_code == 200
     assert db_client.post("/auth/student/logout", headers=_bearer(token)).status_code == 200
     assert db_client.get("/auth/student/me", headers=_bearer(token)).status_code == 401
+
+
+@needs_db
+def test_同email不重複建帳_沒email走班級碼_登入不掃多帳號(db_client: TestClient) -> None:
+    """一人一帳：已註冊的 email 只加成員；沒 email 仍用班級碼；重複列不靠試密碼登入。"""
+    from sqlalchemy import func, select, text
+
+    from app.accounts import hash_password
+    from app.db.session import create_engine, create_sessionmaker
+
+    headers, team_id, team_code = _setup_team(db_client)
+    no_mail = _create_students(
+        db_client, headers, team_id, [{"name": "小碼"}], sendInvites=False
+    )
+    assert no_mail["created"][0]["accountKind"] == "code"
+    assert no_mail["joined"] == []
+    assert no_mail["noticesSent"] == {}
+    login = db_client.post(
+        "/auth/student/login",
+        json={"teamCode": team_code, "studentCode": no_mail["created"][0]["studentCode"]},
+    )
+    assert login.status_code == 200, login.text
+
+    email = _student_email("one")
+    reg = db_client.post(
+        "/auth/student/register",
+        json={"name": "小註", "email": email, "password": "kid-pass-123"},
+    )
+    assert reg.status_code == 201, reg.text
+    sid = reg.json()["me"]["id"]
+    mailer = FakeMailer()
+    db_client.app.state.mailer = mailer
+    added = _create_students(
+        db_client, headers, team_id, [{"name": "名單上的名字", "email": email}]
+    )
+    assert added["created"] == []
+    assert added["joined"][0]["id"] == sid
+    assert added["joined"][0]["accountKind"] == "linked"
+    assert added["noticesSent"][email] is True
+    assert "已被加入" in mailer.sent[-1]["subject"]
+    assert "invite=" not in mailer.sent[-1]["html"]
+    again = db_client.post(
+        "/auth/student/register",
+        json={"name": "另一個", "email": email.upper(), "password": "kid-pass-123"},
+    )
+    assert again.status_code == 409
+    me = db_client.get("/auth/teacher/me", headers=headers).json()
+    team_b, _code_b = asyncio.run(_insert_team(me, "另一班"))
+    added_b = _create_students(
+        db_client, headers, team_b, [{"name": "乙", "email": email}]
+    )
+    assert added_b["created"] == [] and added_b["joined"][0]["id"] == sid
+    listed = db_client.get(f"/api/teams/{team_b}/students", headers=headers).json()["students"]
+    assert listed[0]["accountKind"] == "linked"
+    assert listed[0]["id"] == sid
+    fresh = _student_email("new")
+    created = _create_students(db_client, headers, team_id, [{"name": "新同學", "email": fresh}])
+    assert created["joined"] == []
+    assert created["created"][0]["accountKind"] == "pending_password"
+    assert "邀請" in mailer.sent[-1]["subject"]
+
+    db_client.app.state.auth._attempts.clear()  # noqa: SLF001
+    ok = db_client.post(
+        "/auth/student/login", json={"email": email, "password": "kid-pass-123"}
+    )
+    assert ok.status_code == 200 and ok.json()["me"]["id"] == sid
+
+    async def _plant_duplicate() -> None:
+        assert DATABASE_URL
+        engine = create_engine(DATABASE_URL)
+        maker = create_sessionmaker(engine)
+        async with maker() as s:
+            await s.execute(text("DROP INDEX IF EXISTS uq_students_lower_email"))
+            s.add(
+                Student(
+                    name="影子帳號",
+                    email=email,
+                    password_hash=hash_password("other-pass-123"),
+                    invite_status="accepted",
+                    team_id=team_b,
+                    student_code="77",
+                )
+            )
+            await s.commit()
+        await engine.dispose()
+
+    async def _drop_duplicate() -> None:
+        assert DATABASE_URL
+        engine = create_engine(DATABASE_URL)
+        maker = create_sessionmaker(engine)
+        async with maker() as s:
+            rows = (
+                (
+                    await s.execute(
+                        select(Student).where(
+                            func.lower(Student.email) == email, Student.name == "影子帳號"
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                await s.delete(row)
+            await s.execute(
+                text(
+                    "UPDATE students SET email = NULL "
+                    "WHERE lower(email) = :email AND name = '影子帳號'"
+                ),
+                {"email": email},
+            )
+            await s.commit()
+            dupes = (
+                await s.execute(
+                    text(
+                        "SELECT lower(email) FROM students WHERE email IS NOT NULL "
+                        "GROUP BY lower(email) HAVING count(*) > 1"
+                    )
+                )
+            ).all()
+            if not dupes:
+                await s.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_students_lower_email "
+                        "ON students (lower(email)) WHERE email IS NOT NULL"
+                    )
+                )
+                await s.commit()
+        await engine.dispose()
+
+    try:
+        asyncio.run(_plant_duplicate())
+        db_client.app.state.auth._attempts.clear()  # noqa: SLF001
+        for password in ("kid-pass-123", "other-pass-123"):
+            denied = db_client.post(
+                "/auth/student/login", json={"email": email, "password": password}
+            )
+            assert denied.status_code == 401, password
+    finally:
+        asyncio.run(_drop_duplicate())

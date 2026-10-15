@@ -437,6 +437,12 @@ async def admin_create_student(
         raise HTTPException(status_code=422, detail="email 格式不正確")
     if body.password and len(body.password) < 8:
         raise HTTPException(status_code=422, detail="密碼至少 8 個字元")
+    if email:
+        taken = (
+            await session.execute(select(Student.id).where(func.lower(Student.email) == email))
+        ).first()
+        if taken is not None:
+            raise HTTPException(status_code=409, detail="這個 email 已經有學生帳號")
     student = Student(
         name=body.name.strip(),
         emoji=body.emoji or "🙂",

@@ -31,10 +31,22 @@ function avatarChip(emoji: string): string {
   return `<span class="avatar-chip" aria-hidden="true">${esc(emoji)}</span>`;
 }
 
-/** 邀請狀態 tag：未寄（灰）/ 已寄（黃）/ 已加入（綠） */
-function inviteTag(status: StudentEntry['inviteStatus']): string {
-  const text = status === 'accepted' ? '已加入' : status === 'sent' ? '已寄' : '未寄';
-  return `<span class="invite-tag invite-${status}">${text}</span>`;
+/** 名單上的帳號狀態（繁中、台灣用語） */
+export function accountStatusText(kind: StudentEntry['accountKind']): string {
+  switch (kind) {
+    case 'linked':
+      return '既有帳號已加入';
+    case 'pending_password':
+      return '新帳號待設密碼';
+    case 'password_set':
+      return '已設密碼';
+    default:
+      return '班級碼登入';
+  }
+}
+
+function accountTag(kind: StudentEntry['accountKind']): string {
+  return `<span class="invite-tag acct-${kind}">${accountStatusText(kind)}</span>`;
 }
 
 /** 寬鬆 email 檢查（有 @ 有 .、無空白；嚴格驗證交給伺服器） */
@@ -86,7 +98,7 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
         <div class="modal-head-text">
           <h2 class="modal-title" id="stu-title">學生名單管理</h2>
           <p class="modal-desc">班級「${esc(opts.teamName)}」（<span class="mono">${esc(opts.teamCode)}</span>）—
-            學生用「班級碼＋學生碼」免密碼登入；有 email 的可寄邀請信自設密碼。</p>
+            沒有 email 的用「班級碼＋學生碼」登入。有 email 的新學生會收到設密碼邀請；本來就有帳號的只加入這個班，並寄加入通知。</p>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" id="stu-close">${ICONS.x}關閉</button>
       </div>
@@ -99,7 +111,7 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
         <div class="stu-scroll">
           <table class="stu-table">
             <thead>
-              <tr><th>學生碼</th><th>學生</th><th>Email</th><th>邀請</th><th class="right"></th></tr>
+              <tr><th>學生碼</th><th>學生</th><th>Email</th><th>帳號狀態</th><th class="right"></th></tr>
             </thead>
             <tbody id="stu-tbody"><tr><td colspan="5" class="empty">載入名單中…</td></tr></tbody>
           </table>
@@ -112,7 +124,7 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
           <label class="field-label" for="stu-input">每行一位：名字 或 名字,email（例：王小明 或 林小華,hua@example.com）</label>
           <textarea id="stu-input" rows="4" placeholder="王小明&#10;林小華,hua@example.com"></textarea>
         </div>
-        <label class="check-row"><input type="checkbox" id="stu-send-invites" checked>建立後寄邀請信給有 email 的學生</label>
+        <label class="check-row"><input type="checkbox" id="stu-send-invites" checked>寄信：新帳號寄設密碼邀請；已經有帳號的改寄加入班級通知</label>
         <div class="stu-errors" id="stu-errors" role="alert" hidden></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-primary" id="stu-add">${ICONS.plus}新增學生</button>
@@ -141,14 +153,14 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
     tbody.innerHTML = students
       .map((s) => {
         const reinvite =
-          s.email && s.inviteStatus !== 'accepted'
+          s.email && s.accountKind === 'pending_password'
             ? `<button type="button" class="btn btn-ghost btn-sm" data-act="reinvite" data-id="${s.id}">${ICONS.send}重寄邀請</button>`
             : '';
         return `<tr>
           <td class="stu-code mono">${esc(s.studentCode)}</td>
           <td><span class="student-cell">${avatarChip(s.emoji)}<span class="student-name">${esc(s.name)}</span></span></td>
           <td class="stu-email">${s.email ? esc(s.email) : '—'}</td>
-          <td>${inviteTag(s.inviteStatus)}</td>
+          <td>${accountTag(s.accountKind)}</td>
           <td class="right stu-act">${reinvite}<button type="button" class="btn btn-danger btn-sm" data-act="remove" data-id="${s.id}" data-name="${esc(s.name)}" data-code="${esc(s.studentCode)}">移除</button></td>
         </tr>`;
       })
@@ -175,7 +187,7 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
     if (btn.dataset['act'] === 'reinvite') {
       btn.disabled = true;
       const email = students.find((s) => s.id === id)?.email ?? '';
-      void reinviteStudent(id)
+      void reinviteStudent(id, opts.teamId)
         .then((res) => {
           if (res.sent) {
             toast(`已重寄邀請信給 ${email}`, 'success');
@@ -194,7 +206,7 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
       const code = btn.dataset['code'] || '';
       if (!confirm(`確定移除「${name}」（學生碼 ${code}）？\n移除後無法再登入；學習紀錄保留。`)) return;
       btn.disabled = true;
-      void removeStudent(id)
+      void removeStudent(id, opts.teamId)
         .then(() => {
           toast(`已移除 ${name}`, 'success');
           return load();
@@ -236,12 +248,20 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
     addBtn.textContent = '建立中…';
     void createStudents(opts.teamId, parsed, sendInvitesCk.checked)
       .then((res) => {
-        const results = Object.values(res.invitesSent);
-        const sent = results.filter(Boolean).length;
-        const failed = results.length - sent;
-        let text = `已建立 ${res.created.length} 位學生`;
-        if (sendInvitesCk.checked && results.length > 0) {
-          text += `，邀請信寄出 ${sent} 封${failed > 0 ? `、失敗 ${failed} 封` : ''}`;
+        const inviteResults = Object.values(res.invitesSent);
+        const noticeResults = Object.values(res.noticesSent ?? {});
+        const sent = inviteResults.filter(Boolean).length;
+        const noticed = noticeResults.filter(Boolean).length;
+        const failed = inviteResults.length - sent + (noticeResults.length - noticed);
+        const parts: string[] = [];
+        if (res.created.length > 0) parts.push(`已建立 ${res.created.length} 位新學生`);
+        if ((res.joined?.length ?? 0) > 0) parts.push(`已將 ${res.joined.length} 位既有帳號加入班級`);
+        let text = parts.join('，') || '名單已更新';
+        if (sendInvitesCk.checked && (inviteResults.length > 0 || noticeResults.length > 0)) {
+          const mail: string[] = [];
+          if (inviteResults.length > 0) mail.push(`設密碼邀請 ${sent} 封`);
+          if (noticeResults.length > 0) mail.push(`加入通知 ${noticed} 封`);
+          text += `，${mail.join('、')}${failed > 0 ? `（失敗 ${failed} 封）` : ''}`;
         }
         toast(text, 'success');
         input.value = '';

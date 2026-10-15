@@ -1159,6 +1159,11 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 .invite-none { color: var(--text-3); background: var(--bg-3); }
 .invite-sent { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .invite-accepted { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+/* 帳號狀態：班級碼／新帳號待設密碼／既有帳號已加入／已設密碼 */
+.acct-code { color: var(--text-3); background: var(--bg-3); }
+.acct-pending_password { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
+.acct-linked { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
+.acct-password_set { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
 .stu-act { white-space: nowrap; }
 .stu-act .btn { margin-left: var(--sp-2); }
 /* 解析錯誤：3px 左邊線著色（與 toast / 登入提示同語彙），逐行列出 */

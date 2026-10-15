@@ -70,6 +70,13 @@ export interface StudentEntry {
   studentCode: string;
   email: string | null;
   inviteStatus: 'none' | 'sent' | 'accepted';
+  /**
+   * code = 沒有 email，用班級碼＋學生碼
+   * pending_password = 新帳號還沒設密碼
+   * linked = 本來就有帳號，這班只是加入
+   * password_set = 新帳號已設密碼
+   */
+  accountKind: 'code' | 'pending_password' | 'linked' | 'password_set';
   status: 'active' | 'disabled' | 'removed';
   createdAt: number;
   lastSeenAt: number | null;
@@ -83,9 +90,14 @@ export interface StudentsCreateRequest {
   sendInvites?: boolean;
 }
 export interface StudentsCreateResponse {
+  /** 這次新建的學生帳號 */
   created: StudentEntry[];
-  /** 邀請信寄送結果（email → true/false；停用寄信時全 false） */
+  /** 沿用既有帳號、只加入這個班 */
+  joined: StudentEntry[];
+  /** 設密碼邀請寄送結果（email → true/false；停用寄信時全 false） */
   invitesSent: Record<string, boolean>;
+  /** 既有帳號的加入班級通知（不是設密碼邀請） */
+  noticesSent: Record<string, boolean>;
 }
 
 /** GET /api/teams/{teamId}/students（Bearer 老師） */
@@ -95,6 +107,13 @@ export interface StudentsListResponse { students: StudentEntry[] }
 export interface ReinviteResponse { sent: boolean }
 
 /** DELETE /api/students/{id}（Bearer 老師）— 移除（status=removed，進度保留） */
+
+export interface StudentClassRef {
+  teamId: number;
+  teamName: string;
+  teamCode: string;
+  studentCode: string;
+}
 
 export interface StudentMe {
   id: number;
@@ -106,6 +125,15 @@ export interface StudentMe {
   studentCode: string;
   /** personal = 自己的進度；class = 目前班級的進度 */
   progressMode?: 'personal' | 'class';
+  /** 目前加入的班級。切換後看的是該班自己的進度，不是全部併在一起。 */
+  classes?: StudentClassRef[];
+}
+
+/** GET /auth/student/progress — 目前這一份帳本（個人或指定班） */
+export interface StudentProgressResponse {
+  mode: 'personal' | 'class';
+  teamId: number | null;
+  progress: Record<string, { bestTimeMs: number | null; attempts: number }>;
 }
 
 /** POST /auth/student/login — 兩種擇一：{teamCode, studentCode} 或 {email, password} */

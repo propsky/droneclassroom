@@ -15,7 +15,12 @@
 import type { InputRecordingV2, ProgressSyncMsg } from '@creafly/shared';
 import { mergeLevelProgress, replaceProgressMap } from '@creafly/shared';
 import { bus, toast } from '../core/events';
-import { clearProgressCache, loadProgressCache, saveProgressCache } from './progressLocalCache';
+import {
+  clearProgressCache,
+  loadProgressCache,
+  progressCacheScope,
+  saveProgressCache,
+} from './progressLocalCache';
 import { uploadReplayLog } from './replayLogUpload';
 import { getStudentToken, loadStudentSession } from './studentAuth';
 import { sendToServer, wsState } from './ws';
@@ -232,25 +237,33 @@ export function handleCompleteAck(clientEventId: string): void {
   }
 }
 
+function sessionProgressScope(): string {
+  const me = loadStudentSession()?.me;
+  return progressCacheScope(me?.progressMode, me?.teamId);
+}
+
 /** net/ws.ts 收到 progress_sync：伺服器為準整份覆蓋（跨裝置同步） */
 export function handleProgressSync(progress: ProgressSyncMsg['progress']): void {
   progressState.progress = replaceProgressMap(progress);
   const sid = loadStudentSession()?.me.id;
-  if (sid != null) saveProgressCache(sid, progressState.progress);
+  if (sid != null) saveProgressCache(sid, progressState.progress, sessionProgressScope());
   bus.emit('progress-updated', {});
 }
 
 function markLocalComplete(levelId: string, timeMs: number): void {
   progressState.progress[levelId] = mergeLevelProgress(progressState.progress[levelId], timeMs);
   const sid = loadStudentSession()?.me.id;
-  if (sid != null) saveProgressCache(sid, progressState.progress);
+  if (sid != null) saveProgressCache(sid, progressState.progress, sessionProgressScope());
   bus.emit('progress-updated', {});
 }
 
 function hydrateProgressFromCache(): void {
   const session = loadStudentSession();
   if (!session) return;
-  const cached = loadProgressCache(session.me.id);
+  const cached = loadProgressCache(
+    session.me.id,
+    progressCacheScope(session.me.progressMode, session.me.teamId),
+  );
   if (!cached) return;
   progressState.progress = cached;
   bus.emit('progress-updated', {});

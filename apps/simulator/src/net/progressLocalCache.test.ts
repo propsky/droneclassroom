@@ -35,6 +35,13 @@ describe('progressLocalCache', () => {
     clearProgressCache();
     expect(loadProgressCache(1)).toBeNull();
   });
+
+  it('不同班的快取不會混在一起', () => {
+    saveProgressCache(7, { '1-1': { bestTimeMs: 1000, attempts: 1 } }, 'class:1');
+    expect(loadProgressCache(7, 'class:1')).toEqual({ '1-1': { bestTimeMs: 1000, attempts: 1 } });
+    expect(loadProgressCache(7, 'class:2')).toBeNull();
+    expect(loadProgressCache(7, 'personal')).toBeNull();
+  });
 });
 
 describe('replaceProgressMap', () => {
