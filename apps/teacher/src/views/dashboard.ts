@@ -30,7 +30,7 @@ import { toast } from '../toast';
 import { copyText } from '../clipboard';
 import { saveResume, type ResumeState } from '../resume';
 import { renderAccountMenu } from './account';
-import { rosterManageUi } from './rosterManage';
+import { attachInstantTip, rosterManageUi } from './rosterManage';
 import { openStudentsPanel, type StudentsPanel } from './students';
 import { mountLevelsManage, type LevelsManagePanel } from './levelsManage';
 import { openLevelEditor, type LevelEditorContext } from './levelEditor';
@@ -226,14 +226,20 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               <span class="room-sub"><strong class="roster-count mono">0</strong><span id="room-max"> / ${esc(maxStudents)} 人</span><span class="room-flags" id="room-flags"></span></span>
             </div>
             <div class="room-tools" id="room-tools" hidden>
-              <span class="tip-wrap" id="manage-students-wrap">
-                <button type="button" class="btn btn-ghost btn-sm" id="btn-manage-students">${ICONS.users}管理名單</button>
+              <span class="tip-wrap" id="manage-students-wrap" aria-describedby="manage-students-tip">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-manage-students" aria-describedby="manage-students-tip">${ICONS.users}管理名單</button>
+                <span class="instant-tip" id="manage-students-tip" role="tooltip"></span>
               </span>
               <button type="button" class="btn btn-ghost btn-sm" id="btn-create-class" hidden>${ICONS.plus}建立班級</button>
               <button class="btn btn-ghost btn-sm" id="btn-room-lock" title="鎖房後新學生無法加入，已在房內的不受影響">${ICONS.lockOpen}鎖房</button>
               <button class="btn btn-ghost btn-sm" id="btn-room-settings" aria-haspopup="dialog">${ICONS.settings}設定</button>
               <span class="tip-wrap" id="room-close-wrap"><button class="btn btn-danger btn-sm" id="btn-room-close">${ICONS.doorClosed}關閉房間</button></span>
               <button class="btn btn-danger btn-sm" id="btn-room-archive" hidden title="封存班級：學生無法再加入，紀錄保留，列表不再顯示">${ICONS.archive}封存班級</button>
+            </div>
+            <div class="room-limit" id="room-limit" role="status" hidden>
+              <span class="room-limit-mark" aria-hidden="true">${ICONS.alertTriangle}</span>
+              <p class="room-limit-text" id="room-limit-text"></p>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-room-limit-create">${ICONS.plus}建立班級</button>
             </div>
             <div class="room-pop" id="room-pop" role="dialog" aria-label="房間設定" hidden>
               <div class="room-pop-title">房間設定</div>
@@ -944,7 +950,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const roomTools = root.querySelector<HTMLElement>('#room-tools')!;
   const manageWrap = root.querySelector<HTMLElement>('#manage-students-wrap')!;
   const manageBtn = root.querySelector<HTMLButtonElement>('#btn-manage-students')!;
+  const manageTip = root.querySelector<HTMLElement>('#manage-students-tip')!;
   const createClassBtn = root.querySelector<HTMLButtonElement>('#btn-create-class')!;
+  const roomLimit = root.querySelector<HTMLElement>('#room-limit')!;
+  const roomLimitText = root.querySelector<HTMLElement>('#room-limit-text')!;
+  // 停用「管理名單」的說明不走瀏覽器 title（要等約一秒）。滑過與聚焦當下就開。
+  attachInstantTip(manageWrap);
   const roomLockBtn = root.querySelector<HTMLButtonElement>('#btn-room-lock')!;
   const roomCloseBtn = root.querySelector<HTMLButtonElement>('#btn-room-close')!;
   const roomCloseWrap = root.querySelector<HTMLElement>('#room-close-wrap')!;
@@ -1016,6 +1027,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       roomMaxEl.textContent = ` / ${maxStudents} 人`;
       roomFlagsEl.innerHTML = '';
       createClassBtn.hidden = true;
+      roomLimit.hidden = true;
+      manageWrap.tabIndex = -1;
       return;
     }
     roomCodeBtn.textContent = r.code;
@@ -1048,8 +1061,21 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const manageUi = rosterManageUi(r, { teamMode: teamMode(), defaultCode: defaultRoomCode(rooms) });
     manageBtn.hidden = false;
     manageBtn.disabled = !manageUi.enabled;
-    manageWrap.title = manageUi.title;
+    manageTip.textContent = manageUi.title;
+    // 可按時焦點在按鈕上；停用時按鈕不進 tab，改由外層接住 focus，tooltip 才出得來
+    manageWrap.tabIndex = manageUi.enabled ? -1 : 0;
+    manageWrap.removeAttribute('title');
+    manageBtn.removeAttribute('title');
     createClassBtn.hidden = !manageUi.showCreateClass;
+    const banner = manageUi.banner;
+    roomLimit.hidden = banner == null;
+    if (banner) {
+      roomLimitText.textContent = banner.text;
+      roomLimit.dataset['kind'] = banner.kind;
+    } else {
+      roomLimitText.textContent = '';
+      delete roomLimit.dataset['kind'];
+    }
   };
 
   /** 學生連線位址：有選定房 → 加 ?room=房碼 */
@@ -1127,8 +1153,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     else roomForm.reset();
   };
   on('btn-room-new', () => showRoomForm(roomForm.hidden));
-  // 管理名單旁的捷徑：同一張新增班級表單，不另做流程
+  // 管理名單旁與警告列的捷徑：同一張新增班級表單，不另做流程
   on('btn-create-class', () => showRoomForm(true));
+  on('btn-room-limit-create', () => showRoomForm(true));
   on('rf-cancel', () => showRoomForm(false));
   roomForm.addEventListener('submit', (ev) => {
     ev.preventDefault();
