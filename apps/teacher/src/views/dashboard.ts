@@ -30,6 +30,7 @@ import { toast } from '../toast';
 import { copyText } from '../clipboard';
 import { saveResume, type ResumeState } from '../resume';
 import { renderAccountMenu } from './account';
+import { rosterManageUi } from './rosterManage';
 import { openStudentsPanel, type StudentsPanel } from './students';
 import { mountLevelsManage, type LevelsManagePanel } from './levelsManage';
 import { openLevelEditor, type LevelEditorContext } from './levelEditor';
@@ -225,7 +226,10 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               <span class="room-sub"><strong class="roster-count mono">0</strong><span id="room-max"> / ${esc(maxStudents)} 人</span><span class="room-flags" id="room-flags"></span></span>
             </div>
             <div class="room-tools" id="room-tools" hidden>
-              <button class="btn btn-ghost btn-sm" id="btn-manage-students" hidden title="管理班級學生名單：學生碼 / 邀請 / 新增 / 移除">${ICONS.users}管理名單</button>
+              <span class="tip-wrap" id="manage-students-wrap">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-manage-students">${ICONS.users}管理名單</button>
+              </span>
+              <button type="button" class="btn btn-ghost btn-sm" id="btn-create-class" hidden>${ICONS.plus}建立班級</button>
               <button class="btn btn-ghost btn-sm" id="btn-room-lock" title="鎖房後新學生無法加入，已在房內的不受影響">${ICONS.lockOpen}鎖房</button>
               <button class="btn btn-ghost btn-sm" id="btn-room-settings" aria-haspopup="dialog">${ICONS.settings}設定</button>
               <span class="tip-wrap" id="room-close-wrap"><button class="btn btn-danger btn-sm" id="btn-room-close">${ICONS.doorClosed}關閉房間</button></span>
@@ -938,7 +942,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const roomMaxEl = root.querySelector<HTMLElement>('#room-max')!;
   const roomFlagsEl = root.querySelector<HTMLElement>('#room-flags')!;
   const roomTools = root.querySelector<HTMLElement>('#room-tools')!;
+  const manageWrap = root.querySelector<HTMLElement>('#manage-students-wrap')!;
   const manageBtn = root.querySelector<HTMLButtonElement>('#btn-manage-students')!;
+  const createClassBtn = root.querySelector<HTMLButtonElement>('#btn-create-class')!;
   const roomLockBtn = root.querySelector<HTMLButtonElement>('#btn-room-lock')!;
   const roomCloseBtn = root.querySelector<HTMLButtonElement>('#btn-room-close')!;
   const roomCloseWrap = root.querySelector<HTMLElement>('#room-close-wrap')!;
@@ -1009,6 +1015,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       roomNameEl.textContent = '學生名冊';
       roomMaxEl.textContent = ` / ${maxStudents} 人`;
       roomFlagsEl.innerHTML = '';
+      createClassBtn.hidden = true;
       return;
     }
     roomCodeBtn.textContent = r.code;
@@ -1036,8 +1043,13 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           : `關閉房間 ${r.code}（房內學生會被移出）`;
     // 持久化班級才有「封存」：學生無法再加入、紀錄保留、列表不再顯示；分房 / 訪客房 / 舊伺服器房間沒有
     roomArchiveBtn.hidden = !team || isSub;
-    // 「管理名單」也只有持久化班級的主房才有（DB 名單掛在 teamId 上）
-    manageBtn.hidden = !team || r.teamId == null || isSub;
+    // 「管理名單」只有持久化班級主房可按（DB 名單掛在 teamId 上）。
+    // 預設房 / 訪客房 / 分房 / 其他沒有班級的房間仍顯示，但停用並說明原因；旁邊給建立班級捷徑。
+    const manageUi = rosterManageUi(r, { teamMode: teamMode(), defaultCode: defaultRoomCode(rooms) });
+    manageBtn.hidden = false;
+    manageBtn.disabled = !manageUi.enabled;
+    manageWrap.title = manageUi.title;
+    createClassBtn.hidden = !manageUi.showCreateClass;
   };
 
   /** 學生連線位址：有選定房 → 加 ?room=房碼 */
@@ -1115,6 +1127,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     else roomForm.reset();
   };
   on('btn-room-new', () => showRoomForm(roomForm.hidden));
+  // 管理名單旁的捷徑：同一張新增班級表單，不另做流程
+  on('btn-create-class', () => showRoomForm(true));
   on('rf-cancel', () => showRoomForm(false));
   roomForm.addEventListener('submit', (ev) => {
     ev.preventDefault();
@@ -1221,7 +1235,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   let studentsPanel: StudentsPanel | null = null;
   manageBtn.addEventListener('click', () => {
     const r = currentRoom();
-    if (!r || r.teamId == null) return;
+    if (!r || r.teamId == null || r.isMain === false || !teamMode()) return;
     studentsPanel?.destroy();
     studentsPanel = openStudentsPanel({
       teamId: r.teamId,

@@ -399,8 +399,11 @@ body {
   gap: var(--sp-2);
   max-width: 100%;
 }
-/* 停用鈕的 title 由外層 span 提供（disabled 元素不一定顯示 tooltip） */
+/* 停用鈕的 title 由外層 span 提供（disabled 元素不一定顯示 tooltip）。
+   停用鈕不吃滑鼠，滑過才會落在外層、游標也維持不可按。 */
 .tip-wrap { display: inline-flex; }
+.tip-wrap:has(> :disabled) { cursor: not-allowed; }
+.tip-wrap > :disabled { pointer-events: none; }
 .room-pop {
   position: absolute;
   top: calc(100% - var(--sp-2));
