@@ -18,7 +18,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.accounts import hash_password, token_hash, verify_password
 from app.auth import WS_CLOSE_UNAUTHORIZED
-from app.config import Settings
+from app.config import TEACHER_REGISTER_CODE, Settings
 from app.db.models import AuditEvent, Session
 from app.db.session import create_engine, create_sessionmaker
 from app.main import create_app
@@ -103,7 +103,13 @@ def _make_client(tmp_path: Path, **overrides) -> Iterator[TestClient]:
 
 def _register(c: TestClient, email: str, password: str = PASSWORD, name: str = "王老師") -> dict:
     r = c.post(
-        "/auth/teacher/register", json={"email": email, "password": password, "name": name}
+        "/auth/teacher/register",
+        json={
+            "email": email,
+            "password": password,
+            "name": name,
+            "registerCode": TEACHER_REGISTER_CODE,
+        },
     )
     assert r.status_code == 201, r.text
     return r.json()
@@ -160,7 +166,13 @@ def test_註冊即登入_me通_重複email回409(db_client: TestClient) -> None:
     assert db_client.get("/auth/teacher/me", headers=_bearer("nope")).status_code == 401
     # 重複 email（大小寫不同也算）→ 409
     r = db_client.post(
-        "/auth/teacher/register", json={"email": email, "password": PASSWORD, "name": "B"}
+        "/auth/teacher/register",
+        json={
+            "email": email,
+            "password": PASSWORD,
+            "name": "B",
+            "registerCode": TEACHER_REGISTER_CODE,
+        },
     )
     assert r.status_code == 409
     # 稽核
@@ -170,11 +182,23 @@ def test_註冊即登入_me通_重複email回409(db_client: TestClient) -> None:
 @needs_db
 def test_註冊_密碼太短或email格式錯回422(db_client: TestClient) -> None:
     r = db_client.post(
-        "/auth/teacher/register", json={"email": _email(), "password": "1234567", "name": "x"}
+        "/auth/teacher/register",
+        json={
+            "email": _email(),
+            "password": "1234567",
+            "name": "x",
+            "registerCode": TEACHER_REGISTER_CODE,
+        },
     )
     assert r.status_code == 422
     r = db_client.post(
-        "/auth/teacher/register", json={"email": "no-at-sign", "password": PASSWORD, "name": "x"}
+        "/auth/teacher/register",
+        json={
+            "email": "no-at-sign",
+            "password": PASSWORD,
+            "name": "x",
+            "registerCode": TEACHER_REGISTER_CODE,
+        },
     )
     assert r.status_code == 422
 
@@ -318,9 +342,28 @@ def test_免登入模式_有DB_任意帳密登入預設老師(tmp_path: Path) ->
     asyncio.run(_cleanup(include_dev=True))
 
 
+def test_邀請碼寫死_環境變數無法覆寫(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """正式機 creafly.env 就算還有 TEACHER_REGISTER_CODE，也不能改程式裡的邀請碼。"""
+    monkeypatch.setenv("TEACHER_REGISTER_CODE", "from-env-not-creafly")
+    env_file = tmp_path / "creafly.env"
+    env_file.write_text("TEACHER_REGISTER_CODE=from-dotenv-not-creafly\n", encoding="utf-8")
+    assert TEACHER_REGISTER_CODE == "CREAFLY"
+    assert "teacher_register_code" not in Settings.model_fields
+    loaded = Settings(_env_file=env_file, database_url=None, teacher_password="test123")
+    assert "teacher_register_code" not in loaded.model_dump()
+    assert TEACHER_REGISTER_CODE == "CREAFLY"
+    with _make_client(tmp_path) as c:
+        settings = c.app.state.settings
+        assert "teacher_register_code" not in settings.model_dump()
+        assert getattr(settings, "teacher_register_code", None) is None
+        info = c.get("/api/info").json()
+        assert info["teacherRegisterCodeRequired"] is True
+
+
 @needs_db
-def test_註冊邀請碼錯誤403(tmp_path: Path) -> None:
-    with _make_client(tmp_path, teacher_register_code="secret-code") as c:
+def test_註冊邀請碼錯誤403(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEACHER_REGISTER_CODE", "from-env-not-creafly")
+    with _make_client(tmp_path) as c:
         assert c.get("/api/info").json()["teacherRegisterCodeRequired"] is True
         email = _email("code")
         bad = c.post(
@@ -328,11 +371,27 @@ def test_註冊邀請碼錯誤403(tmp_path: Path) -> None:
             json={"email": email, "password": PASSWORD, "name": "x", "registerCode": "wrong"},
         )
         assert bad.status_code == 403
+        missing = c.post(
+            "/auth/teacher/register",
+            json={"email": email, "password": PASSWORD, "name": "x"},
+        )
+        assert missing.status_code == 403
+        env_code = c.post(
+            "/auth/teacher/register",
+            json={
+                "email": email,
+                "password": PASSWORD,
+                "name": "x",
+                "registerCode": "from-env-not-creafly",
+            },
+        )
+        assert env_code.status_code == 403
         ok = c.post(
             "/auth/teacher/register",
-            json={"email": email, "password": PASSWORD, "name": "x", "registerCode": "secret-code"},
+            json={"email": email, "password": PASSWORD, "name": "x", "registerCode": "CREAFLY"},
         )
         assert ok.status_code == 201, ok.text
+        assert TEACHER_REGISTER_CODE == "CREAFLY"
     asyncio.run(_cleanup())
 
 

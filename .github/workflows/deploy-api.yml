@@ -67,7 +67,7 @@ jobs:
 
       # ==========================================
       # 4. 透過 SSM 叫 EC2 更新（無 SSH、無金鑰）
-      #    TEACHER_AUTH_DISABLED 勿設為 1（正式環境）；註冊碼可設 TEACHER_REGISTER_CODE。
+      #    TEACHER_AUTH_DISABLED 勿設為 1（正式環境）；邀請碼寫在程式裡，不從環境變數讀。
       # ==========================================
       - name: Deploy via SSM
         run: |

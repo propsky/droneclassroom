@@ -39,7 +39,7 @@ from .accounts import (
     verify_password,
 )
 from .auth import TeacherAuth, origin_allowed
-from .config import Settings
+from .config import TEACHER_REGISTER_CODE, Settings
 from .db.audit import record_event
 from .db.models import Organization, Teacher
 from .db.models import Session as SessionRow
@@ -381,7 +381,8 @@ async def teacher_register(
     """老師自行註冊（掛預設單位）→ 註冊即登入、發 session。重複 email 409。"""
     settings: Settings = request.app.state.settings
     ip = _login_guard(request)
-    if settings.teacher_register_code and body.registerCode != settings.teacher_register_code:
+    # 有邀請碼常數就必須完全相符（環境變數無法改這組碼）
+    if TEACHER_REGISTER_CODE and body.registerCode != TEACHER_REGISTER_CODE:
         raise HTTPException(status_code=403, detail="註冊邀請碼不正確")
     email = _normalize_email(body.email)
     if "@" not in email:
@@ -651,7 +652,7 @@ async def get_info(request: Request) -> InfoResponse:
         maxStudents=settings.max_students,
         version=API_VERSION,
         teacherAuthDisabled=settings.teacher_auth_disabled,
-        teacherRegisterCodeRequired=bool(settings.teacher_register_code),
+        teacherRegisterCodeRequired=bool(TEACHER_REGISTER_CODE),
     )
 
 
