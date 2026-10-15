@@ -74,16 +74,14 @@ describe('F9A 階段三七段計分', () => {
   });
 });
 
-describe('F9A 階段三練習旗號', () => {
-  it('來回練習還沒過中線時請返場', () => {
-    expect(
-      readPracticeBroadcast({
-        running: true,
-        goals: 1,
-        elapsedSec: 12,
-        needReturn: true,
-        scoredDrill: true,
-      }).flag,
-    ).toBe('請返場');
+describe('自由練習計分板', () => {
+  it('只累計進球，不顯示返場或練習完成', () => {
+    const view = readPracticeBroadcast({ goals: 4, elapsedSec: 12 });
+    expect(view.blueGoals).toBe(4);
+    expect(view.flag).toBe('');
+    expect(view.ended).toBe(false);
+    expect(view.title).toBe('');
+    expect(view.detail).toBe('分數：4');
+    expect(view.detail).not.toContain('完成');
   });
 });

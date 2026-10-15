@@ -1008,20 +1008,10 @@ export class SoccerFieldVisuals {
         pkScores: soccerState.pkScores,
       });
     }
-    const drill = practiceState.drill;
     const elapsed = practiceState.startTime ? (Date.now() - practiceState.startTime) / 1000 : 0;
-    const waitHalf =
-      !!drill &&
-      (drill.mustReturn || drill.type === 'shuttle') &&
-      practiceState.status === 'running' &&
-      practiceState.count > 0 &&
-      !practiceState.shuttleReturned;
     return readPracticeBroadcast({
-      running: practiceState.status === 'running',
       goals: practiceState.count,
       elapsedSec: elapsed,
-      needReturn: waitHalf,
-      scoredDrill: drill?.type === 'pass' || drill?.type === 'shuttle',
     });
   }
 

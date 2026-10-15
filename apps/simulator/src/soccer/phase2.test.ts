@@ -42,6 +42,15 @@ describe('F9A 階段二穿環', () => {
     expect(shieldPassesRing({ x: 0, y, z: through }, { x: 0, y, z: before }, ring)).toBe(false);
   });
 
+  it('從球門後方穿回場內不算，由場內向外才算', () => {
+    const behind = SOCCER_FIELD.goalZ + SOCCER_FIELD.goalTube + SOCCER_BALL_R + 0.3;
+    const inside = SOCCER_FIELD.goalZ - 0.8;
+    expect(behind).toBeLessThan(SOCCER_FIELD.halfZ - SOCCER_BALL_R);
+    expect(behind).toBeGreaterThan(SOCCER_FIELD.goalZ + SOCCER_FIELD.goalTube);
+    expect(shieldPassesRing({ x: 0, y, z: behind }, { x: 0, y, z: inside }, ring)).toBe(false);
+    expect(shieldPassesRing({ x: 0, y, z: inside }, { x: 0, y, z: behind }, ring)).toBe(true);
+  });
+
   it('後緣過了門面中心、還沒離開環厚，不算穿', () => {
     const partial = SOCCER_FIELD.goalZ + SOCCER_BALL_R + SOCCER_FIELD.goalTube * 0.4;
     expect(shieldPassesRing({ x: 0, y, z: before }, { x: 0, y, z: partial }, ring)).toBe(false);

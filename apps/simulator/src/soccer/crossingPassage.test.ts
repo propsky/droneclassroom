@@ -46,6 +46,14 @@ describe('練習穿環漏判', () => {
     for (let z = through; z <= approach; z += 0.04) back.push({ x: 0, y, z });
     expect(step(back)).toBe(false);
 
+    // 端牆與門面之間的後方口袋，穿回場內仍不算
+    const pocket = -SOCCER_FIELD.halfZ + SOCCER_FIELD.shieldR + 0.2;
+    const intoField = far.goalZ + 0.9;
+    const fromBehind: Array<{ x: number; y: number; z: number }> = [];
+    for (let z = pocket; z <= intoField; z += 0.04) fromBehind.push({ x: 0, y, z });
+    expect(pocket).toBeLessThan(exit - far.shieldR);
+    expect(step(fromBehind)).toBe(false);
+
     const high: Array<{ x: number; y: number; z: number }> = [];
     for (let z = approach; z >= through; z -= 0.04) high.push({ x: 0, y: y + 1.2, z });
     expect(step(high)).toBe(false);

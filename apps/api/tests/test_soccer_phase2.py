@@ -29,6 +29,12 @@ def test_護罩整顆穿過才算_擦框與只到球心都不算() -> None:
     assert not shield_passes_ring((graze, y, z0), (graze, y, z1), **kw)
     # 往回穿，行進方向不對（機頭朝向不在這個函式裡）
     assert not shield_passes_ring((0, y, z1), (0, y, z0), **kw)
+    # 從球門後方（端牆與門面之間）穿回場內不算；由場內向外才算
+    behind = gz + F9A_A.goal_tube + F9A_A.shield_r + 0.3
+    inside = gz - 0.8
+    assert behind < F9A_A.half_z - F9A_A.shield_r
+    assert not shield_passes_ring((0, y, behind), (0, y, inside), **kw)
+    assert shield_passes_ring((0, y, inside), (0, y, behind), **kw)
 
 
 def test_假得分與未返場罰球(

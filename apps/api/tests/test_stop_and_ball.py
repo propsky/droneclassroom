@@ -352,6 +352,38 @@ def test_ball模式_進球烏龍與重置(
             assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 1}
 
 
+def test_ball模式_從球門後方穿回不得分(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    """球在門面與端牆之間，穿回場內不得分，球也不重置。"""
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join(s1, "soccer")
+            _join(s2, "soccer")
+            _start_ball_game(client, t, clock, s1, s2)
+
+            ball = soccer.ball
+            gz = soccer.field.goal_z
+            gy = soccer.field.goal_y
+            ball.last_touch = soccer.players["g:小明"]
+            ball.x, ball.y, ball.z, ball.vz = 0.0, gy, gz + 0.4, -10.0
+            tick(client)
+            assert soccer.scores == {"blue": 0, "red": 0}
+            assert soccer.ball.z < gz
+            assert soccer.ball.z != 0.0
+
+            ball = soccer.ball
+            ball.last_touch = soccer.players["g:小華"]
+            ball.x, ball.y, ball.z, ball.vz = 0.0, gy, -(gz + 0.4), 10.0
+            tick(client)
+            assert soccer.scores == {"blue": 0, "red": 0}
+            assert soccer.ball.z > -gz
+
+
 def test_ball模式_門環外撞端牆反彈不進球(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
