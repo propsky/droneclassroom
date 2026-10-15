@@ -1726,25 +1726,13 @@ body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   font-weight: 700;
 }
 
-#soccer-status {
-  margin-bottom: var(--sp-2);
-}
-#soccer-drills {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-.soccer-drill-btn {
-  background: color-mix(in srgb, var(--text-1) 6%, transparent);
-  border: 1px solid var(--line);
+.soccer-score {
+  margin-top: var(--sp-1);
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
   color: var(--text-1);
-  border-radius: var(--r-sm);
-  padding: var(--sp-1) var(--sp-2);
-  font-size: var(--fs-xs);
-  text-align: left;
-}
-.soccer-drill-btn:hover {
-  background: var(--bg-3);
 }
 
 /* 觸控 / 手勢 */

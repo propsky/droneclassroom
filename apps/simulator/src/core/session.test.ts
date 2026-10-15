@@ -17,7 +17,7 @@ import { programState, runProgram } from './program';
 import { GameSession } from './session';
 import { ARENA_OBSTACLE_DEFS, arenaState, enterArena, exitArena } from '../multiplayer/arena';
 import { enterSoccerMatch, exitSoccerMatch, soccerState } from '../multiplayer/soccer';
-import { enterSoccerPractice, exitSoccerPractice, practiceState, startDrill } from '../soccer/practice';
+import { enterSoccerPractice, exitSoccerPractice, practiceState } from '../soccer/practice';
 import { wsState } from '../net/ws';
 
 const levels: LevelDef[] = [1, 2, 3].flatMap((n) => {
@@ -236,37 +236,31 @@ describe('場次生命週期', () => {
     expect(programState.running).toBe(false);
   });
 
-  it('離場會卸下網格碰撞，練習倒數不會在離開後繼續', () => {
-    vi.useFakeTimers();
-    try {
-      const backend = {
-        init: () => Promise.resolve(),
-        resolveCollisions: (pos: { x: number; y: number; z: number }, vel: { x: number; y: number; z: number }) => ({
-          pos,
-          vel,
-          bumped: false,
-        }),
-        addStaticBox() {},
-        addStaticMesh() {},
-        removeStatic() {},
-        clear() {},
-      } satisfies PhysicsBackend;
-      enterArena();
-      setMeshCollisionBackend(backend);
-      expect(meshCollisionActive()).toBe(true);
-      enterSoccerPractice();
-      expect(meshCollisionActive()).toBe(false);
-      expect(arenaState.active).toBe(false);
-      startDrill(1);
-      expect(GameSession.liveTimerCount('soccer-practice')).toBeGreaterThan(0);
-      applyLoadLevel('2-1');
-      vi.advanceTimersByTime(5000);
-      expect(practiceState.active).toBe(false);
-      expect(levelState.current?.id).toBe('2-1');
-      expect(GameSession.liveTimerCount()).toBe(0);
-      expect(meshCollisionActive()).toBe(false);
-    } finally {
-      vi.useRealTimers();
-    }
+  it('離場會卸下網格碰撞，自由練習沒有關卡倒數', () => {
+    const backend = {
+      init: () => Promise.resolve(),
+      resolveCollisions: (pos: { x: number; y: number; z: number }, vel: { x: number; y: number; z: number }) => ({
+        pos,
+        vel,
+        bumped: false,
+      }),
+      addStaticBox() {},
+      addStaticMesh() {},
+      removeStatic() {},
+      clear() {},
+    } satisfies PhysicsBackend;
+    enterArena();
+    setMeshCollisionBackend(backend);
+    expect(meshCollisionActive()).toBe(true);
+    enterSoccerPractice();
+    expect(meshCollisionActive()).toBe(false);
+    expect(arenaState.active).toBe(false);
+    expect(practiceState.count).toBe(0);
+    expect(GameSession.liveTimerCount('soccer-practice')).toBe(0);
+    applyLoadLevel('2-1');
+    expect(practiceState.active).toBe(false);
+    expect(levelState.current?.id).toBe('2-1');
+    expect(GameSession.liveTimerCount()).toBe(0);
+    expect(meshCollisionActive()).toBe(false);
   });
 });

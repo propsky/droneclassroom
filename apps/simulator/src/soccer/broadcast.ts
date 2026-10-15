@@ -129,25 +129,19 @@ export function readBroadcast(s: BroadcastInput): BroadcastView {
   };
 }
 
-/** 單人練習的計分板：沒有局數時用第 1 局、進球次數，並依來回練習決定旗號 */
-export function readPracticeBroadcast(p: {
-  running: boolean;
-  goals: number;
-  elapsedSec: number;
-  needReturn: boolean;
-  scoredDrill: boolean;
-}): BroadcastView {
-  const flag: BroadcastView['flag'] = !p.running || !p.scoredDrill ? '' : p.needReturn ? '請返場' : '可得分';
+/** 單人自由練習的計分板：只顯示累計進球，不顯示返場旗號，也不結束練習。 */
+export function readPracticeBroadcast(p: { goals: number; elapsedSec: number }): BroadcastView {
+  const goals = clampDigit(p.goals);
   return {
     period: 1,
     remainSec: Math.max(0, Math.floor(p.elapsedSec)),
     blueSets: 0,
     redSets: 0,
-    blueGoals: clampDigit(p.goals),
+    blueGoals: goals,
     redGoals: 0,
-    flag,
+    flag: '',
     ended: false,
-    title: '練習結束',
-    detail: `穿門 ${clampDigit(p.goals)} 次`,
+    title: '',
+    detail: `分數：${goals}`,
   };
 }

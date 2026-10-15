@@ -74,7 +74,6 @@ import {
   tickSoccerPractice,
   enterSoccerPractice,
   exitSoccerPractice,
-  startDrill,
 } from './soccer/practice';
 import {
   initSoccerMatch,
@@ -196,7 +195,6 @@ declare global {
       exitSoccerMatch: typeof exitSoccerMatch;
       enterSoccerPractice: typeof enterSoccerPractice;
       exitSoccerPractice: typeof exitSoccerPractice;
-      startDrill: typeof startDrill;
       calibration: typeof calibration;
       gamepadConfig: typeof gamepadConfig;
       startCalibration: typeof startCalibration;
@@ -226,7 +224,6 @@ window.CREAFLY = {
   exitSoccerMatch,
   enterSoccerPractice,
   exitSoccerPractice,
-  startDrill,
   // 校正精靈 debug / headless 驗收入口
   calibration,
   gamepadConfig,
@@ -306,7 +303,7 @@ function fixedTick(nowMs: number): void {
     tickSoccerMatch();
     soccerVisuals.tick();
   } else if (practiceState.active) {
-    // ⚽ 單人練習：邊界 / 穿門判定 / drill 進度
+    // ⚽ 單人練習：邊界 / 正面穿門計分
     tickFlightPhysics(feltFrame, arenaThrustScale());
     tickSoccerPractice();
     soccerVisuals.tick();
