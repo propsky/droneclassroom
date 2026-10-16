@@ -1,5 +1,5 @@
 // 程式執行後端介面（M-01）：cf_* 動作的最小契約。
-// Sim 實作走 motion plan；Real 實作走 BLE（v2.0 對接，目前為 stub）。
+// Sim 實作走 motion plan；Real 實作走本機 WebSocket 橋接（ws://localhost:8765/ws）。
 
 export interface MotionRuntime {
   isConnected(): boolean;
