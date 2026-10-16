@@ -570,12 +570,174 @@ body.mode-program #blockly-panel {
   line-height: 1.8;
 }
 #blockly-toolbar {
+  position: relative;
   padding: var(--sp-3) var(--sp-4);
   background: var(--bg-1);
   border-top: 1px solid var(--line);
   display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+.blockly-actions {
+  display: flex;
   gap: var(--sp-2);
   align-items: center;
+  width: 100%;
+}
+#exec-switch[hidden],
+#real-controls[hidden],
+#real-settings[hidden] {
+  display: none !important;
+}
+.exec-switch {
+  display: inline-flex;
+  align-self: flex-start;
+  padding: var(--sp-1);
+  gap: var(--sp-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+#blockly-toolbar .exec-seg {
+  height: 32px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--r-sm) - 2px);
+  color: var(--text-3);
+  font-weight: 600;
+}
+#blockly-toolbar .exec-seg[aria-pressed='true'] {
+  background: var(--brand);
+  color: #fff;
+}
+#blockly-toolbar .exec-seg-real[aria-pressed='true'] {
+  background: var(--danger);
+  color: #fff;
+}
+.exec-switch.is-locked {
+  opacity: 0.5;
+}
+.real-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.real-status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+#real-status-text {
+  min-width: 0;
+}
+.real-lamp {
+  width: var(--sp-3);
+  height: var(--sp-3);
+  margin-top: var(--sp-1);
+  border-radius: var(--r-full);
+  flex: none;
+}
+.real-lamp.red {
+  background: var(--danger);
+  box-shadow: 0 0 0 var(--sp-1) color-mix(in srgb, var(--danger) 28%, transparent);
+}
+.real-lamp.yellow {
+  background: var(--warn);
+  box-shadow: 0 0 0 var(--sp-1) color-mix(in srgb, var(--warn) 28%, transparent);
+}
+.real-lamp.green {
+  background: var(--accent);
+  box-shadow: 0 0 0 var(--sp-1) color-mix(in srgb, var(--accent) 28%, transparent);
+}
+#blockly-toolbar .real-ghost {
+  flex: none;
+  height: 36px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-1);
+}
+#blockly-toolbar .real-ghost:hover:not(:disabled) {
+  background: var(--bg-3);
+}
+#blockly-toolbar .btn-estop {
+  flex: none;
+  height: 36px;
+  padding: 0 var(--sp-3);
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+}
+#blockly-toolbar .btn-estop:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 80%, var(--bg-0));
+}
+body.real-exec #btn-run {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+body.real-exec #btn-run:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 80%, var(--bg-0));
+  border-color: var(--danger);
+}
+.real-settings {
+  position: absolute;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: calc(100% + var(--sp-2));
+  z-index: var(--z-modal);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-3) var(--sp-4);
+}
+.real-settings-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.real-field {
+  display: block;
+  margin-top: var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.real-settings input,
+.real-settings select {
+  display: block;
+  width: 100%;
+  margin-top: var(--sp-1);
+  height: 36px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-2);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.real-settings-note {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+#blockly-toolbar .real-apply {
+  width: 100%;
+  margin-top: var(--sp-3);
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  color: var(--text-1);
 }
 #blockly-toolbar button {
   display: inline-flex;

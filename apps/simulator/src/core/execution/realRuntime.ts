@@ -1,14 +1,15 @@
 // 真機執行後端：cf_* 動作改送本機 WebSocket 橋接，並等飛機做完。
 // 預設 ws://localhost:8765/ws，比例 1 m = 10 cm。載入時不連線，頁面仍從模擬模式啟動。
 // 斷線、失聯、飛機拒絕都是硬錯誤，不會改回只播畫面。
-// 前後左右會送出；目前真機韌體會以 range 拒絕（光流尚未就緒），假橋接則會接受。
+// 前後左右仍會送出（一次一個、等回覆）。真機韌體目前以 range 拒絕（光流尚未就緒），
+// 這裡改寫成學生看得懂的說明。假橋接預設接受；加 --reject-planar 可重現拒絕。
 import type { LinkLamp, RealLinkStatus } from '@creafly/shared';
 import { bus, type ToastKind } from '../events';
 import { DroneClient, DroneError, type DroneLink } from './droneClient';
+import { DEFAULT_BRIDGE_URL, DEFAULT_CM_PER_METER, getBridgeUrl, getCmPerMeter } from './realPrefs';
 import type { MotionRuntime } from './runtime';
 
-export const DEFAULT_BRIDGE_URL = 'ws://localhost:8765/ws';
-export const DEFAULT_CM_PER_METER = 10;
+export { DEFAULT_BRIDGE_URL, DEFAULT_CM_PER_METER };
 
 /** 真機限制（協定：公分、度、秒） */
 export const LIMITS = {
@@ -33,9 +34,14 @@ const ABORT_TEXT: Record<number, string> = {
   6: '傾角保護',
 };
 
+/** 前後左右被韌體 range 拒絕時，給學生的說明 */
+export const PLANAR_UNSUPPORTED_TEXT =
+  '真機目前不支援前後左右移動（光流尚未就緒）。這個動作已被拒絕，後面的積木不會再飛。';
+
 const REJECT_TEXT: Record<string, string> = {
   lowbat: '電量不足，真機拒絕起飛',
   range: '數值超出真機允許的範圍',
+  planar: PLANAR_UNSUPPORTED_TEXT,
   state: '真機目前的狀態不能做這個動作（例如還沒起飛就移動）',
   locked: '真機還在空中，不能進入或離開程式模式',
 };
@@ -78,6 +84,10 @@ export interface RealMotionRuntime extends MotionRuntime {
   stop(): Promise<void>;
   /** 程式結束：還在空中就降落並離開程式模式 */
   onRunEnd(): Promise<void>;
+  /** 緊急停止：已連線就送硬停（懸停後降落），不管程式有沒有在跑 */
+  emergencyStop(): Promise<void>;
+  /** 先硬停，再拆掉 WebSocket */
+  disconnect(): Promise<void>;
   connect(url?: string): Promise<string>;
   close(): void;
   snapshot(): RealLinkSnapshot;
@@ -142,14 +152,15 @@ function defaultNotify(text: string, kind: ToastKind): void {
 
 export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionRuntime {
   const drone = deps.drone ?? new DroneClient({ name: 'classroom' });
-  const getScale = deps.getScale ?? (() => DEFAULT_CM_PER_METER);
+  const getScale = deps.getScale ?? getCmPerMeter;
   const notify = deps.notify ?? defaultNotify;
   const now = deps.now ?? (() => Date.now());
-  let url = deps.url ?? DEFAULT_BRIDGE_URL;
+  let url = deps.url ?? getBridgeUrl();
   let lastTelemetry: number | null = null;
   let begun = false;
   let userStopped = false;
   let failed = false;
+  let stopSent = false;
 
   drone.on('telemetry', () => {
     lastTelemetry = now();
@@ -183,7 +194,17 @@ export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionR
     throw new Error(text);
   }
 
-  async function runAction(fn: () => Promise<void>): Promise<void> {
+  function isRangeReject(err: unknown): boolean {
+    return !!err && typeof err === 'object' && 'code' in err && err.code === 'REJECTED' && 'reason' in err && err.reason === 'range';
+  }
+
+  /** 前後左右被 range 拒絕時，換成說明光流尚未就緒的句子 */
+  function rewritePlanarReject(err: unknown): unknown {
+    if (isRangeReject(err)) return new DroneError('REJECTED', 'planar');
+    return err;
+  }
+
+  async function runAction(fn: () => Promise<void>, rewrite?: (err: unknown) => unknown): Promise<void> {
     if (failed) throw new Error(USER_STOP);
     const status = linkStatus();
     if (status !== 'ready') {
@@ -192,8 +213,17 @@ export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionR
     try {
       await fn();
     } catch (err) {
-      await failAction(err);
+      await failAction(rewrite ? rewrite(err) : err);
     }
+  }
+
+  async function sendHardStop(): Promise<void> {
+    if (!drone.connected || stopSent) return;
+    stopSent = true;
+    await drone.stop().then(
+      () => undefined,
+      () => undefined,
+    );
   }
 
   async function ensureProgramMode(): Promise<void> {
@@ -224,12 +254,13 @@ export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionR
 
   async function onUserStop(): Promise<void> {
     userStopped = true;
-    if (begun && drone.connected) {
-      await drone.stop().then(
-        () => undefined,
-        () => undefined,
-      );
-    }
+    if (begun) await sendHardStop();
+  }
+
+  async function emergencyStop(): Promise<void> {
+    userStopped = true;
+    failed = true;
+    await sendHardStop();
   }
 
   const runtime: RealMotionRuntime = {
@@ -239,10 +270,18 @@ export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionR
     snapshot,
     async connect(nextUrl?: string): Promise<string> {
       if (nextUrl) url = nextUrl;
+      else url = deps.url ?? getBridgeUrl();
+      stopSent = false;
       return drone.connect(url);
     },
     close() {
       drone.close();
+    },
+    emergencyStop,
+    async disconnect() {
+      await emergencyStop();
+      drone.close();
+      stopSent = false;
     },
     async preflight() {
       const status = linkStatus();
@@ -258,6 +297,7 @@ export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionR
       begun = false;
       userStopped = false;
       failed = false;
+      stopSent = false;
     },
     onUserStop,
     stop: onUserStop,
@@ -293,10 +333,10 @@ export function createRealMotionRuntime(deps: RealRuntimeDeps = {}): RealMotionR
     wait(seconds = 1) {
       return sleepSeconds(seconds);
     },
-    forward: (distance = 2) => runAction(() => moveReal(distance, 0, 0)),
-    backward: (distance = 2) => runAction(() => moveReal(-Math.abs(distance), 0, 0)),
-    right: (distance = 2) => runAction(() => moveReal(0, distance, 0)),
-    left: (distance = 2) => runAction(() => moveReal(0, -Math.abs(distance), 0)),
+    forward: (distance = 2) => runAction(() => moveReal(distance, 0, 0), rewritePlanarReject),
+    backward: (distance = 2) => runAction(() => moveReal(-Math.abs(distance), 0, 0), rewritePlanarReject),
+    right: (distance = 2) => runAction(() => moveReal(0, distance, 0), rewritePlanarReject),
+    left: (distance = 2) => runAction(() => moveReal(0, -Math.abs(distance), 0), rewritePlanarReject),
     up: (distance = 1) => runAction(() => moveReal(0, 0, distance)),
     down: (distance = 1) => runAction(() => moveReal(0, 0, -Math.abs(distance))),
     rotateClockwise: (degrees = 90) => runAction(() => yawReal(degrees)),

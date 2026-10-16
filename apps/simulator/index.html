@@ -84,9 +84,35 @@
             <div id="blockly-placeholder">積木編輯器建置中…<br>（cf_* 飛行 API 已就緒）</div>
         </div>
         <div id="blockly-toolbar">
-            <button class="btn-run" id="btn-run"><span class="btn-ic" data-icon="play"></span><span>執行程式</span></button>
-            <button class="btn-stop" id="btn-stop" disabled><span class="btn-ic" data-icon="square"></span><span>停止</span></button>
-            <button class="btn-reset" id="btn-reset" title="重置無人機位置"><span class="btn-ic" data-icon="rotate-ccw"></span></button>
+            <div id="exec-switch" class="exec-switch" hidden>
+                <button type="button" id="exec-sim" class="exec-seg" aria-pressed="true">模擬器</button>
+                <button type="button" id="exec-real" class="exec-seg exec-seg-real" aria-pressed="false">真機</button>
+            </div>
+            <div id="real-controls" class="real-controls" hidden>
+                <div class="real-status">
+                    <span id="real-lamp" class="real-lamp red" role="status" aria-label="連線狀態：未連線"></span>
+                    <span id="real-status-text">未連線</span>
+                </div>
+                <button type="button" id="real-connect" class="real-ghost" title="連上橋接程式"><span class="btn-ic" data-icon="wifi"></span><span>連線</span></button>
+                <button type="button" id="real-estop" class="btn-estop" title="立刻硬停並降落"><span class="btn-ic" data-icon="alert-triangle"></span><span>緊急停止</span></button>
+                <button type="button" id="real-settings-btn" class="real-ghost" title="橋接位址與距離比例"><span class="btn-ic" data-icon="settings"></span><span>設定</span></button>
+            </div>
+            <div class="blockly-actions">
+                <button class="btn-run" id="btn-run"><span class="btn-ic" data-icon="play"></span><span id="btn-run-label">執行程式</span></button>
+                <button class="btn-stop" id="btn-stop" disabled><span class="btn-ic" data-icon="square"></span><span>停止</span></button>
+                <button class="btn-reset" id="btn-reset" title="重置無人機位置"><span class="btn-ic" data-icon="rotate-ccw"></span></button>
+            </div>
+            <div id="real-settings" class="real-settings" hidden>
+                <div class="real-settings-title">真機設定</div>
+                <label class="real-field" for="real-url">橋接 WebSocket 位址
+                    <input id="real-url" type="text" spellcheck="false" autocomplete="off" value="ws://localhost:8765/ws">
+                </label>
+                <label class="real-field" for="real-scale">距離比例（模擬器 1 公尺）
+                    <select id="real-scale"></select>
+                </label>
+                <p class="real-settings-note">預設連到本機假橋接。起飛前確認場地淨空、遙控器在手上。緊急停止會讓真機硬停並降落。</p>
+                <button type="button" id="real-settings-apply" class="real-apply">套用</button>
+            </div>
         </div>
     </div>
 
