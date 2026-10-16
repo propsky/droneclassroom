@@ -7,8 +7,10 @@
 //   pnpm --filter @creafly/simulator fake-bridge -- --abort-at=2
 //   pnpm --filter @creafly/simulator fake-bridge -- --timeout-at=1
 //   pnpm --filter @creafly/simulator fake-bridge -- --slow
+//   pnpm --filter @creafly/simulator fake-bridge -- --reject-planar
 //
 // 第一個連上的客戶端是控制者；之後的連線只能看遙測，指令會被忽略。
+// --reject-planar：前後左右（move 的 dx 或 dy 不為 0）以 range 拒絕，用來重現真機光流尚未就緒。垂直移動仍接受。
 import { WebSocketServer } from 'ws';
 
 const PORT = 8765;
@@ -24,6 +26,7 @@ const lowbat = has('lowbat');
 const abortAt = num('abort-at');
 const timeoutAt = num('timeout-at');
 const slow = has('slow');
+const rejectPlanar = has('reject-planar');
 const MOTION = new Set(['takeoff', 'land', 'hover', 'move', 'yaw']);
 
 const wss = new WebSocketServer({ port: PORT, path: '/ws' });
@@ -64,6 +67,11 @@ wss.on('connection', (ws) => {
     const id = msg.id;
     const cmd = msg.cmd;
     later(slow ? 200 : 15, () => send(ws, { id, status: 'ack' }));
+
+    if (cmd === 'move' && rejectPlanar && (Number(msg.dx || 0) !== 0 || Number(msg.dy || 0) !== 0)) {
+      later(slow ? 400 : 40, () => send(ws, { id, status: 'rejected', reason: 'range' }));
+      return;
+    }
 
     if (MOTION.has(cmd)) {
       motionCount += 1;
@@ -110,7 +118,7 @@ wss.on('connection', (ws) => {
 });
 
 wss.on('listening', () => {
-  const flags = [noAircraft && 'no-aircraft', lowbat && 'lowbat', abortAt && `abort-at=${abortAt}`, timeoutAt && `timeout-at=${timeoutAt}`, slow && 'slow']
+  const flags = [noAircraft && 'no-aircraft', lowbat && 'lowbat', rejectPlanar && 'reject-planar', abortAt && `abort-at=${abortAt}`, timeoutAt && `timeout-at=${timeoutAt}`, slow && 'slow']
     .filter(Boolean)
     .join(' ');
   console.log(`假橋接 ws://localhost:${PORT}/ws${flags ? `（${flags}）` : ''}`);

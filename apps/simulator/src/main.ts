@@ -39,6 +39,7 @@ import { CameraRig } from './render/cameras';
 import { initHud, updateHudFrame } from './ui/hud';
 import { initOnboarding } from './ui/onboarding';
 import { initOverlays, initPlayer, syncViewButton } from './ui/overlays';
+import { initRealToolbar } from './ui/realToolbar';
 import { initHeaderOverflow } from './ui/headerOverflow';
 import { initLevelComplete } from './ui/levelComplete';
 import { initCalibrationOverlay } from './ui/calibrationOverlay';
@@ -110,6 +111,7 @@ cameraRig.snapBehindDrone();
 // ---- UI / 輸入 / 音效 / 網路 ----
 initHud();
 initOverlays();
+initRealToolbar(); // 積木工具列：模擬器／真機（在 initOverlays 之後，圖標才掛得上）
 initHeaderOverflow(); // header 溢出防護（在 initOverlays 之後：圖標已掛載，量測才準）
 initLevelComplete(); // 過關結算卡（下一關 / 再玩一次）
 initAudio();

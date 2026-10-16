@@ -3,6 +3,7 @@ import { DroneError, type DroneLink, type DroneRole, type DroneTelemetry } from 
 import {
   DEFAULT_BRIDGE_URL,
   DEFAULT_CM_PER_METER,
+  PLANAR_UNSUPPORTED_TEXT,
   STATUS_TEXT,
   createRealMotionRuntime,
   describeDroneError,
@@ -277,7 +278,7 @@ describe('realRuntime', () => {
       const { rt, drone } = setup();
       await rt.takeoff(8);
       drone.failOn = { name: 'move', error: new DroneError('REJECTED', 'range') };
-      await expect(rt[name](2)).rejects.toThrow('數值超出真機允許的範圍');
+      await expect(rt[name](2)).rejects.toThrow(PLANAR_UNSUPPORTED_TEXT);
       const sent = drone.calls.length;
       await expect(rt.forward(1)).rejects.toThrow('使用者中斷');
       expect(drone.calls.length).toBe(sent);
@@ -364,6 +365,29 @@ describe('realRuntime', () => {
     expect(drone.calls).toEqual([]);
   });
 
+  it('緊急停止即使還沒起飛，已連線就送硬停', async () => {
+    const { rt, drone } = setup();
+    await rt.emergencyStop();
+    expect(drone.calls).toEqual([['stop']]);
+    await rt.emergencyStop();
+    expect(drone.calls).toEqual([['stop']]);
+  });
+
+  it('中斷連線會先硬停再拆線', async () => {
+    const { rt, drone } = setup();
+    await rt.takeoff(8);
+    await rt.disconnect();
+    expect(names(drone)).toEqual(['begin', 'takeoff', 'stop']);
+    expect(drone.connected).toBe(false);
+  });
+
+  it('上下被 range 拒絕仍用範圍說明', async () => {
+    const { rt, drone } = setup();
+    await rt.takeoff(8);
+    drone.failOn = { name: 'move', error: new DroneError('REJECTED', 'range') };
+    await expect(rt.up(1)).rejects.toThrow('數值超出真機允許的範圍');
+  });
+
   it('真機出錯：顯示中文原因，後面的積木不再飛', async () => {
     const { rt, drone, notes } = setup();
     drone.failOn = { name: 'takeoff', error: new DroneError('REJECTED', 'lowbat') };
@@ -392,6 +416,8 @@ describe('realRuntime', () => {
     expect(describeDroneError({ code: 'REJECTED', reason: 'state' })).toBe(
       '真機目前的狀態不能做這個動作（例如還沒起飛就移動）',
     );
+    expect(describeDroneError({ code: 'REJECTED', reason: 'range' })).toBe('數值超出真機允許的範圍');
+    expect(describeDroneError({ code: 'REJECTED', reason: 'planar' })).toBe(PLANAR_UNSUPPORTED_TEXT);
     expect(describeDroneError({ code: 'REJECTED', reason: '?' })).toBe('真機拒絕了這個動作');
     expect(describeDroneError({ code: 'NOACK' })).toMatch(/沒有回應/);
     expect(describeDroneError({ code: 'CLOSED' })).toMatch(/連線斷了/);
