@@ -31,6 +31,14 @@
             <span class="btn-ic" data-icon="menu"></span><span>選單</span>
         </button>
         <div id="header-tools" class="header-right">
+            <!-- 模擬器／真機：手動與程式模式都看得到。真機連線鈕仍在程式面板。 -->
+            <div class="header-group">
+                <div id="exec-switch" class="exec-switch" role="group" aria-label="飛行目標" hidden>
+                    <button type="button" id="exec-sim" class="exec-seg" aria-pressed="true" title="模擬器：飛機只在畫面裡動">模擬器</button>
+                    <button type="button" id="exec-real" class="exec-seg exec-seg-real" aria-pressed="false" title="真機：到程式模式連線後，積木會控制實體飛機。手動搖桿與鍵盤仍只飛畫面">真機</button>
+                </div>
+            </div>
+            <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 1：關卡 / 回家 -->
             <div class="header-group">
                 <div id="level-selector" class="level-selector">
@@ -56,6 +64,7 @@
             <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 3：搖桿 / 校正 / 全螢幕 -->
             <div class="header-group">
+                <button id="touch-joystick-btn" class="header-btn" type="button" aria-pressed="false" title="顯示畫面上的虛擬搖桿"><span class="btn-ic" data-icon="hand"></span><span>觸控搖桿</span></button>
                 <button id="connect-gamepad-btn" class="header-btn" title="用藍牙連線 pyController 實體搖桿（需 HTTPS；iPad 請用 Bluefy）"><span class="btn-ic" data-icon="bluetooth"></span><span>連線搖桿</span></button>
                 <button id="calib-fab" class="header-btn header-btn-calib" title="搖桿設定與校正（連線後出現）"><span class="btn-ic" data-icon="settings"></span><span>搖桿</span></button>
                 <button id="fullscreen-btn" class="header-btn" title="全螢幕（iPad / 桌機）"><span class="btn-ic" data-icon="expand"></span><span>全螢幕</span></button>
@@ -87,10 +96,6 @@
             <div id="blockly-placeholder">積木編輯器建置中…<br>（cf_* 飛行 API 已就緒）</div>
         </div>
         <div id="blockly-toolbar">
-            <div id="exec-switch" class="exec-switch" hidden>
-                <button type="button" id="exec-sim" class="exec-seg" aria-pressed="true">模擬器</button>
-                <button type="button" id="exec-real" class="exec-seg exec-seg-real" aria-pressed="false">真機</button>
-            </div>
             <div id="real-controls" class="real-controls" hidden>
                 <div class="real-status">
                     <span id="real-lamp" class="real-lamp red" role="status" aria-label="連線狀態：未連線"></span>
@@ -163,7 +168,7 @@
             <div class="hud-stack hud-stack-bl">
                 <!-- 操作說明卡（§5.2）：kbd 鍵帽 + 兩欄格線 + 分組小標；卡頭可收合（localStorage 記憶）。
                      三套說明變體以 body class 切換（純 CSS，見 style.css）：
-                     gamepad-connected > touch-device / joystick-forced > 鍵盤（預設） -->
+                     gamepad-connected > touch-joysticks > 鍵盤（預設） -->
                 <div id="help-hud" class="hud">
                     <button id="help-hud-toggle" class="hud-title help-toggle" type="button" aria-expanded="true" aria-controls="help-body">
                         <span>操作說明</span><span class="btn-ic chev" data-icon="chevron-down"></span>
@@ -187,7 +192,7 @@
                                 <span class="help-keys"><kbd>C</kbd></span><span class="help-desc">切換視角</span>
                             </div>
                         </div>
-                        <!-- 觸控虛擬搖桿（body.touch-device / body.joystick-forced） -->
+                        <!-- 觸控虛擬搖桿（body.touch-joysticks） -->
                         <div id="help-joystick" class="help-variant">
                             <div class="help-group-title">移動</div>
                             <div class="help-grid">

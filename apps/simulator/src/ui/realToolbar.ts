@@ -1,6 +1,7 @@
-// 學生積木頁的模擬器／真機工具列。
+// 學生頁的模擬器／真機切換（在共用頂部工具列，手動與程式模式都看得到）。
 // 切換要不要出現只問 isRealDroneSwitchVisible（PR-C 改班級設定時不用動這支）。
 // 預設模擬器。上次選擇、橋接位址、距離比例記在 localStorage。切到真機不會自動連線。
+// 手動搖桿／鍵盤仍只推動畫面上的飛機：橋接協定沒有連續搖桿指令，見 droneClient。
 import { flags } from '../core/droneState';
 import { bus, toast } from '../core/events';
 import { getExecutionMode, setExecutionMode } from '../core/execution/mode';
@@ -160,12 +161,22 @@ export function initRealToolbar(): void {
       await releaseLink();
       setExecutionMode('sim');
       rememberMode('sim');
-      toast('模擬器模式：積木只會移動畫面上的飛機', '');
+      toast(
+        flags.mode === 'manual'
+          ? '模擬器模式：搖桿和鍵盤控制畫面上的飛機'
+          : '模擬器模式：積木只會移動畫面上的飛機',
+        '',
+      );
     } else {
       setExecutionMode('real');
       if (getExecutionMode() !== 'real') return;
       rememberMode('real');
-      toast('真機模式：請按「連線」，綠燈之後積木才會讓真的飛機起飛', '');
+      toast(
+        flags.mode === 'manual'
+          ? '已切到真機。手動搖桿和鍵盤仍只控制畫面上的飛機；請到「程式」按「連線」，綠燈後積木才會讓真的飛機起飛'
+          : '真機模式：請按「連線」，綠燈之後積木才會讓真的飛機起飛',
+        flags.mode === 'manual' ? 'warning' : '',
+      );
     }
     render();
   };

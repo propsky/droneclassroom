@@ -20,6 +20,8 @@ vi.mock('./progressLocalCache', () => ({
   loadProgressCache: vi.fn(() => null),
   saveProgressCache: vi.fn(),
   clearProgressCache: vi.fn(),
+  progressCacheScope: (mode?: string, teamId?: number | null) =>
+    mode === 'class' && teamId != null ? `class:${teamId}` : 'personal',
 }));
 
 vi.mock('./replayLogUpload', () => ({

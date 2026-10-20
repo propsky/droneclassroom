@@ -247,6 +247,14 @@ body.header-compact .header-btn {
   justify-content: center;
   padding: 0;
 }
+/* 觸控搖桿是開關，字要留著，收成圖示後看不出開或關 */
+body.header-compact #touch-joystick-btn > span:not(.btn-ic) {
+  display: inline;
+}
+body.header-compact #touch-joystick-btn {
+  width: auto;
+  padding: 0 var(--sp-3);
+}
 
 /* 「更多」下拉（ui/headerOverflow.ts：header 溢出時依序收納低頻按鈕） */
 .header-more {
@@ -599,22 +607,32 @@ body.mode-program #blockly-panel {
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
 }
-#blockly-toolbar .exec-seg {
-  height: 32px;
+.exec-switch .exec-seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
   padding: 0 var(--sp-3);
   background: transparent;
   border: 0;
   border-radius: calc(var(--r-sm) - 2px);
   color: var(--text-3);
+  font-size: var(--fs-sm);
   font-weight: 600;
+  white-space: nowrap;
 }
-#blockly-toolbar .exec-seg[aria-pressed='true'] {
+.exec-switch .exec-seg[aria-pressed='true'] {
   background: var(--brand);
   color: #fff;
 }
-#blockly-toolbar .exec-seg-real[aria-pressed='true'] {
+.exec-switch .exec-seg-real[aria-pressed='true'] {
   background: var(--danger);
   color: #fff;
+}
+#header .exec-switch {
+  height: 36px;
+  align-items: center;
+  flex: none;
 }
 .exec-switch.is-locked {
   opacity: 0.5;
@@ -873,9 +891,8 @@ body.real-exec #btn-run:hover:not(:disabled) {
   left: var(--sp-4);
   align-items: flex-start;
 }
-/* 觸控裝置：左下卡片抬過虛擬搖桿區（170px 搖桿 + 上方標籤），禁止重疊（§3） */
-body.touch-device .hud-stack-bl,
-body.joystick-forced .hud-stack-bl {
+/* 虛擬搖桿出現時：左下卡片抬過搖桿區（170px 搖桿 + 上方標籤），禁止重疊（§3） */
+body.touch-joysticks .hud-stack-bl {
   bottom: calc(var(--sp-5) + 170px + var(--sp-5));
 }
 
@@ -1057,16 +1074,15 @@ body.joystick-forced .hud-stack-bl {
   font-size: var(--fs-xs);
   color: var(--text-2);
 }
-/* 三套說明變體切換（保留既有 body class 機制，純 CSS 分派）：
-   實體搖桿 > 觸控虛擬搖桿 > 鍵盤（與 legacy 優先序一致） */
+/* 三套說明變體切換（純 CSS 分派）：
+   實體搖桿 > 畫面上的虛擬搖桿 > 鍵盤 */
 .help-variant {
   display: none;
 }
-body:not(.gamepad-connected):not(.touch-device):not(.joystick-forced) #help-keyboard {
+body:not(.gamepad-connected):not(.ble-connected):not(.touch-joysticks) #help-keyboard {
   display: block;
 }
-body.touch-device:not(.gamepad-connected):not(.ble-connected) #help-joystick,
-body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #help-joystick {
+body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #help-joystick {
   display: block;
 }
 body.gamepad-connected #help-gamepad,
@@ -1120,7 +1136,7 @@ body.ble-connected #help-gamepad {
 }
 
 /* =============================================================================
- * 虛擬搖桿（觸控裝置 / ?joystick）
+ * 虛擬搖桿（body.touch-joysticks：主要指標 coarse，或工具列／?joystick=1 打開）
  * ========================================================================== */
 #joystick-layer {
   position: absolute;
@@ -1129,8 +1145,7 @@ body.ble-connected #help-gamepad {
   pointer-events: none;
   z-index: var(--z-overlay-btn);
 }
-body.touch-device:not(.gamepad-connected):not(.ble-connected) #joystick-layer,
-body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #joystick-layer {
+body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer {
   display: block;
 }
 .joystick-zone {
@@ -2300,8 +2315,8 @@ body,
   font-weight: 600;
   white-space: nowrap;
 }
-/* 觸控裝置：提示上移，避免與虛擬搖桿區重疊 */
-body.touch-device:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
+/* 虛擬搖桿出現時：提示上移，避免與搖桿區重疊 */
+body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
   bottom: calc(190px + max(var(--sp-4), env(safe-area-inset-bottom, 0px)));
 }
 @media (max-width: 480px) {
@@ -2313,7 +2328,7 @@ body.touch-device:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
   .pad-hint-dismiss {
     width: 100%;
   }
-  body.touch-device:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
+  body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
     bottom: calc(175px + max(var(--sp-3), env(safe-area-inset-bottom, 0px)));
   }
 }
@@ -2514,6 +2529,12 @@ body:has(#pad-ui-hint.show) #toast.show {
   body.portrait-menu-open #header-tools .header-btn > span:not(.btn-ic) {
     display: inline;
   }
+  body.portrait-menu-open #header-tools .exec-switch {
+    width: 100%;
+  }
+  body.portrait-menu-open #header-tools .exec-seg {
+    flex: 1;
+  }
   body.portrait-menu-open #portrait-menu-btn {
     background: var(--bg-3);
     border-color: var(--brand);
@@ -2586,8 +2607,7 @@ body:has(#pad-ui-hint.show) #toast.show {
   #toast {
     bottom: calc(var(--portrait-control-band) + var(--sp-3));
   }
-  body.touch-device:not(.gamepad-connected):not(.ble-connected) .pad-hint.show,
-  body.joystick-forced:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
+  body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
     bottom: calc(var(--portrait-control-band) + var(--sp-3));
   }
 }

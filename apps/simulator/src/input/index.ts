@@ -7,7 +7,7 @@ import { droneState, YAW_KEY_RATE, YAW_STICK_RATE } from '../core/droneState';
 import { resetMission } from '../core/level';
 import { toast } from '../core/events';
 import { keys, initKeyboard } from './keyboard';
-import { virtualStick, initVirtualJoystick, isTouchDevice } from './joystick';
+import { virtualStick, initVirtualJoystick, isTouchDevice, touchJoysticksShouldShow } from './joystick';
 import {
   initGamepad,
   pollGamepad,
@@ -20,7 +20,7 @@ import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from 
 import { registerBleConnectedChecker } from '../core/execution/mode';
 import { resolveStickSource, type StickAxes } from './padMath';
 
-export { isTouchDevice };
+export { isTouchDevice, touchJoysticksShouldShow };
 
 /** 搖桿選單導覽（ui/padUi 於 init 時註冊；input 層不反向依賴 ui） */
 export interface PadUiHooks {
