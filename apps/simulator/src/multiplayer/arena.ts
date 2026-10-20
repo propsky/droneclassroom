@@ -2,11 +2,11 @@
 // 行為對齊 legacy main.js §15；伺服器權威（計分 / 抓捕 / 氣球重生都由 server 仲裁），
 // 本模組只維護本地狀態、回報位置（80ms）與氣球碰撞候選（arena_pop）。
 // 視覺（他人分身 / 名牌 / 氣球 / 光環）在 render/clones.ts；HUD 在 ui/arenaHud.ts。
-import type { ArenaPlayerState, ArenaRole, ArenaServerMsg, ArenaEndMsg } from '@creafly/shared';
+import type { ArenaPlayerState, ArenaRole, ArenaRoundResult, ArenaServerMsg, ArenaEndMsg } from '@creafly/shared';
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
 import { setMeshCollisionBackend, setSolidObstacles, type SolidObstacle } from '../core/physics';
 import { clearLevel } from '../core/level';
-import { setMode } from '../core/program';
+import { setMode, stopProgram } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { GameSession } from '../core/session';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
@@ -16,7 +16,10 @@ import {
   setArenaTimer,
   setArenaFieldLabel,
   updateArenaScoreboard,
+  showArenaResults,
+  hideArenaResults,
 } from '../ui/arenaHud';
+import { ArenaResults } from './arenaResults';
 
 // ---- 常數（與 legacy / server 對齊） ----
 /** 鬼抓人：鬼的推力倍率（掛在 input→physics 的縫；見 main.ts applyManualControls） */
@@ -63,6 +66,10 @@ export const arenaState = {
   /** 無敵解除時間戳（涵蓋暈眩＋復活後的跑走時間，鬼抓不到） */
   invincibleUntil: 0,
   endTime: 0,
+  /** 時間到的結算停留：鎖輸入、速度歸零，直到老師再來一輪或切關 */
+  resultsHold: false,
+  /** 結算標題用：搶氣球是 time，鬼抓人是 ghosts / runners */
+  resultsWinner: 'time' as 'time' | 'ghosts' | 'runners',
   /** id → 位置（存資料非 mesh；碰撞判定用這份，render 只負責畫） */
   balloons: new Map<number, { x: number; y: number; z: number }>(),
   /** 已送出 arena_pop、等 server 仲裁的氣球 id */
@@ -72,8 +79,6 @@ export const arenaState = {
 };
 
 let posTimer: ReturnType<typeof setInterval> | null = null;
-/** 鬼抓人結算的延遲 toast；離場要取消，避免切關後還跳出來 */
-let resultToast: ReturnType<typeof setTimeout> | null = null;
 
 // =============================================================================
 // 初始化 / 進出場
@@ -109,6 +114,9 @@ export function enterArena(opts?: { mode?: 'balloon' | 'tag'; field?: 'grid' | '
   arenaState.stunUntil = 0;
   arenaState.invincibleUntil = 0;
   arenaState.endTime = 0;
+  arenaState.resultsHold = false;
+  arenaState.resultsWinner = 'time';
+  hideArenaResults();
   arenaState.balloons.clear();
   arenaState.pendingPop.clear();
   arenaState.others.clear();
@@ -157,10 +165,9 @@ function teardownArena(): void {
     GameSession.clearTracked(posTimer);
     posTimer = null;
   }
-  if (resultToast) {
-    GameSession.clearTracked(resultToast);
-    resultToast = null;
-  }
+  arenaState.resultsHold = false;
+  arenaState.resultsWinner = 'time';
+  hideArenaResults();
   arenaState.balloons.clear();
   arenaState.pendingPop.clear();
   arenaState.others.clear();
@@ -194,6 +201,7 @@ function handleArenaMessage(msg: ArenaServerMsg): void {
       arenaState.pendingPop.clear();
       (msg.balloons || []).forEach((b) => arenaState.balloons.set(b.id, { x: b.x, y: b.y, z: b.z }));
       updateArenaScoreboard(msg.players || [], arenaState.mode, wsState.myId);
+      applyResultsStep(msg.status, msg.result);
       // 倒數開始時，移到自己的出生點（避免大家疊在原點）
       if (msg.status === 'countdown' && msg.spawns) applyMySpawn(msg.spawns);
       break;
@@ -216,6 +224,7 @@ function handleArenaMessage(msg: ArenaServerMsg): void {
       sound('beep');
       break;
     case 'arena_go': {
+      leaveResults();
       arenaState.status = 'running';
       arenaState.endTime = msg.endTime;
       if (msg.mode) arenaState.mode = msg.mode;
@@ -256,6 +265,8 @@ function handleArenaMessage(msg: ArenaServerMsg): void {
       }
       break;
     case 'arena_respawn':
+      // 結算停留中不再傳送，人留在時間到的位置
+      if (arenaState.resultsHold) break;
       // 只有被抓到的自己會收到：暈眩鎖操作（見 tickArena → flags.multiplayerLock）
       // ＋傳送回出生點；暈眩結束後還有一段無敵（clones.ts 逐 tick 閃爍提示）
       arenaState.stunUntil = Date.now() + (msg.stunMs || 0);
@@ -272,6 +283,10 @@ function handleArenaMessage(msg: ArenaServerMsg): void {
       if (msg.endTime) arenaState.endTime = msg.endTime;
       if (msg.field) setArenaField(msg.field);
       updateArenaScoreboard(msg.scores || [], arenaState.mode, wsState.myId);
+      if (msg.status && msg.status !== 'ended') leaveResults();
+      else if (arenaState.resultsHold) {
+        showArenaResults(arenaState.mode, arenaState.resultsWinner, msg.scores || [], wsState.myId);
+      }
       break;
     case 'arena_end':
       arenaState.status = 'ended';
@@ -284,7 +299,12 @@ function handleArenaMessage(msg: ArenaServerMsg): void {
       droneState.position.z = msg.z;
       droneState.yaw = msg.yaw;
       droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
-      toast('🟢 已恢復連線，回到斷線前位置', 'success');
+      if (arenaState.resultsHold) {
+        holdArenaFlight();
+        toast('🟢 已恢復連線。比賽已結束，先停在這裡等老師', 'success');
+      } else {
+        toast('🟢 已恢復連線，回到斷線前位置', 'success');
+      }
       break;
   }
 }
@@ -322,41 +342,59 @@ function setMyRole(role: Exclude<ArenaRole, null>, stunned: boolean): void {
 }
 
 function showArenaResult(msg: ArenaEndMsg): void {
-  // 老師手動停止 / 切關（智能停止）→ 只提示、不顯示勝負結算（time_up 才有完整結算）
-  if (msg.reason === 'teacher_stop' || msg.reason === 'level_switch') {
+  // 老師手動停止 / 切關只提示。時間到才蓋結算並凍結，等老師的下一個動作。
+  if (!ArenaResults.isTimeUp(msg.reason)) {
+    leaveResults();
     stateHud('🏁 比賽結束');
     toast('🛑 老師結束了本場比賽', 'warning');
     return;
   }
-  stateHud('🏁 大亂鬥結束！');
-  if (msg.mode === 'tag') {
-    // 隊伍勝負：鬼隊總抓捕數有沒有達門檻（見 legacy server.js ARENA_TAG_WIN_MULT）
-    if (msg.winner === 'ghosts') toast('👻 鬼隊獲勝！抓到超多人～', 'error');
-    else toast('🏃 跑者隊獲勝！成功撐過鬼的追擊！', 'success');
-    // 個人榮譽：抓鬼王（抓最多的鬼）＋逃脫達人（被抓最少的跑者），跟隊伍輸贏無關
-    const ranking = msg.ranking || [];
-    const topGhost = ranking
-      .filter((r) => r.role === 'ghost')
-      .sort((a, b) => (b.score || 0) - (a.score || 0))[0];
-    const topRunner = ranking
-      .filter((r) => r.role === 'runner')
-      .sort((a, b) => (a.caughtCount || 0) - (b.caughtCount || 0))[0];
-    const parts: string[] = [];
-    if (topGhost) parts.push(`👻 抓鬼王：${topGhost.emoji || ''}${topGhost.name}（抓到 ${topGhost.score || 0} 次）`);
-    if (topRunner) parts.push(`🏃 逃脫達人：${topRunner.emoji || ''}${topRunner.name}（只被抓 ${topRunner.caughtCount || 0} 次）`);
-    if (parts.length) {
-      if (resultToast) GameSession.clearTracked(resultToast);
-      resultToast = GameSession.trackTimeout(() => {
-        resultToast = null;
-        if (!arenaState.active) return;
-        toast(parts.join('｜'), 'success');
-      }, 1800);
-    }
-  } else {
-    const top = msg.ranking?.[0];
-    toast(top ? `🏆 冠軍：${top.emoji || ''}${top.name}（${top.score} 顆）` : '🏁 結束', 'success');
+  enterResults(
+    {
+      reason: 'time_up',
+      winner: msg.winner,
+      ranking: msg.ranking || [],
+    },
+    true,
+  );
+}
+
+function applyResultsStep(status: string, result: ArenaRoundResult | undefined): void {
+  const step = ArenaResults.transition(arenaState.resultsHold, status, result);
+  if (step === 'show' && result) enterResults(result, !arenaState.resultsHold);
+  else if (step === 'hide') leaveResults();
+}
+
+/** 進入結算停留。announce 只在第一次播放音效，重連補狀態不再播一次。 */
+function enterResults(result: ArenaRoundResult, announce: boolean): void {
+  const first = !arenaState.resultsHold;
+  arenaState.resultsHold = true;
+  arenaState.resultsWinner = result.winner;
+  stopProgram();
+  holdArenaFlight();
+  showArenaResults(arenaState.mode, result.winner, result.ranking, wsState.myId);
+  stateHud('🏁 時間到，等待老師');
+  if (first && announce) sound('complete');
+}
+
+function leaveResults(): void {
+  if (!arenaState.resultsHold) {
+    hideArenaResults();
+    return;
   }
-  sound('complete');
+  arenaState.resultsHold = false;
+  droneState.frozen = false;
+  hideArenaResults();
+  if (!arenaState.active) return;
+  if (arenaState.status === 'countdown') stateHud('🏟️ 即將開始');
+  else if (arenaState.status === 'running') stateHud('🏟️ 開搶！');
+  else stateHud('🏟️ 大亂鬥');
+}
+
+/** 結算停留中，每個物理 tick 之前呼叫：鎖輸入並把速度歸零，積分就停在原地。 */
+export function holdArenaFlight(): void {
+  if (!arenaState.resultsHold) return;
+  ArenaResults.freeze(droneState, flags);
 }
 
 function applyMySpawn(spawns: { id: string; x: number; z: number }[]): void {
@@ -407,7 +445,9 @@ export function myInvincibleNow(now = Date.now()): boolean {
 export function tickArena(): void {
   const now = Date.now();
   // 鎖操控：大亂鬥倒數中 / 鬼抓人暈眩中（時間到自動解除）
+  if (arenaState.resultsHold) holdArenaFlight();
   flags.multiplayerLock =
+    arenaState.resultsHold ||
     arenaState.status === 'countdown' ||
     (arenaState.mode === 'tag' && arenaState.stunUntil > now);
 

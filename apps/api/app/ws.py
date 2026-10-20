@@ -243,6 +243,9 @@ async def _apply_broadcast(room: Room, payload: TeacherBroadcastPayload) -> None
         # 同一 handler 內依序 await，學生保證先收到 end 再收到關卡廣播。
         # 送進「正在進行的那一場」不結束它（足球對戰／大亂鬥），還沒進場的學生要加入。
         level_id = payload.levelId if payload.type in ("load_level", "race_start") else ""
+        # 時間到的結算還停著：切關／重置先解凍再轉發，學生才不會卡在結算畫面
+        if room.arena.holding_results():
+            await room.arena.release_results()
         if ClassLevelSend.stops_arena(level_id):
             await room.arena.stop("level_switch")
         if ClassLevelSend.stops_soccer(level_id):
@@ -346,9 +349,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
             try:
                 valid = STUDENT_MESSAGE_ADAPTER.validate_python(msg)
             except ValidationError:
-                logger.info(
-                    "[WS] 學生訊息驗證失敗，丟棄：type=%s（%s）", msg["type"], record.name
-                )
+                logger.info("[WS] 學生訊息驗證失敗，丟棄：type=%s（%s）", msg["type"], record.name)
                 continue
             # 心跳基準：任何有效訊息都算「有回應」；ping 另外標記此 client 會送心跳
             record.last_seen = time.monotonic()
@@ -435,9 +436,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 maker = ws.app.state.db_sessionmaker
                 if maker is not None and team_id is not None:
                     async with maker() as session:
-                        team_level_ids = await resolve_team_allowed_ids(
-                            session, team_id, known
-                        )
+                        team_level_ids = await resolve_team_allowed_ids(session, team_id, known)
                 entitlement = build_register_entitlement(
                     ws.app.state.settings,
                     known,
@@ -511,9 +510,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                         if saved and valid.clientEventId:
                             await send_safe(
                                 ws,
-                                CompleteAckMsg(
-                                    clientEventId=valid.clientEventId
-                                ).model_dump_json(),
+                                CompleteAckMsg(clientEventId=valid.clientEventId).model_dump_json(),
                             )
                 # ----- 大亂鬥 -----
                 case ArenaJoinMsg():
