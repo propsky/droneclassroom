@@ -1,5 +1,6 @@
 // 相機：第三人稱跟隨（offset (0,4,12) 依 yaw 旋轉、lerp 0.06、lookAt drone）、
-// FPV（C 鍵切換，機身隱藏），以及畫畫教室的 topdown / orbit3d 兩模式（依 level.view 切換）。
+// 考證視角（固定在操作員站位）、FPV（C 鍵切換，機身隱藏），
+// 以及畫畫教室的 topdown / orbit3d 兩模式（依 level.view 切換）。
 //
 // topdown 對齊 legacy main.js L3484–3489 的視覺（近乎正上方、固定框住畫布、不跟機身轉），
 // 但不寫死鏡位：由 guide 折線 bounding box 自動取景（含邊距係數），
@@ -7,19 +8,15 @@
 // orbit3d 對齊 legacy L3490–3498：慢速繞著作品轉的展示台鏡頭，參數全由 JSON orbit 讀取。
 import { Scene, FreeCamera, Vector3 } from '@babylonjs/core';
 import type { LevelDef } from '@creafly/shared';
-import { droneState, forwardVec } from '../core/droneState';
+import { droneState } from '../core/droneState';
 import { levelState } from '../core/level';
 import { DRAW_HEIGHT_DEFAULT } from '../core/pen';
 import { bus, toast } from '../core/events';
+import { arenaState } from '../multiplayer/arena';
 import { activeSoccerField } from '../soccer/field';
-import {
-  clampSoccerCameraY,
-  clampSoccerFpv,
-  SOCCER_CAM_MIN_Y,
-  SOCCER_FOLLOW_DISTANCE,
-  SOCCER_FOLLOW_HEIGHT,
-  SOCCER_TEAM_END_INSET,
-} from '../soccer/enclosureView';
+import { SOCCER_CAM_MIN_Y } from '../soccer/enclosureView';
+import type { SightSolid } from './cameraSight';
+import { PilotView, type CameraPose, type CameraViewMode } from './pilotView';
 
 // ---- 俯視（topdown）取景常數 ----
 /** 邊距係數：取景半徑 = guide bbox 半徑 × 此係數（>1 = 圖形四周留白） */
@@ -84,15 +81,17 @@ function computeGuideBounds(level: LevelDef): GuideBounds {
 export class CameraRig {
   readonly camera: FreeCamera;
   fpv = false;
+  private mode: CameraViewMode = 'follow';
   private tmpTarget = new Vector3();
+  /** 目前關卡會擋住第三人稱焦點的幾何（氣球、圈、障礙） */
+  private courseSolids: SightSolid[] = [];
   /** 目前關卡的 topdown 取景（level-loaded 時重算一次；高度在 update 依 aspect 求） */
   private guideBounds: GuideBounds = { cx: 0, cz: 0, halfX: TOPDOWN_FALLBACK_HALF, halfZ: TOPDOWN_FALLBACK_HALF };
   /** ⚽ 足球窄邊定點視角：站哪個 z 端往場內看（+1 / -1）；null = 一般跟隨視角 */
   private soccerSign: number | null = null;
   /** 固定鏡位的目前抬升量（m），平滑逼近目標；離開 draw 關自然歸零 */
   private fixedCamLift = 0;
-  /** ⚽ 足球視角模式：'follow' 跟隨（預設 — 定點視角會被門環/球/其他飛機擋住）｜'team' 窄邊全場 */
-  private soccerCam: 'follow' | 'team' = 'follow';
+  /** ⚽ 足球視角模式已併入 mode：follow 跟隨、team 全場、exam 考證、fpv 第一人稱 */
   /** 進足球或切回跟隨時直接貼到目標，避免從教室鏡頭插值時整段穿在外殼上 */
   private soccerSnap = false;
 
@@ -105,82 +104,73 @@ export class CameraRig {
     // 不 attachControl：相機完全由程式驅動
     bus.on('level-loaded', ({ level }) => {
       this.guideBounds = computeGuideBounds(level);
+      this.courseSolids = PilotView.courseSolids(level);
     });
-    // ⚽ 足球模式：進場設 sign（多人依隊伍動態換）、離場還原 null + 視角回預設跟隨
+    // ⚽ 足球模式：進場設 sign（多人依隊伍動態換）。全場視角只在場內有意義。
     bus.on('soccer-view-changed', ({ sign }) => {
       this.soccerSign = sign;
-      if (sign === null) this.soccerCam = 'follow';
-      else this.soccerSnap = true;
+      if (sign === null && this.mode === 'team') this.applyMode('follow');
+      else if (sign !== null) this.soccerSnap = true;
     });
   }
 
-  /** 切換視角（C 鍵 / header 按鈕）。足球中三段循環：跟隨 → 全場 → FPV；其餘二段。 */
-  toggleView(): { label: string; fpv: boolean } {
-    let label: string;
-    if (this.soccerSign !== null) {
-      if (!this.fpv && this.soccerCam === 'follow') {
-        this.soccerCam = 'team';
-        label = '🏟 全場視角';
-      } else if (!this.fpv) {
-        this.fpv = true;
-        label = '👁 第一視角(FPV)';
-      } else {
-        this.fpv = false;
-        this.soccerCam = 'follow';
-        this.soccerSnap = true;
-        label = '🎥 跟隨視角';
-      }
-    } else {
-      this.fpv = !this.fpv;
-      label = this.fpv ? '👁 第一視角(FPV)' : '🎥 第三人稱';
-    }
+  /** 切換視角（C 鍵 / header 按鈕）。足球：跟隨 → 全場 → 考證 → FPV；其餘：第三人稱 → 考證 → FPV。 */
+  toggleView(): { label: string; fpv: boolean; mode: CameraViewMode } {
+    const order: CameraViewMode[] =
+      this.soccerSign !== null ? ['follow', 'team', 'exam', 'fpv'] : ['follow', 'exam', 'fpv'];
+    const idx = Math.max(0, order.indexOf(this.mode));
+    this.applyMode(order[(idx + 1) % order.length]!);
+    const label = PilotView.label(this.mode, this.soccerSign !== null);
     toast(label);
-    return { label, fpv: this.fpv };
+    return { label, fpv: this.fpv, mode: this.mode };
+  }
+
+  /** 直接切到某個視角（截圖與測試用）。場外沒有全場視角時改考證。 */
+  setView(mode: CameraViewMode): { label: string; fpv: boolean; mode: CameraViewMode } {
+    if (mode === 'team' && this.soccerSign == null) mode = 'exam';
+    this.applyMode(mode);
+    const label = PilotView.label(this.mode, this.soccerSign !== null);
+    return { label, fpv: this.fpv, mode: this.mode };
+  }
+
+  private applyMode(mode: CameraViewMode): void {
+    this.mode = mode;
+    this.fpv = mode === 'fpv';
+    if (mode === 'follow' && this.soccerSign != null) this.soccerSnap = true;
   }
 
   /** 每個渲染幀更新（pos/yaw 已是插值後的值）。回傳機身是否應顯示。 */
   update(pos: Vector3, yaw: number): boolean {
-    if (this.fpv) {
+    if (this.mode === 'fpv') {
       // 第一視角：相機在機身、看機頭方向（略往下，像 FPV 眼鏡）
-      const f = forwardVec(yaw);
-      const eye = new Vector3(pos.x + f.x * 0.35, pos.y + 0.45, pos.z + f.z * 0.35);
-      // 足球：機頭貼牆時眼位會穿出外殼，收回歸在牆內側，才不會埋進實心板
-      if (this.soccerSign !== null) {
-        const c = clampSoccerFpv(eye.x, eye.y, eye.z, activeSoccerField());
-        eye.set(c.x, c.y, c.z);
-      }
-      this.camera.position.copyFrom(eye);
-      this.tmpTarget.set(eye.x + f.x * 10, eye.y - 1.2, eye.z + f.z * 10);
+      const pose = PilotView.fpv(
+        { x: pos.x, y: pos.y, z: pos.z },
+        yaw,
+        this.soccerSign !== null ? activeSoccerField() : null,
+      );
+      this.camera.position.set(pose.eye.x, pose.eye.y, pose.eye.z);
+      this.tmpTarget.set(pose.target.x, pose.target.y, pose.target.z);
       this.camera.setTarget(this.tmpTarget);
       return false; // FPV 不顯示自己的機身
     }
 
-    // ⚽ 足球：窄邊定點「全場視角」— 站己方端線後方、略高於門頂，看向場內遠端門。
-    // 預設是跟隨視角（落到下方一般分支）：定點視角容易被門環/球/其他飛機擋住，
-    // 想看全場再用 C 鍵/視角鈕切過來。尺寸依伺服器下發的生效場地（soccer/field.ts）。
-    if (this.soccerSign !== null && this.soccerCam === 'team') {
-      const sign = this.soccerSign;
-      const F = activeSoccerField();
-      // 站在端牆內側、略高於近端圓環，才看得到天花鋼架，也不會被圓環擋滿
-      const dist = F.halfZ - SOCCER_TEAM_END_INSET;
-      const camY = clampSoccerCameraY(Math.min(F.top - 0.95, 4.05), F.top);
-      this.camera.position.set(0, camY, sign * dist);
-      this.tmpTarget.set(0, 1.7, -sign * F.halfZ * 0.45);
-      this.camera.setTarget(this.tmpTarget);
+    if (this.mode === 'exam') {
+      this.place(this.examPose());
+      return true;
+    }
+
+    // ⚽ 足球全場：站在己方端牆內側、偏離門軸，才不會被近端門框擋住。
+    if (this.soccerSign !== null && this.mode === 'team') {
+      const sign = this.soccerSign > 0 ? 1 : -1;
+      this.place(PilotView.soccerTeam(activeSoccerField(), sign));
       return true;
     }
 
     // 足球跟隨：F9A-A 護罩直徑 40cm，機位退後才看得到螺旋槳與 LED。
     // 貼邊時機位會落在牆或天花外側；那一面由場地視覺關掉，不擋視線。
-    if (this.soccerSign !== null && this.soccerCam === 'follow') {
-      const dist = SOCCER_FOLLOW_DISTANCE;
-      const cos = Math.cos(yaw);
-      const sin = Math.sin(yaw);
-      const target = new Vector3(
-        pos.x + dist * sin,
-        Math.max(SOCCER_CAM_MIN_Y, pos.y + SOCCER_FOLLOW_HEIGHT),
-        pos.z + dist * cos,
-      );
+    if (this.soccerSign !== null && this.mode === 'follow') {
+      const followed = PilotView.soccerFollow({ x: pos.x, y: pos.y, z: pos.z }, yaw);
+      const target = new Vector3(followed.eye.x, followed.eye.y, followed.eye.z);
       if (this.soccerSnap) {
         this.camera.position.copyFrom(target);
         this.soccerSnap = false;
@@ -205,16 +195,30 @@ export class CameraRig {
     }
     this.fixedCamLift = 0;
 
-    // 第三人稱跟隨：offset (0,4,12) 依 yaw 旋轉
-    const cos = Math.cos(yaw);
-    const sin = Math.sin(yaw);
-    // 旋轉 (0,4,12)：x' = z*sin、z' = z*cos（右手系繞 Y）
-    const ox = 12 * sin;
-    const oz = 12 * cos;
-    const target = new Vector3(pos.x + ox, pos.y + 4, pos.z + oz);
+    // 第三人稱跟隨：offset (0,4,12) 依 yaw 旋轉。焦點被氣球或柱子擋住時沿 x 挪開。
+    const followed = PilotView.dodgeFocus(
+      PilotView.thirdPerson({ x: pos.x, y: pos.y, z: pos.z }, yaw),
+      this.courseSolids,
+    );
+    const target = new Vector3(followed.eye.x, followed.eye.y, followed.eye.z);
     Vector3.LerpToRef(this.camera.position, target, 0.06, this.camera.position);
     this.camera.setTarget(new Vector3(pos.x, pos.y, pos.z));
     return true;
+  }
+
+  private examPose(): CameraPose {
+    if (this.soccerSign !== null) {
+      const sign = this.soccerSign > 0 ? 1 : -1;
+      return PilotView.soccerExam(activeSoccerField(), sign);
+    }
+    if (arenaState.active) return PilotView.arenaExam();
+    return PilotView.courseExam(levelState.current);
+  }
+
+  private place(pose: CameraPose): void {
+    this.camera.position.set(pose.eye.x, pose.eye.y, pose.eye.z);
+    this.tmpTarget.set(pose.target.x, pose.target.y, pose.target.z);
+    this.camera.setTarget(this.tmpTarget);
   }
 
   /** 固定鏡位出框保護：機身高出 baseY + headroom 的部分 → 平滑轉成鏡位抬升量 */

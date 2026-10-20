@@ -1135,7 +1135,7 @@ function initPause(): void {
   });
 }
 
-/** 視角按鈕文字同步（點按鈕與按 C 鍵共用；由 main 呼叫）。label 由 CameraRig 決定（足球中三段循環）。 */
+/** 視角按鈕文字同步（點按鈕與按 C 鍵共用；由 main 呼叫）。label 由 CameraRig 決定。 */
 export function syncViewButton(view: { label: string; fpv: boolean }): void {
   const btn = $('view-btn');
   if (!btn) return;
