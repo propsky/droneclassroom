@@ -313,8 +313,8 @@ def test_ball模式_牆反彈(client: TestClient, teacher_ticket: str, clock: Fa
 def test_ball模式_進球烏龍與重置(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """球心過門面且在門環內 → 攻方得分；守方最後觸球 = 烏龍（own=true 得分仍歸對隊）；
-    進球後球重置中場、進球隊 armed=false。"""
+    """球心過門面且在門環內 → 攻方得分；守方最後觸球 = 烏龍，雙方都不加分。
+    正規進球後球重置中場、進球隊 armed=false。烏龍也重置球，但不鎖返場。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -343,13 +343,16 @@ def test_ball模式_進球烏龍與重置(
             assert (b.vx, b.vy, b.vz) == (0.0, 0.0, 0.0)
             assert b.last_touch is None
 
-            # 藍隊員把球推進自家（-z）門 → 烏龍球：得分歸紅隊、own=true、by=觸球者
+            # 藍隊員把球推進自家（-z）門 → 烏龍：比分不變、own=true、球回中場
             b.last_touch = soccer.players["g:小明"]
             b.x, b.y, b.z, b.vz = 0.0, gy, -(gz - 0.6), -10.0
             tick(client)
             ok = recv_until(s1, "soccer_goal_ok")
-            assert ok["team"] == "red" and ok["own"] is True
-            assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 1}
+            assert ok["team"] == "blue" and ok["own"] is True
+            assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 0}
+            assert soccer.scores == {"blue": 1, "red": 0}
+            assert soccer.armed["red"] is True
+            assert soccer.ball.z == 0.0
 
 
 def test_ball模式_從球門後方穿回不得分(

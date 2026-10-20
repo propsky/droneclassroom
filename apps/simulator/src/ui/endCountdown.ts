@@ -32,8 +32,7 @@ function activeEndTime(): number {
     (soccerState.status === 'running' ||
       soccerState.status === 'break' ||
       soccerState.status === 'golden' ||
-      soccerState.status === 'pk' ||
-      soccerState.status === 'penalty') &&
+      soccerState.status === 'pk') &&
     soccerState.endTime
   ) {
     return soccerState.endTime;

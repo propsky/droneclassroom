@@ -21,9 +21,14 @@ import { toast } from './toast';
 import { TeacherWs } from './ws';
 import { DEV_EMAIL, DEV_PASSWORD, renderLogin, renderOffline } from './views/login';
 import { renderDashboard, type DashboardView } from './views/dashboard';
+import { GoalAnnounceOverlay } from './views/goalAnnounce';
 import { clearResume, loadResume } from './resume';
 
 const app = document.getElementById('app')!;
+const goalPreview = new URLSearchParams(location.search).get('goalpreview');
+if (goalPreview === 'goal' || goalPreview === 'own') {
+  window.setTimeout(() => GoalAnnounceOverlay.preview(goalPreview), 300);
+}
 let wsClient: TeacherWs | null = null;
 let dashboard: DashboardView | null = null;
 /** 免登入模式（伺服器 TEACHER_AUTH_DISABLED=1，由 /api/info 得知）：登入頁多「測試模式：直接進入」 */

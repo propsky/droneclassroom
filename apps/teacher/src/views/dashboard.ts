@@ -38,6 +38,7 @@ import { openStudentsPanel, type StudentsPanel } from './students';
 import { mountLevelsManage, type LevelsManagePanel } from './levelsManage';
 import { openLevelEditor, type LevelEditorContext } from './levelEditor';
 import { levelSelectHtml } from './levelSelect';
+import { GoalAnnounceOverlay } from './goalAnnounce';
 
 export interface DashboardView {
   setWsStatus(connected: boolean): void;
@@ -394,7 +395,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-body">
-              <p class="hint">FAI 前鋒穿門（預設）：只有攻擊手穿對方圓環得分，得分後該機須回己方半場。三局兩勝、局間休息；平手黃金進球，再平手 PK。推球模式不在這裡選。</p>
+              <p class="hint">FAI 前鋒穿門（預設）：只有攻擊手穿對方圓環得分，得分後該隊還能飛的人要回己方半場。三局兩勝、局間休息；平手先 PK，再黃金進球。打進自己的門不算分。推球模式不在這裡選。</p>
               <div class="ctl-grid">
                 <div class="field">
                   <label class="field-label" for="soccer-dur">每局時長</label>
@@ -406,7 +407,6 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                   </select>
                 </div>
               </div>
-              <p class="hint">非攻擊手飛進自家圓環算犯規（本階段只公告，不發牌）。</p>
               <div class="soccer-score" id="soccer-score"><span class="score-side blue">藍隊</span><span class="score-num">0 : 0</span><span class="score-side red">紅隊</span><span class="score-status">等待開始</span></div>
               <div class="hint" id="soccer-armed"></div>
             </div>
@@ -537,7 +537,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 傳到這個關卡會不會結束目前賽局。送進正在打的那一場不會結束。 */
   const switchEndsGame = (levelId: string): boolean =>
     (['countdown', 'running'].includes(gameState.arena) && ClassLevelSend.stopsArena(levelId)) ||
-    (['countdown', 'running', 'break', 'golden', 'pk', 'penalty'].includes(gameState.soccer) &&
+    (['countdown', 'running', 'break', 'golden', 'pk'].includes(gameState.soccer) &&
       ClassLevelSend.stopsSoccer(levelId));
   const levelLabel = (levelId: string): string => ClassLevelSend.find(levelId)?.title ?? levelId;
 
@@ -852,8 +852,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const renderSoccerScore = (): void => {
     const { armed, status, endTime } = soccer;
     gameState.soccer = status;
-    const live = status === 'running' || status === 'countdown' || status === 'break' || status === 'golden' || status === 'pk' || status === 'penalty';
-    const timed = status === 'running' || status === 'break' || status === 'golden' || status === 'pk' || status === 'penalty';
+    const live = status === 'running' || status === 'countdown' || status === 'break' || status === 'golden' || status === 'pk';
+    const timed = status === 'running' || status === 'break' || status === 'golden' || status === 'pk';
     setTabLive('soccer', live);
     soccerStopBtn.hidden = !live; // 停止鈕在卡頭，賽事進行（含休息／黃金／PK）才顯示
     soccerStartBtn.disabled = live; // 開始鈕 disabled 不隱藏（版面不跳）
@@ -870,8 +870,6 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               ? '黃金進球'
               : status === 'pk'
                 ? 'PK'
-                : status === 'penalty'
-                  ? '罰球'
                 : status === 'done'
                   ? '已結束'
                   : '';
@@ -1399,22 +1397,6 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           applySoccerMatch(msg.match);
           renderSoccerScore();
           break;
-        case 'soccer_foul': {
-          const why =
-            msg.reason === 'false_start'
-              ? '搶跑'
-              : msg.reason === 'no_return'
-                ? '得分後未回半場'
-                : '進入自家圓環';
-          toast(`犯規：${msg.byName || '?'} ${why}`, 'error');
-          break;
-        }
-        case 'soccer_penalty':
-          soccer.status = 'penalty';
-          soccer.endTime = msg.endTime;
-          renderSoccerScore();
-          toast(`罰球 10 秒（${msg.byName || '?'}）`, 'error');
-          break;
         case 'soccer_card':
           toast(
             `${msg.card === 'red' ? '紅牌・整場出場' : '黃牌・本局出場'}：${msg.byName || '?'}`,
@@ -1433,15 +1415,13 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         case 'soccer_goal_ok': {
           soccer.scores = msg.scores;
           renderSoccerScore();
-          const teamName = msg.team === 'blue' ? '藍隊' : '紅隊';
-          if (msg.own) {
-            // 推球模式烏龍球：得分歸對隊、by = 最後觸球者
-            toast(`烏龍球！${msg.byName || '?'} 把球推進自家門 → ${teamName}得分`, 'success');
-          } else if (soccer.mode === 'ball') {
-            toast(`${msg.byName || '?'} 推球進門！（${teamName}得分）`, 'success');
-          } else {
-            toast(`${msg.byName || ''} 進球！（${msg.team === 'blue' ? '藍' : '紅'}隊）`, 'success');
-          }
+          GoalAnnounceOverlay.show({
+            team: msg.team,
+            byName: msg.byName || '',
+            scores: msg.scores,
+            own: msg.own,
+            pk: msg.pk,
+          });
           break;
         }
         case 'soccer_end':

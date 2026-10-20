@@ -11,7 +11,7 @@ from .soccer_presets import F9A_A
 
 # 沒帶 shield_r 時的預設（F9A-A，直徑 40 cm）。賽局應傳場地上的 shield_r。
 DEFAULT_SHIELD_R = F9A_A.shield_r
-# 罰球 10 秒（攻擊手對一名防守）。PK 每一記也用這一個，不再另設 20 秒。
+# PK 每一記 10 秒。犯規罰球已拿掉，這常數只給點球時鐘用。
 PENALTY_SEC = 10.0
 
 
@@ -273,46 +273,34 @@ def shield_passes_ring(
     )
 
 
-class PenaltyFlow:
-    """同一輪違規只開一次罰球。純判斷，不改賽局物件。
-
-    F9A.8.4／F9A.9.1：沒回半場再攻，判一次罰球，接著那顆不算。
-    人留在自家圓環裡也是同一筆違規，離開再進來才是下一筆。
-    """
-
-    LIVE = ("running", "golden")
+class OwnGoal:
+    """進了自己隊的門：雙方都不加分。純判斷，不改賽局物件。"""
 
     @staticmethod
-    def own_ring_occupied(*, striker: bool, disabled: bool, inside: bool) -> bool:
-        """非攻擊手、還能飛、護罩在自家圓環開口裡。"""
-        return (not striker) and (not disabled) and inside
+    def by_touch(*, toucher_team: str | None, scoring_team: str) -> bool:
+        """最後觸球的人屬於守這顆門的隊，就是打進自己的門。"""
+        return toucher_team in ("blue", "red") and toucher_team != scoring_team
 
     @staticmethod
-    def open_own_ring(*, status: str, occupied: bool, already_inside: bool) -> bool:
-        """進行中或黃金進球、這次才進圓環，才開罰球。人留在裡面不重複。"""
-        return status in PenaltyFlow.LIVE and occupied and not already_inside
-
-    @staticmethod
-    def open_no_return(*, armed: bool, sanctioned: bool) -> bool:
-        """這一輪返場還沒判過，才因再攻或再越線開罰球。"""
-        return (not armed) and (not sanctioned)
-
-
-def shield_overlaps_opening(
-    x: float,
-    y: float,
-    z: float,
-    *,
-    goal_z: float,
-    goal_y: float,
-    goal_r: float,
-    shield_r: float = DEFAULT_SHIELD_R,
-) -> bool:
-    """護罩碰到圓環開口（非攻擊手進自家圓環）。
-
-    球心在門面前後一個護罩半徑內，且徑向距離小於內半徑：護罩伸進洞裡。
-    只在洞外擦到環管不算進入。
-    """
-    if abs(z - goal_z) > shield_r + 1e-9:
-        return False
-    return math.hypot(x, y - goal_y) < goal_r + 1e-9
+    def shield_into_own(
+        prev: tuple[float, float, float],
+        curr: tuple[float, float, float],
+        *,
+        defend_goal_z: float,
+        goal_y: float,
+        goal_r: float,
+        half_thick: float,
+        shield_r: float = DEFAULT_SHIELD_R,
+    ) -> bool:
+        """護罩沿離開場地的方向，整顆穿過自家圓環。反向穿回場內不算。"""
+        sign = -1.0 if defend_goal_z < 0 else 1.0
+        return shield_passes_ring(
+            prev,
+            curr,
+            goal_z=defend_goal_z,
+            goal_y=goal_y,
+            goal_r=goal_r,
+            attack_sign=sign,
+            half_thick=half_thick,
+            shield_r=shield_r,
+        )

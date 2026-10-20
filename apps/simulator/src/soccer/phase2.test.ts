@@ -172,19 +172,14 @@ function hud(over: Partial<SoccerHudInput> = {}): SoccerHudInput {
     pkScores: { blue: 0, red: 0 },
     pkTurn: null,
     pkRound: 0,
-    foul: false,
     ...over,
   };
 }
 
 describe('F9A 階段二 HUD', () => {
-  it('開賽寫起槳，罰球與黃牌會出現在計分列', () => {
+  it('開賽寫起槳，黃牌會出現在計分列', () => {
     expect(formatSoccerMatchLine(hud({ status: 'countdown', endTime: 0 }))).toContain('起槳');
-    const pen = formatSoccerMatchLine(
-      hud({ status: 'penalty', foul: true, foulReason: 'false_start', endTime: 10_000, now: 0 }),
-    );
-    expect(pen).toContain('罰球 10 秒');
-    expect(pen).toContain('搶跑');
+    expect(formatSoccerMatchLine(hud({ status: 'running' }))).not.toContain('罰球');
     expect(formatSoccerMatchLine(hud({ card: 'yellow' }))).toContain('黃牌');
     expect(formatSoccerMatchLine(hud({ card: 'yellow' }))).toContain('本局出場');
     expect(formatSoccerMatchLine(hud({ disabled: true, card: 'red' }))).toContain('整場出場');
