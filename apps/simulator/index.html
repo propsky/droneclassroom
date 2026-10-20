@@ -449,6 +449,17 @@
     <div id="soccer-status" class="soccer-score">分數：0</div>
 </div>
 
+<!-- 大亂鬥時間到：全場凍結，等老師再來一輪或切關。沒有關閉鈕。 -->
+<div id="arena-results" class="arena-results" hidden>
+    <div class="arena-results-card" role="dialog" aria-modal="true" aria-labelledby="arena-results-title">
+        <p id="arena-results-kicker" class="arena-results-kicker"></p>
+        <h2 id="arena-results-title"></h2>
+        <p id="arena-results-detail"></p>
+        <ol id="arena-results-list"></ol>
+        <p id="arena-results-wait" class="arena-results-wait"></p>
+    </div>
+</div>
+
 <!-- 大亂鬥 HUD（右上：倒數計時 + 場地 + 即時排行） -->
 <div id="arena-hud" class="hud hud-fixed">
     <div class="hud-title arena-title"><span class="btn-ic" data-icon="users"></span>大亂鬥 <span id="arena-timer" class="mono">等待老師開始</span></div>

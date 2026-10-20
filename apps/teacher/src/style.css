@@ -1833,6 +1833,83 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
 
+/* 大亂鬥時間到結算。再來一輪與前往關卡在動作列，主按鈕靠右。 */
+.arena-results {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 10, 20, 0.7);
+  padding: var(--sp-5);
+}
+.arena-results-card {
+  width: min(480px, 100%);
+  max-height: min(720px, 100%);
+  overflow: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-5);
+}
+.arena-results-kicker {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+}
+.arena-results-card h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xl);
+}
+.arena-results-card p {
+  margin: 0 0 var(--sp-4);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+#arena-results-list {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.arena-results-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 44px;
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  border-left: 3px solid transparent;
+}
+.arena-results-row.rank-1 { border-left-color: var(--rank-gold); }
+.arena-results-row.rank-2 { border-left-color: var(--rank-silver); }
+.arena-results-row.rank-3 { border-left-color: var(--rank-bronze); }
+.arena-results-rank {
+  width: 1.5em;
+  color: var(--text-3);
+  font-weight: 700;
+}
+.arena-results-who {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.arena-results-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+.arena-results-empty { color: var(--text-3); }
+
 /* 動效制度：使用者要求減少動態 → 全部關閉 */
 @media (prefers-reduced-motion: reduce) {
   *,

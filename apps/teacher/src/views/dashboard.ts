@@ -6,6 +6,7 @@
 // 每張卡片固定結構：卡頭（標題＋賽局狀態膠囊＋停止鈕〔進行中才出現〕）→ 控件區（label 在上）→ 動作列（右對齊，primary 最右）。
 // 大亂鬥與足球對齊舊版 teacher.html 的功能：排行榜 / 隊伍名單 / 倒數時鐘 / 勝負 toast。
 import type {
+  ArenaResultWinner,
   ArenaScoreEntry,
   CurriculumResponse,
   InfoResponse,
@@ -22,7 +23,8 @@ import type {
   TeacherToServer,
   TeamInfo,
 } from '@creafly/shared';
-import { ClassLevelSend } from '@creafly/shared';
+import { ArenaRanking, ClassLevelSend } from '@creafly/shared';
+import { ArenaResultsPanel } from './arenaResultsPanel';
 import type { TeacherArenaMsg, TeacherSoccerMsg } from '../ws';
 import { fetchTeamCurriculum } from '../api';
 import { clearEditorRoute, parseEditorRoute } from '../editorRoute';
@@ -415,6 +417,19 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           </div>
         </section>
       </main>
+    </div>
+    <div id="arena-results" class="arena-results" hidden>
+      <div class="arena-results-card" role="dialog" aria-modal="true" aria-labelledby="arena-results-title">
+        <p id="arena-results-kicker" class="arena-results-kicker"></p>
+        <h2 id="arena-results-title"></h2>
+        <p id="arena-results-detail"></p>
+        <ol id="arena-results-list"></ol>
+        <p id="arena-results-wait" class="arena-results-wait"></p>
+        <div class="arena-results-actions">
+          <button type="button" class="btn btn-ghost" id="arena-results-levels">${ICONS.map}前往關卡</button>
+          <button type="button" class="btn btn-primary" id="arena-results-again">${ICONS.play}再來一輪</button>
+        </div>
+      </div>
     </div>`;
 
   // ---- 帳號選單（topbar 右側：老師名稱 → 更改密碼 / 登出）----
@@ -619,12 +634,19 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const setArenaHead = (status: string): void => {
     const live = status === 'running' || status === 'countdown';
     arenaStopBtn.hidden = !live; // 停止鈕在卡頭，只在倒數/進行中顯示
-    for (const b of arenaStartBtns) b.disabled = live;
+    for (const b of arenaStartBtns) {
+      b.disabled = live;
+      // 結算停留時，同一顆開始鈕改成再來一輪，老師不用找另一個入口
+      b.innerHTML = status === 'ended' ? `${ICONS.play}再來一輪` : `${ICONS.play}開始大亂鬥`;
+    }
     arenaPill.hidden = !live && status !== 'ended';
     arenaPill.classList.toggle('live', live);
     arenaPillLabel.textContent =
       status === 'running' ? '進行中' : status === 'countdown' ? '即將開始' : status === 'ended' ? '已結束' : '';
   };
+
+  /** 結算標題用。arena_scores 只有名次、沒有勝負，沿用上一筆。 */
+  let arenaResultWinner: ArenaResultWinner = 'time';
 
   // 手動停止大亂鬥（倒數中或進行中皆可）→ 伺服器結算後廣播 arena_end reason:'teacher_stop'
   arenaStopBtn.addEventListener('click', () => {
@@ -632,24 +654,38 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     sendGame({ type: 'arena_stop' });
   });
 
+  /** 用卡片上的模式、場地、時長開一場。結算蓋板的「再來一輪」走同一條。 */
+  const startArenaFromForm = (): boolean => {
+    const sec = Number(arenaDurSel.value) || 180;
+    const mode = pickedArenaMode();
+    const ghostCount = Number.parseInt(ghostCountSel.value, 10) || 1;
+    const field = arenaFieldSel.value === 'playground' ? 'playground' : 'grid';
+    const ok = sendGame(
+      { type: 'arena_start', durationSec: sec, mode, ghostCount, field },
+      `${mode === 'tag' ? '鬼抓人' : '搶氣球'}開始（${sec / 60} 分鐘，${field === 'playground' ? '遊樂場' : '格線'}）`,
+    );
+    // 倒數 3-2-1 期間伺服器不會推排行 → 先在本地給即時回饋，並收起結算
+    if (ok) {
+      arenaClock.stop();
+      arenaClockEl.textContent = '3-2-1…';
+      setArenaHead('countdown');
+      ArenaResultsPanel.hide(root);
+    }
+    return ok;
+  };
   for (const btn of arenaStartBtns) {
     btn.addEventListener('click', () => {
-      const sec = Number(arenaDurSel.value) || 180;
-      const mode = pickedArenaMode();
-      const ghostCount = Number.parseInt(ghostCountSel.value, 10) || 1;
-      const field = arenaFieldSel.value === 'playground' ? 'playground' : 'grid';
-      const ok = sendGame(
-        { type: 'arena_start', durationSec: sec, mode, ghostCount, field },
-        `${mode === 'tag' ? '鬼抓人' : '搶氣球'}開始（${sec / 60} 分鐘，${field === 'playground' ? '遊樂場' : '格線'}）`,
-      );
-      // 倒數 3-2-1 期間伺服器不會推排行 → 先在本地給即時回饋
-      if (ok) {
-        arenaClock.stop();
-        arenaClockEl.textContent = '3-2-1…';
-        setArenaHead('countdown');
-      }
+      startArenaFromForm();
     });
   }
+  root.querySelector<HTMLButtonElement>('#arena-results-again')?.addEventListener('click', () => {
+    startArenaFromForm();
+  });
+  root.querySelector<HTMLButtonElement>('#arena-results-levels')?.addEventListener('click', () => {
+    // 蓋板先收起，關卡分頁的「全班載入」才點得到。學生仍凍結，直到真的送出切關。
+    ArenaResultsPanel.hide(root);
+    switchTab('levels');
+  });
 
   /** 排行榜 + 倒數時鐘（balloon：名次+分數；tag：鬼/跑者狀態 — 照舊版） */
   const renderArena = (
@@ -1290,41 +1326,50 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     onArenaMsg(msg: TeacherArenaMsg): void {
       switch (msg.type) {
         case 'arena_state': {
-          // 快照（進場 / 重連補狀態）：players 帶計分欄位 → 依分數排序當排行榜
-          const entries: ArenaScoreEntry[] = [...msg.players]
-            .sort((a, b) => (b.score || 0) - (a.score || 0))
-            .map((p) => ({
-              id: p.id,
-              name: p.name,
-              emoji: p.emoji,
-              score: p.score || 0,
-              role: p.role ?? null,
-              stunned: p.stunned,
-              invincible: p.invincible,
-              caughtCount: p.caughtCount,
-            }));
+          // 快照（進場 / 重連補狀態）：名次沿用伺服器排好的順序（含同分規則）
+          const entries: ArenaScoreEntry[] = msg.result?.ranking?.length
+            ? msg.result.ranking
+            : ArenaRanking.rank(
+                msg.players.map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  emoji: p.emoji,
+                  score: p.score || 0,
+                  role: p.role ?? null,
+                  stunned: p.stunned,
+                  invincible: p.invincible,
+                  caughtCount: p.caughtCount,
+                })),
+              );
           renderArena(entries, msg.status, msg.endTime, msg.mode);
+          if (msg.status === 'ended' && msg.result) {
+            arenaResultWinner = msg.result.winner;
+            ArenaResultsPanel.show(root, msg.mode, msg.result.winner, msg.result.ranking);
+          } else if (msg.status !== 'ended') {
+            ArenaResultsPanel.hide(root);
+          }
           break;
         }
         case 'arena_scores':
           renderArena(msg.scores, msg.status, msg.endTime, msg.mode);
+          if (msg.status === 'ended' && ArenaResultsPanel.isOpen(root)) {
+            ArenaResultsPanel.show(root, msg.mode, arenaResultWinner, msg.scores);
+          } else if (msg.status !== 'ended') {
+            ArenaResultsPanel.hide(root);
+          }
           break;
         case 'arena_end':
           renderArena(msg.ranking, 'ended', 0, msg.mode);
-          // 結束原因：老師手動停止 / 切換關卡（智能停止）→ 提示原因；時間到 → 照舊報勝負
+          // 結束原因：老師手動停止 / 切換關卡（智能停止）→ 提示原因；時間到 → 蓋結算並停住
           if (msg.reason === 'teacher_stop') {
+            ArenaResultsPanel.hide(root);
             toast('已手動停止', 'info');
           } else if (msg.reason === 'level_switch') {
+            ArenaResultsPanel.hide(root);
             toast('已切換關卡，比賽結束', 'info');
           } else {
-            toast(
-              msg.mode === 'tag'
-                ? msg.winner === 'ghosts'
-                  ? '鬼隊勝！'
-                  : '跑者隊勝！'
-                : '大亂鬥結束',
-              'success',
-            );
+            arenaResultWinner = msg.winner;
+            ArenaResultsPanel.show(root, msg.mode, msg.winner, msg.ranking || []);
           }
           break;
       }

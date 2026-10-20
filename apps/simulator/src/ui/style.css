@@ -1995,6 +1995,79 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   font-weight: 700;
 }
 
+/* 大亂鬥時間到結算（學生端；沒有關閉鈕） */
+.arena-results {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  padding: var(--sp-5);
+}
+.arena-results[hidden] {
+  display: none;
+}
+.arena-results-card {
+  width: min(440px, 100%);
+  max-height: min(640px, 100%);
+  overflow: auto;
+  background: var(--bg-1);
+  color: var(--text-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  padding: var(--sp-5);
+}
+.arena-results-kicker {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+}
+.arena-results-card h2 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-xl);
+}
+.arena-results-card p {
+  margin: 0 0 var(--sp-4);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+}
+#arena-results-list {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.arena-results-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  border-left: 3px solid transparent;
+  background: var(--bg-2);
+  font-size: var(--fs-sm);
+}
+.arena-results-row.rank-1 { border-left-color: var(--rank-1); }
+.arena-results-row.rank-2 { border-left-color: var(--rank-2); }
+.arena-results-row.rank-3 { border-left-color: var(--rank-3); }
+.arena-results-row.me { background: var(--bg-3); font-weight: 700; }
+.arena-results-rank {
+  width: 1.5em;
+  color: var(--text-3);
+  font-weight: 700;
+}
+.arena-results-name { flex: 1; min-width: 0; }
+.arena-results-stat { color: var(--accent); font-weight: 700; }
+.arena-results-empty { color: var(--text-3); font-size: var(--fs-sm); }
+.arena-results-wait { margin-bottom: 0; }
+
 .soccer-score {
   margin-top: var(--sp-1);
   font-size: 28px;

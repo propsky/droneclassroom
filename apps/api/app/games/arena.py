@@ -6,6 +6,8 @@
 - 手動 / 智能停止（legacy 沒做）：老師 arena_stop 或在賽局中切關（load_level /
   race_start / reset_all）→ stop() 廣播 arena_end（reason 'teacher_stop' /
   'level_switch'、含當下排行）後回 idle；倒數中也可停
+- 時間到不回 idle：停在 ended（reason 'time_up'），忽略位置回報，直到老師
+  再來一輪（arena_start）或切關／重置（release_results）才解凍
 - 位置級防作弊（base.py）：座標 clamp、速度上限、arena_pop 距離驗證
 """
 
@@ -40,6 +42,30 @@ ARENA_POP_MAX_DIST = 2.5
 # 防作弊（新增）：位置 clamp 邊界。x/z 同氣球場地；y 下限 0（地面）、
 # 上限取氣球天花板 10 的兩倍，保留越過氣球頂端的正常飛行空間
 ARENA_CLAMP = FieldBounds(max_x=22.0, max_z=22.0, min_y=0.0, max_y=20.0)
+
+
+class ArenaRanking:
+    """時間到結算的名次。與 packages/shared ArenaRanking 同一套規則。
+
+    主鍵沿用各模式既有的 score，高者在前：
+    - 搶氣球：score = 戳破的氣球數
+    - 鬼抓人：score = 鬼的抓捕數（跑者的 score 維持 0）
+    同分時 caughtCount 少者在前。搶氣球此欄為 0，不改變順序；
+    鬼抓人用來把被抓較少的跑者排在同樣 0 分的跑者前面。
+    仍同分則依玩家 id 字串升冪，與加入順序無關。
+    """
+
+    @staticmethod
+    def key(entry: dict[str, Any]) -> tuple[int, int, str]:
+        return (
+            -int(entry.get("score") or 0),
+            int(entry.get("caughtCount") or 0),
+            str(entry.get("id") or ""),
+        )
+
+    @staticmethod
+    def rank(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(entries, key=ArenaRanking.key)
 
 
 @dataclass
@@ -91,6 +117,8 @@ class ArenaGame(BaseGame):
         self.duration_sec: float = 180
         self.ghost_count = 1
         self.winner: str | None = None
+        # 時間到才留在 ended；手動停止 / 切關在 stop() 裡清掉
+        self.end_reason: str | None = None
         self.players: dict[str, ArenaPlayer] = {}
         self.balloons: list[Balloon] = []
         self._init_balloons()  # legacy 在模組載入時就先生一批
@@ -128,9 +156,7 @@ class ArenaGame(BaseGame):
         )
 
     def _init_balloons(self) -> None:
-        self.balloons = [
-            Balloon(i, *self._rand_pos()) for i in range(ARENA_BALLOON_COUNT)
-        ]
+        self.balloons = [Balloon(i, *self._rand_pos()) for i in range(ARENA_BALLOON_COUNT)]
 
     def _assign_spawns(self) -> None:
         """把所有玩家平均散佈在一個圓上，避免 16 台疊在同一個出生點。"""
@@ -171,10 +197,11 @@ class ArenaGame(BaseGame):
         }
 
     def _ranking(self) -> list[dict[str, Any]]:
-        return sorted(
-            (self._player_info(p) for p in self._present()),
-            key=lambda x: -x["score"],
-        )
+        return ArenaRanking.rank([self._player_info(p) for p in self._present()])
+
+    def holding_results(self) -> bool:
+        """時間到之後停在結算：全場凍結，直到老師再來一輪或切關。"""
+        return self.status == "ended" and self.end_reason == "time_up"
 
     def _spawns(self) -> list[dict[str, Any]]:
         return [{"id": p.record.id, "x": p.spawn_x, "z": p.spawn_z} for p in self._active()]
@@ -187,7 +214,7 @@ class ArenaGame(BaseGame):
         return "ghosts" if total_catches >= max(1, runners * ARENA_TAG_WIN_MULT) else "runners"
 
     def snapshot(self) -> dict[str, Any]:
-        return {
+        snap: dict[str, Any] = {
             "type": "arena_state",
             "status": self.status,
             "mode": self.mode,
@@ -202,6 +229,14 @@ class ArenaGame(BaseGame):
             "players": [self._player_info(p) for p in self._present()],
             "spawns": self._spawns(),
         }
+        if self.holding_results():
+            # 遲到與重連沒看到 arena_end，靠這份快照進入同一張結算
+            snap["result"] = {
+                "reason": "time_up",
+                "winner": self.winner,
+                "ranking": self._ranking(),
+            }
+        return snap
 
     async def broadcast_scores(self) -> None:
         """排行廣播：在場玩家 + 老師後台。"""
@@ -291,6 +326,9 @@ class ArenaGame(BaseGame):
         p = self._player_for(record)
         if p is None or not p.active or p.disconnected:
             return
+        # 結算停留：鍵盤／搖桿／觸控的位置回報一律丟掉，人停在最後一筆座標
+        if self.holding_results():
+            return
         await self._apply_pos(p, ARENA_CLAMP, msg.x, msg.y, msg.z, msg.yaw, "大亂鬥")
 
     async def pop(self, record: StudentRecord, msg: ArenaPopMsg) -> None:
@@ -305,9 +343,7 @@ class ArenaGame(BaseGame):
             return
         dist = math.dist((p.x, p.y, p.z), (b.x, b.y, b.z))
         if dist > ARENA_POP_MAX_DIST:
-            await self._strike(
-                p, f"arena_pop 距氣球 {dist:.1f} 單位 > {ARENA_POP_MAX_DIST}，丟棄"
-            )
+            await self._strike(p, f"arena_pop 距氣球 {dist:.1f} 單位 > {ARENA_POP_MAX_DIST}，丟棄")
             return
         b.alive = False
         b.respawn_at = self.now_ms() + ARENA_RESPAWN_MS
@@ -324,6 +360,7 @@ class ArenaGame(BaseGame):
         self.field = msg.field
         self.ghost_count = int(msg.ghostCount) or 1
         self.winner = None
+        self.end_reason = None
         for p in self._active():
             p.score = 0
             p.role = "runner"
@@ -333,7 +370,9 @@ class ArenaGame(BaseGame):
         self._init_balloons()
         self._assign_spawns()
         self.status = "countdown"
-        await self._broadcast(self._active(), self.snapshot())
+        snap = self.snapshot()
+        await self._broadcast(self._active(), snap)
+        await self._broadcast_teachers(snap)
         await self._begin_countdown()
 
     async def send_snapshot_to(self, ws: WebSocket) -> None:
@@ -354,10 +393,29 @@ class ArenaGame(BaseGame):
         await self._end(winner, reason)
         self.status = "idle"
         self.end_time = 0
+        self.end_reason = None
         self._countdown_n = 0
         await self._broadcast(self._active(), self.snapshot())
         await self.broadcast_scores()
         logger.info("[Arena] 停止本場（%s），回 idle", reason)
+
+    async def release_results(self) -> None:
+        """時間到的結算停留結束：回 idle 並解凍。不另發 arena_end。
+
+        老師切關、重置、或開計時賽時呼叫。再來一輪走 start()，不經過這裡。
+        """
+        if not self.holding_results():
+            return
+        self.status = "idle"
+        self.end_time = 0
+        self.winner = None
+        self.end_reason = None
+        self._countdown_n = 0
+        snap = self.snapshot()
+        await self._broadcast(self._active(), snap)
+        await self._broadcast_teachers(snap)
+        await self.broadcast_scores()
+        logger.info("[Arena] 結算結束，回 idle")
 
     # ---------- 倒數 / 開賽 ----------
 
@@ -394,6 +452,7 @@ class ArenaGame(BaseGame):
         """結束：廣播勝負（含老師端）與最終排行；reason 標記結束原因（時間到 / 停止 / 切關）。"""
         self.status = "ended"
         self.winner = winner
+        self.end_reason = reason
         players = self._active()
         msg = {
             "type": "arena_end",

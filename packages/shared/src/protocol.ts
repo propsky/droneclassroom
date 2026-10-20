@@ -291,6 +291,15 @@ export interface ArenaScoreEntry {
   id: string; name: string; emoji: string; score: number;
   role?: ArenaRole; stunned?: boolean; invincible?: boolean; caughtCount?: number;
 }
+/**
+ * 時間到之後附在 arena_state 上的結算。
+ * 老師再來一輪或切關後，快照不再帶這欄。遲到與重連靠它看到同一張結算。
+ */
+export interface ArenaRoundResult {
+  reason: 'time_up';
+  winner: 'time' | 'ghosts' | 'runners';
+  ranking: ArenaScoreEntry[];
+}
 export interface ArenaStateMsg {
   type: 'arena_state';
   status: 'idle' | 'countdown' | 'running' | 'ended';
@@ -301,6 +310,8 @@ export interface ArenaStateMsg {
   balloons: { id: number; x: number; y: number; z: number }[];
   players: ArenaPlayerState[];
   spawns: { id: string; x: number; z: number }[];
+  /** 只有時間到的結算停留才有。手動停止與切關不會帶。 */
+  result?: ArenaRoundResult;
 }
 export interface ArenaCountdownMsg { type: 'arena_countdown'; n: number }
 export interface ArenaGoMsg {

@@ -68,6 +68,7 @@ import {
   arenaState,
   tickArena,
   arenaThrustScale,
+  holdArenaFlight,
   enterArena,
   exitArena,
 } from './multiplayer/arena';
@@ -313,6 +314,8 @@ function fixedTick(nowMs: number): void {
   // 模式分派：大亂鬥 / 足球 tick 接管 ↔ 一般關卡（與伺服器重播共用 core/simTick）。
   // 各模式自己管邊界/判定/HUD，分身視覺在 arenaClones / soccerVisuals
   if (arenaState.active) {
+    // 結算停留先鎖輸入、速度歸零，本 tick 的積分才不會再往前滑
+    holdArenaFlight();
     // 大亂鬥鬼抓人：我是鬼 → 推力 ×GHOST_SPEED（非鬼時恆為 1）
     tickFlightPhysics(feltFrame, arenaThrustScale());
     tickArena();
