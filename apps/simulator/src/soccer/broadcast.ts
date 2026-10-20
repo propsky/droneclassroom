@@ -50,7 +50,7 @@ export function formatClock(sec: number): string {
 
 export interface BroadcastInput {
   status: string;
-  mode: 'ball' | 'striker';
+  mode: 'striker';
   scores: { blue: number; red: number };
   sets: { blue: number; red: number };
   period: number;

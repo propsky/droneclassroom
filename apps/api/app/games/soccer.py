@@ -11,19 +11,15 @@
   以 legacy 為準）
 - 場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
   完整 SoccerFieldDef（含護罩半徑），client 據此渲染。SOCCER_CLASS 選子類
-- 兩種玩法（SoccerStartMsg.mode）：
-  'striker'（預設）= FAI 前鋒穿門：只有攻擊手穿對方圓環得分；得分後該隊
-    全員先回己方半場才能再攻（F9A.8.4）。沒回完就再穿，這一球不算，不罰球。
+- 玩法只有前鋒穿門（SoccerStartMsg.mode='striker'）：只有攻擊手穿對方圓環得分；
+    得分後該隊全員先回己方半場才能再攻（F9A.8.4）。沒回完就再穿，這一球不算，不罰球。
     穿環看整顆護罩與行進方向，伺服器不單信 soccer_goal。
     整顆護罩穿出自家圓環是烏龍，雙方都不加分。
     警告／黃牌／紅牌按隊伍計（F9A.9）。墜機是安全事件，本局少一人，不發紅牌（F9A.8.5）。
     開賽先起槳再 3-2-1，倒數鎖控。倒數中離開起飛點的座標不採用，不另判罰球。
     賽制：一節 durationSec（預設 3 分鐘）、三局兩勝、局間休息。
     平手順序可設定，預設照 WDSC：先各罰 3 球 PK，仍平手再黃金進球。
-  'ball'（隱藏選配，須明確指定）= 推球進門：一顆共用球由伺服器 80ms tick 模擬
-    （積分 + 輕阻力 + 弱重力向懸浮高度回歸 + 牆面反彈），無人機貼近即沿法線推球，
-    球心過門面且在門環半徑內 → 伺服器判進球（推進自家門 = 烏龍，雙方都不加分）；
-    client 的 soccer_goal 上報一律忽略。球模式維持單節、時間到比分，不走三局制。
+    推球（mode='ball'）已移除。舊客戶端送來由 SoccerStartMode 拒絕，不開賽。
 """
 
 import logging
@@ -35,7 +31,7 @@ from typing import Any, Literal
 from fastapi import WebSocket
 
 from ..config import Settings
-from ..protocol import SoccerPosMsg
+from ..protocol import SoccerPosMsg, SoccerStartMode
 from ..roster import Roster, StudentRecord, send_safe
 from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
 from .soccer_presets import F9A_A, SoccerClassSpec, preset_for
@@ -55,7 +51,7 @@ logger = logging.getLogger("creafly.api.games.soccer")
 
 SOCCER_DURATION_DEFAULT = 180  # 1 局 3 分鐘（測試可送較短 durationSec）
 SOCCER_TEAM_NAMES = ("blue", "red")
-# 三局兩勝（與 client 文案一致；球模式不使用）
+# 三局兩勝（與 client 文案一致）
 SOCCER_SETS_TO_WIN = 2
 SOCCER_MAX_PERIODS = 3
 SOCCER_BREAK_SEC = 15  # 局間休息
@@ -64,25 +60,6 @@ SOCCER_PK_MIN_ROUNDS = 3  # WDSC 8.7：先各罰 3 球
 # 平手順序。預設 pk_then_golden = WDSC 8.7；golden_then_pk 把黃金進球放前面。
 TieBreak = Literal["pk_then_golden", "golden_then_pk"]
 TIE_BREAKS = ("pk_then_golden", "golden_then_pk")
-
-# ---------- 推球模式（ball）物理常數 ----------
-# 伺服器 80ms tick 模擬；數值以「單位/秒」為主，每 tick 的量以 BALL_TICK_DT 換算
-
-# 推球模式的黃球半徑。與 client SOCCER_PUSH_BALL_R 同一份（兩邊都是 0.6）。
-# 舊版伺服器寫 1.2、客戶端缺 r 時 fallback 0.6，現在合成這一個值。
-# F9A-A 天花板 5 m、圓環內徑 0.6 m；1.2 的球直徑 2.4 m 會頂到天花，也比整個圓環大。
-BALL_RADIUS = 0.6
-# 推球接觸用的機體半徑（公尺）。只給隱藏的 ball 模式。
-# 不是教室關卡的 DRONE_RADIUS（0.6），也不是 F9A 護罩 shield_r（0.20）。三個數字不要混成同一個。
-DRONE_RADIUS = 0.8
-BALL_TICK_DT = 0.08  # 物理積分步長 = 賽局 tick 週期（80ms），與假時鐘無關、每 tick 固定
-BALL_DRAG = 0.985  # 輕阻力：每 tick 速度衰減倍率
-BALL_HOVER_GAIN = 1.5  # 弱重力：向懸浮高度（goalY）回歸的加速度增益（/秒²）
-# —— 球漂浮在門環高度附近、掉不到地上，比真重力適合無人機推
-BALL_PUSH_MIN = 3.0  # 最小推力（單位/秒）：貼著球慢慢蹭也推得動
-BALL_PUSH_SPEED_MULT = 0.8  # 推力與玩家回報位置速度估計的比例：衝得快踢得遠
-BALL_BOUNCE = 0.7  # 牆 / 天花板 / 地板反彈的速度衰減
-BALL_MAX_SPEED = 20.0  # 球速上限（重疊時每 tick 連推會疊加，防爆衝）
 
 
 @dataclass(frozen=True)
@@ -157,19 +134,6 @@ class SoccerField:
 
 
 @dataclass
-class SoccerBall:
-    """推球模式的共用球（伺服器模擬）。last_touch = 最後觸球者（進球歸屬 / 烏龍判定）。"""
-
-    x: float = 0.0
-    y: float = 0.0
-    z: float = 0.0
-    vx: float = 0.0
-    vy: float = 0.0
-    vz: float = 0.0
-    last_touch: "SoccerPlayer | None" = None
-
-
-@dataclass
 class SoccerPlayer:
     """足球玩家狀態。active=False = 收過 soccer_leave；disconnected=True = WS 斷線可 resume。"""
 
@@ -188,8 +152,6 @@ class SoccerPlayer:
     # 防作弊：上次接受位置回報的時刻（None = 剛加入 / GO 傳送，下一次回報不測速）
     last_pos_ms: float | None = None
     strikes: int = 0
-    # 推球模式：由相鄰兩次位置回報估計的速度（單位/秒），決定推球力度
-    est_speed: float = 0.0
     # 剛得分的那一隊：這台還沒回到己方半場（z 與自家站位同側）
     needs_return: bool = False
     # 牌面、本局不能飛、新局要不要把前鋒還給他、紅牌整場不能回來
@@ -228,15 +190,14 @@ class SoccerGame(BaseGame):
         )
         self.tie_break: TieBreak = self.tie_break_default
         self._rng = random.Random()
-        # 玩法：'striker' FAI 前鋒穿門（預設）/ 'ball' 推球進門（隱藏選配）
-        self.mode = "striker"
+        # 玩法固定前鋒穿門。推球已移除，開賽若送來 ball 會在 start() 拒絕。
+        self.mode = SoccerStartMode.STRIKER
         self.end_time = 0
         self.duration_sec: float = SOCCER_DURATION_DEFAULT
         self.scores: dict[str, int] = {"blue": 0, "red": 0}
         self.armed: dict[str, bool] = {"blue": True, "red": True}  # 得分隊全員回半場前為 False
         self.winner: str | None = None
         self.players: dict[str, SoccerPlayer] = {}
-        self.ball: SoccerBall | None = None  # 推球模式開賽（GO）才生成
         # 三局兩勝。phase：idle / period / break / golden / pk
         self.phase = "idle"
         self.period = 0
@@ -378,11 +339,6 @@ class SoccerGame(BaseGame):
                 p.spawn_x = round(x, 2)
                 p.spawn_z = z
 
-    def _reset_ball(self) -> SoccerBall:
-        """球重置中場：懸浮高度（goalY）、速度歸零、清最後觸球者。"""
-        self.ball = SoccerBall(y=self.field.goal_y)
-        return self.ball
-
     # ---------- payload 組裝（欄位名照 legacy 線上格式）----------
 
     def _player_info(self, p: SoccerPlayer) -> dict[str, Any]:
@@ -399,17 +355,6 @@ class SoccerGame(BaseGame):
     def _spawns(self) -> list[dict[str, Any]]:
         return [{"id": p.record.id, "x": p.spawn_x, "z": p.spawn_z} for p in self._active()]
 
-    def _ball_payload(self) -> dict[str, float] | None:
-        """SoccerBallState 線上格式（含半徑 r，client 據此渲染與預測接觸）。"""
-        if self.ball is None:
-            return None
-        return {
-            "x": round(self.ball.x, 2),
-            "y": round(self.ball.y, 2),
-            "z": round(self.ball.z, 2),
-            "r": BALL_RADIUS,
-        }
-
     def snapshot(self) -> dict[str, Any]:
         return {
             "type": "soccer_state",
@@ -423,7 +368,6 @@ class SoccerGame(BaseGame):
             "players": [self._player_info(p) for p in self._present()],
             "spawns": self._spawns(),
             "field": self.field_payload(),
-            "ball": self._ball_payload(),
             "match": self._match_payload(),
         }
 
@@ -609,22 +553,15 @@ class SoccerGame(BaseGame):
             p.vx = (p.x - prev[0]) / dt_sec
             p.vy = (p.y - prev[1]) / dt_sec
             p.vz = (p.z - prev[2]) / dt_sec
-            p.est_speed = math.dist((p.x, p.y, p.z), prev) / dt_sec
             await self._on_segment(p, prev)
         else:
             p.vx = p.vy = p.vz = 0.0
-            p.est_speed = 0.0
 
     def _cross_fresh(self, p: SoccerPlayer) -> bool:
         return bool(p.pending_cross) and (self.now_ms() - p.pending_cross_ms) <= CROSS_GRANT_MS
 
     async def goal(self, record: StudentRecord) -> None:
-        """進球宣告。沒有伺服器自己看到的整顆護罩穿越就拒絕（擋假得分）。
-
-        ball 模式仍由球物理判定，client 上報一律忽略。
-        """
-        if self.mode == "ball":
-            return
+        """進球宣告。沒有伺服器自己看到的整顆護罩穿越就拒絕（擋假得分）。"""
         p = self._player_for(record)
         if p is None or not p.active or p.disconnected or p.disabled:
             return
@@ -672,8 +609,12 @@ class SoccerGame(BaseGame):
     async def start(
         self, duration_sec: float, mode: str = "striker", tie_break: str | None = None
     ) -> None:
-        """開始比賽：預設前鋒穿門。比分與局數歸零、補齊前鋒、進入既有 3 秒倒數。"""
-        self.mode = mode if mode in ("ball", "striker") else "striker"
+        """開始比賽：前鋒穿門。推球（ball）拒絕、維持現狀。比分與局數歸零後進入 3 秒倒數。"""
+        accepted = SoccerStartMode.playable(mode)
+        if accepted is None:
+            logger.info("[Soccer] 推球模式已移除，拒絕開賽")
+            return
+        self.mode = accepted
         chosen = tie_break if tie_break in TIE_BREAKS else self.tie_break_default
         self.tie_break = chosen  # type: ignore[assignment]
         self.duration_sec = max(5, duration_sec or SOCCER_DURATION_DEFAULT)
@@ -692,7 +633,6 @@ class SoccerGame(BaseGame):
         self._clear_return_flags()
         self._clear_discipline(restore=True, match=True)
         self.winner = None
-        self.ball = None  # GO 才把球放到中場（僅 ball 模式）
         self._ensure_striker("blue")  # 開賽前未指定的隊 → 自動補第一人
         self._ensure_striker("red")
         self._assign_spawns()
@@ -720,7 +660,6 @@ class SoccerGame(BaseGame):
         self.status = "idle"
         self.phase = "idle"
         self.end_time = 0
-        self.ball = None
         await self.broadcast_state()
         logger.info("[Soccer] 停止本場（%s），回 idle", reason)
 
@@ -774,7 +713,6 @@ class SoccerGame(BaseGame):
         self._clear_discipline(restore=True, match=True)
         self.winner = None
         self.end_time = 0
-        self.ball = None
         players = self._active()
         for p in players:
             p.striker = False
@@ -813,23 +751,19 @@ class SoccerGame(BaseGame):
         self.status = "running"
         self.scores = {"blue": 0, "red": 0}
         self._clear_return_flags()
-        if self.mode != "ball":
-            self._clear_discipline(restore=True, match=False)
-            self._ensure_striker("blue")
-            self._ensure_striker("red")
-        if not first and self.mode != "ball":
+        self._clear_discipline(restore=True, match=False)
+        self._ensure_striker("blue")
+        self._ensure_striker("red")
+        if not first:
             self._assign_spawns()
         players = self._active()
         for p in players:
             p.last_pos_ms = None  # 傳送到出生點 → 重置測速基準
-            p.est_speed = 0.0
             p.vx = p.vy = p.vz = 0.0
             p.needs_return = False
             p.pending_cross = False
             p.spawn_checked_in = False
         self.end_time = int(self.now_ms() + self.duration_sec * 1000)
-        if self.mode == "ball":
-            self._reset_ball()  # 球放中場（懸浮高度）
         await self._broadcast(
             players,
             {
@@ -839,7 +773,6 @@ class SoccerGame(BaseGame):
                 "players": [self._player_info(p) for p in players],
                 "field": self.field_payload(),
                 "mode": self.mode,
-                "ball": self._ball_payload(),
                 "match": self._match_payload(),
             },
         )
@@ -872,125 +805,6 @@ class SoccerGame(BaseGame):
         await self.broadcast_scores()
         logger.info(
             "[Soccer] 結束：藍 %d : %d 紅 → winner=%s（%s）", blue, red, self.winner, reason
-        )
-
-    # ---------- 推球模式：球物理（80ms tick）----------
-
-    async def _tick_ball(self) -> None:
-        """一步球物理：無人機推球 → 積分 + 阻力 + 懸浮回歸 → 牆面反彈 → 進球判定 → 廣播。"""
-        b = self.ball
-        if b is None:
-            return
-        f = self.field
-        dt = BALL_TICK_DT
-        # 無人機推球：任一玩家最後回報位置與球距 < r球 + r機 → 沿法線給推力
-        for p in self._active():
-            if p.last_pos_ms is None:
-                continue  # GO 後尚未回報位置，視為未接觸
-            dx, dy, dz = b.x - p.x, b.y - p.y, b.z - p.z
-            d = math.sqrt(dx * dx + dy * dy + dz * dz)
-            if d >= BALL_RADIUS + DRONE_RADIUS:
-                continue
-            if d < 1e-6:
-                # 完全重疊（極罕見）：往該隊攻門方向推
-                atk = self._teams.get(p.team or "", self._teams["blue"])["attackGoalZ"]
-                nx, ny, nz = 0.0, 0.0, math.copysign(1.0, atk)
-            else:
-                nx, ny, nz = dx / d, dy / d, dz / d
-            power = BALL_PUSH_MIN + p.est_speed * BALL_PUSH_SPEED_MULT
-            b.vx += nx * power
-            b.vy += ny * power
-            b.vz += nz * power
-            b.last_touch = p  # 記錄最後觸球者（進球歸屬 / 烏龍判定）
-        # 球速上限（接觸期間每 tick 連推會疊加）
-        speed = math.sqrt(b.vx * b.vx + b.vy * b.vy + b.vz * b.vz)
-        if speed > BALL_MAX_SPEED:
-            k = BALL_MAX_SPEED / speed
-            b.vx, b.vy, b.vz = b.vx * k, b.vy * k, b.vz * k
-        # 積分 + 輕阻力 + 弱重力向懸浮高度（goalY）回歸（球漂浮、掉不到地上）
-        z0 = b.z  # 積分前 z：門面穿越判定用（只認「由場內向外」穿越，回穿不算）
-        b.x += b.vx * dt
-        b.y += b.vy * dt
-        b.z += b.vz * dt
-        b.vx *= BALL_DRAG
-        b.vy *= BALL_DRAG
-        b.vz *= BALL_DRAG
-        b.vy += (f.goal_y - b.y) * BALL_HOVER_GAIN * dt
-        # 側牆 / 地板 / 天花板反彈（×BALL_BOUNCE）
-        if abs(b.x) > f.half_x - BALL_RADIUS:
-            b.x = math.copysign(f.half_x - BALL_RADIUS, b.x)
-            b.vx = -b.vx * BALL_BOUNCE
-        if b.y < BALL_RADIUS:
-            b.y = BALL_RADIUS
-            b.vy = -b.vy * BALL_BOUNCE
-        elif b.y > f.ceil - BALL_RADIUS:
-            b.y = f.ceil - BALL_RADIUS
-            b.vy = -b.vy * BALL_BOUNCE
-        # 門面（z=±goal_z，與 client 門環視覺同位置）：球心由場內向外穿越門面
-        # 且在門環半徑內 → 進球（_ball_goal 會把球重置回中場）。
-        # 沒進門的球一律被端牆（z=±half_z）反彈；門面～端牆之間是門後退場空間，
-        # 球在該區域可自由移動、也可穿過門環回到場內（回穿不計分）。
-        crossed_goal = (z0 < f.goal_z <= b.z) or (z0 > -f.goal_z >= b.z)
-        if crossed_goal and math.hypot(b.x, b.y - f.goal_y) < f.goal_r:
-            await self._ball_goal(1 if b.z > 0 else -1)
-        elif abs(b.z) > f.half_z - BALL_RADIUS:
-            b.z = math.copysign(f.half_z - BALL_RADIUS, b.z)
-            b.vz = -b.vz * BALL_BOUNCE
-        # 每 tick 廣播球位置（僅 running 期間會走到這裡）
-        msg = {"type": "soccer_ball", "ball": self._ball_payload()}
-        await self._broadcast(self._active(), msg)
-        await self._broadcast_teachers(msg)
-
-    async def _ball_goal(self, goal_sign: int) -> None:
-        """球心過門面。攻方最後觸球才得分；守方把球推進自己的門，雙方都不加分。"""
-        toucher = self.ball.last_touch if self.ball else None
-        # +z 門 = 藍隊攻門 → 藍得分；-z 門 → 紅得分（依 _teams 換算，不寫死）
-        scoring = next(
-            t for t, cfg in self._teams.items() if cfg["attackGoalZ"] * goal_sign > 0
-        )
-        own = OwnGoal.by_touch(
-            toucher_team=toucher.team if toucher is not None else None,
-            scoring_team=scoring,
-        )
-        if own and toucher is not None and toucher.team in SOCCER_TEAM_NAMES:
-            # 烏龍：比分不動，也沒有得分隊要返場。球仍重置中場，避免卡在門裡再觸發。
-            ok = self._goal_ok(
-                team=toucher.team,
-                by=toucher.record.id,
-                by_name=toucher.record.name,
-                own=True,
-            )
-            await self._announce_goal(ok)
-            self._reset_ball()
-            logger.info(
-                "[Soccer] 烏龍，%s 把球推進自家門，比分不變 藍 %d : %d 紅",
-                toucher.record.name,
-                self.scores["blue"],
-                self.scores["red"],
-            )
-            return
-        self.scores[scoring] += 1
-        # 沿用 armed：進球隊先鎖，該隊攻擊手過中線回自家半場才恢復（球模式不走三局制）
-        st = self._striker_of(scoring)
-        if st is not None:
-            st.needs_return = True
-        self.armed[scoring] = False
-        ok = self._goal_ok(
-            team=scoring,
-            by=toucher.record.id if toucher else "",
-            by_name=toucher.record.name if toucher else "",
-        )
-        await self._announce_goal(ok)
-        await self.broadcast_scores()
-        # 進球後球重置中場（armed 機制，client 端引導得分隊返回）
-        self._reset_ball()
-        logger.info(
-            "[Soccer] ⚽ %s 把球推進%s門（%s 得分）！藍 %d : %d 紅",
-            toucher.record.name if toucher else "？",
-            "＋z" if goal_sign > 0 else "－z",
-            scoring,
-            self.scores["blue"],
-            self.scores["red"],
         )
 
     # ---------- 賽制：三局兩勝 / 局間 / 黃金進球 / PK ----------
@@ -1558,20 +1372,15 @@ class SoccerGame(BaseGame):
         self._contact_latch.intersection_update(live)
 
     async def tick(self) -> None:
-        """推進賽局：倒數、回半場、球物理、節次／黃金／PK、碰撞罰牌、位置廣播。"""
+        """推進賽局：倒數、回半場、節次／黃金／PK、碰撞罰牌、位置廣播。"""
         now = self.now_ms()
         if self.status == "countdown":
             await self._tick_countdown()
         if self.status in ("running", "golden"):
             await self._tick_returns()
-            if self.mode == "ball" and self.status == "running":
-                await self._tick_ball()
             await self._tick_contacts()
         if self.status == "running" and now >= self.end_time:
-            if self.mode == "ball":
-                await self._end("time")
-            else:
-                await self._resolve_period()
+            await self._resolve_period()
         elif self.status == "break" and now >= self.end_time:
             self.period += 1
             await self._open_period(first=False)

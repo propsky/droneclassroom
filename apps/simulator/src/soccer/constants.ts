@@ -135,12 +135,6 @@ export const SOCCER_GOAL_INSET = F9A_A.goalInset;
  */
 export const SOCCER_BALL_R = F9A_A.shieldR;
 
-/**
- * ball 模式黃球半徑。與 apps/api/app/games/soccer.py 的 BALL_RADIUS 同一份。
- * 伺服器有下發 r 時以封包為準；缺 r 時用這個，不要再寫另一個 fallback。
- */
-export const SOCCER_PUSH_BALL_R = 0.6;
-
 /** 隊色（與 legacy SOCCER_TEAM_COLORS 相同） */
 export const SOCCER_TEAM_COLORS: Record<SoccerTeam, number> = {
   blue: 0x3b82f6,

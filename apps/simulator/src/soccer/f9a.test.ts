@@ -7,7 +7,6 @@ import {
   SOCCER_FIELD,
   SOCCER_GOAL_INSET,
   SOCCER_START_DEPTH,
-  SOCCER_PUSH_BALL_R,
   SOCCER_START_WIDTH,
   soccerGoalInnerDiameter,
   soccerGoalOuterDiameter,
@@ -58,7 +57,6 @@ describe('F9A-A 場地與圓環', () => {
     expect(SOCCER_BALL_R).toBeCloseTo(0.2);
     expect(SOCCER_BALL_R).toBeLessThan(SOCCER_FIELD.goalR);
     expect(SOCCER_BALL_R * 2).toBeLessThan(soccerGoalInnerDiameter());
-    expect(SOCCER_PUSH_BALL_R).toBe(0.6);
   });
 });
 

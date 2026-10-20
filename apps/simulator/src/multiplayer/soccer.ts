@@ -1,15 +1,13 @@
 // ⚽ 多人足球對戰（伺服器權威 — apps/api/app/games/soccer.py）。
 // 每隊人數上限：F9A-A 5 人、F9A-B 3 人。
-// 兩種玩法（伺服器下發 mode）：
-// - 'striker' 前鋒穿門：客戶端用護罩後緣 + 行進方向偵測後送 soccer_goal（1.5s 去抖）。
-//   伺服器依位置軌跡重算，沒有整顆穿過就不計分。得分後該隊全員先回己方半場。
-// - 'ball' 推球進門（新）：共用球由伺服器模擬（soccer_ball ~12.5Hz 廣播 → 60Hz 內插渲染），
-//   進球由伺服器判定（client 不偵測不上報）。推進自家門是烏龍（own=true），雙方都不加分。
+// 前鋒穿門：客戶端用護罩後緣 + 行進方向偵測後送 soccer_goal（1.5s 去抖）。
+// 伺服器依位置軌跡重算，沒有整顆穿過就不計分。得分後該隊全員先回己方半場。
+// 推進自家門是烏龍（own=true），雙方都不加分，進球公告照舊。
 // 場地資料驅動：尺寸由 soccer_go / soccer_state 的 field 下發（soccer/field.ts 生效值），
 // 邊界 clamp / 進球判定 / 渲染 / 相機全依它 — 老師調場地大小，客戶端零改動。
 //
 // 機對機碰撞對齊護罩半徑：推出到不穿模，並加互推反作用；?nocontact=1 可關。
-// 視覺（場地 / 分身 / 彩帶 / 共用球 / 球框）在 render/soccerField.ts；HUD 在 ui/soccerHud.ts。
+// 視覺（場地 / 分身 / 彩帶 / 球框）在 render/soccerField.ts；HUD 在 ui/soccerHud.ts。
 import type {
   SoccerServerMsg,
   SoccerPlayerState,
@@ -18,7 +16,6 @@ import type {
   SoccerEndMsg,
   SoccerMode,
   SoccerFieldDef,
-  SoccerBallState,
   SoccerMatchMeta,
 } from '@creafly/shared';
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
@@ -28,7 +25,7 @@ import { GameSession } from '../core/session';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
-import { SOCCER_PUSH_BALL_R, soccerCameraSign } from '../soccer/constants';
+import { soccerCameraSign } from '../soccer/constants';
 import { shieldPassesRing } from '../soccer/crossing';
 import {
   SOCCER_IMPACT_TICK,
@@ -70,22 +67,10 @@ export interface SoccerOther {
   hasPos: boolean;
 }
 
-/** 推球模式的共用球（伺服器模擬 ~12.5Hz；客戶端 60Hz 內插 — 與分身同一套模式） */
-export interface SoccerBall {
-  /** 球半徑（伺服器下發，資料驅動） */
-  r: number;
-  /** 伺服器最新位置；null = 還沒收到過 */
-  target: { x: number; y: number; z: number } | null;
-  /** 內插後位置（tickSoccerMatch 推進；render/soccerField 直接取用） */
-  pos: { x: number; y: number; z: number };
-  /** 已收過至少一筆位置（未收過 → 不畫） */
-  hasPos: boolean;
-}
-
 export const soccerState = {
   active: false,
   status: 'idle' as SoccerMatchStatus,
-  /** 玩法（伺服器下發；缺省 'striker' = legacy 相容）：'ball' 推球進門 / 'striker' 前鋒穿門 */
+  /** 玩法固定前鋒穿門。舊伺服器若還帶 ball，這裡仍維持 striker。 */
   mode: 'striker' as SoccerMode,
   myTeam: null as SoccerTeam | null,
   myStriker: false,
@@ -98,10 +83,6 @@ export const soccerState = {
   goalCooldownUntil: 0,
   /** 機對機碰撞開關（?nocontact=1 關閉 — 教學備用） */
   contactEnabled: true,
-  /** 推球模式：共用球狀態；null = 非 ball 模式或還沒收到 */
-  ball: null as SoccerBall | null,
-  /** 推球模式：本機是否貼近球（純視覺回饋 — render 讓球微發亮；物理在伺服器） */
-  ballNear: false,
   /** playerId → 分身邏輯狀態 */
   others: new Map<string, SoccerOther>(),
   /** 三局兩勝進度（伺服器 match；缺省當第 0 局） */
@@ -197,15 +178,13 @@ export function enterSoccerMatch(): void {
   GameSession.enter('soccer-match');
   soccerState.active = true;
   soccerState.status = 'idle';
-  soccerState.mode = 'striker'; // 伺服器 soccer_state / soccer_go 會再告知實際玩法
+  soccerState.mode = 'striker';
   soccerState.myTeam = null;
   soccerState.myStriker = false;
   soccerState.scores = { blue: 0, red: 0 };
   soccerState.armed = { blue: true, red: true };
   soccerState.endTime = 0;
   soccerState.goalCooldownUntil = 0;
-  soccerState.ball = null;
-  soccerState.ballNear = false;
   soccerState.period = 0;
   soccerState.sets = { blue: 0, red: 0 };
   soccerState.pkScores = { blue: 0, red: 0 };
@@ -266,13 +245,11 @@ function teardownSoccerMatch(): void {
     posTimer = null;
   }
   soccerState.others.clear();
-  soccerState.ball = null;
-  soccerState.ballNear = false;
   resetSoccerField(); // 不把伺服器場地殘留給下一個模式（單人練習用 fallback）
   setSolidObstacles([]);
   setMeshCollisionBackend(null);
   bus.emit('soccer-view-changed', { sign: null });
-  bus.emit('soccer-exited', {}); // render 清場地 / 分身 / 彩帶 / 共用球（dispose）、還原機體
+  bus.emit('soccer-exited', {}); // render 清場地 / 分身 / 彩帶（dispose）、還原機體
   showSoccerMatchHud(false);
   showSoccerFeel(false);
   flags.multiplayerLock = false;
@@ -309,7 +286,6 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       applyMatch(msg.match);
       applyServerMode(msg.mode);
       applyServerField(msg.field);
-      applyServerBall(msg.ball);
       applyMyTeamRole(msg.players);
       updateSoccerPlayers(msg.players);
       // 倒數 / 待機時套用出生點（開賽前大家先站好）
@@ -351,27 +327,19 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       applyMatch(msg.match);
       applyServerMode(msg.mode);
       applyServerField(msg.field);
-      applyServerBall(msg.ball);
       applyMyTeamRole(msg.players);
       if (msg.spawns) applyMySpawn(msg.spawns);
       bus.emit('countdown', { n: 0 }); // GO!
       sound('go');
-      // 推球模式：人人都能得分（沒有前鋒角色提示）；striker 模式照舊
       stateHud(
-        soccerState.mode === 'ball'
-          ? '⚽ 把球推進「對方」的門！推進自家門不算分'
-          : (msg.match?.period ?? 1) > 1
-            ? `⚽ 第 ${msg.match?.period} 局開始`
-              : soccerState.myStriker
-              ? '🎀 你是前鋒！穿過對方的圓環得分，得分後全隊先回己方半場'
-              : '🛡 你是防守。打進自己的門不算分。得分後跟全隊回半場',
+        (msg.match?.period ?? 1) > 1
+          ? `⚽ 第 ${msg.match?.period} 局開始`
+          : soccerState.myStriker
+            ? '🎀 你是前鋒！穿過對方的圓環得分，得分後全隊先回己方半場'
+            : '🛡 你是防守。打進自己的門不算分。得分後跟全隊回半場',
       );
       syncSoccerLock();
       updateMatchHud();
-      break;
-    case 'soccer_ball':
-      // 推球模式：共用球位置（~12.5Hz）→ 內插目標；首筆直接放到位
-      applyServerBall(msg.ball);
       break;
     case 'soccer_scores': {
       const prev = soccerState.status;
@@ -466,39 +434,14 @@ function notePhase(prev: SoccerMatchStatus): void {
   else if (s === 'pk') stateHud('🎯 點球：每球 10 秒，按 K 可以換人來罰');
 }
 
-/** 玩法（伺服器權威；缺省 'striker' = legacy 相容）。彩帶開關由 render 逐 tick 依 mode 套用 */
+/** 玩法固定前鋒穿門。舊封包若還帶 ball，忽略、維持 striker。 */
 function applyServerMode(mode: SoccerMode | undefined): void {
-  soccerState.mode = mode === 'ball' ? 'ball' : 'striker';
-  if (soccerState.mode !== 'ball') {
-    soccerState.ball = null;
-    soccerState.ballNear = false;
-  }
+  soccerState.mode = mode === 'striker' ? mode : 'striker';
 }
 
 /** 場地定義（伺服器下發 → 生效值變更時通知 render 重建場地 / 門環） */
 function applyServerField(field: SoccerFieldDef | undefined): void {
   if (setSoccerFieldFromServer(field)) bus.emit('soccer-field-changed', {});
-}
-
-/** 共用球狀態（soccer_go / soccer_state 的 ball 與週期 soccer_ball 共用） */
-function applyServerBall(ball: SoccerBallState | null | undefined): void {
-  if (!ball || soccerState.mode !== 'ball') return;
-  let b = soccerState.ball;
-  if (!b) {
-    b = {
-      r: ball.r || SOCCER_PUSH_BALL_R,
-      target: null,
-      pos: { x: ball.x, y: ball.y, z: ball.z },
-      hasPos: false,
-    };
-    soccerState.ball = b;
-  }
-  if (ball.r) b.r = ball.r;
-  b.target = { x: ball.x, y: ball.y, z: ball.z };
-  if (!b.hasPos) {
-    b.pos = { ...b.target }; // 首筆直接放到位（避免從原點滑過去）
-    b.hasPos = true;
-  }
 }
 
 /** 自己屬哪一隊 / 是否前鋒（伺服器權威）→ 更新狀態 + 依隊伍切換窄邊視角 */
@@ -615,10 +558,9 @@ export function tickSoccerMatch(): void {
   }
   clampMatchBounds();
   interpolateOthers();
-  interpolateBall();
   if (soccerState.contactEnabled) resolveDroneContacts();
   noteCrash();
-  detectGoal(); // striker 模式限定（ball 模式進球由伺服器判定，client 不上報）
+  detectGoal();
   soccerState.prevX = droneState.position.x;
   soccerState.prevY = droneState.position.y;
   soccerState.prevZ = droneState.position.z;
@@ -648,25 +590,6 @@ function noteCrash(): void {
   syncSoccerLock();
   sendToServer({ type: 'soccer_crash' });
   stateHud('墜機：本局排除');
-}
-
-/**
- * 推球模式：共用球 60Hz 內插（沿用分身內插模式）＋「貼近球」視覺回饋旗標。
- * 物理（推球 / 反彈 / 進門）全在伺服器；本機只算距離讓球微發亮，學生知道碰到了。
- */
-function interpolateBall(): void {
-  const b = soccerState.ball;
-  if (!b || !b.hasPos || !b.target) {
-    soccerState.ballNear = false;
-    return;
-  }
-  b.pos.x += (b.target.x - b.pos.x) * INTERP;
-  b.pos.y += (b.target.y - b.pos.y) * INTERP;
-  b.pos.z += (b.target.z - b.pos.z) * INTERP;
-  const p = droneState.position;
-  const d = Math.hypot(p.x - b.pos.x, p.y - b.pos.y, p.z - b.pos.z);
-  const shieldR = activeSoccerField().shieldR;
-  soccerState.ballNear = d < b.r + shieldR + 0.15; // 視覺貼近：護罩半徑 + 網路延遲餘裕
 }
 
 /** 內插他人分身位置（60Hz 固定 tick × 0.25 = legacy 每幀 @60fps 等價） */
@@ -711,7 +634,7 @@ function resolveDroneContacts(): void {
  * 前鋒穿對方門 → 上報 server。
  * 護罩掃掠體要沿進攻方向穿過開口（貼近內緣也算）；只打到框、從框外飛過、反向都不算。
  * server 用同一套幾何再算一次，對不上就拒絕（擋假得分）。
- * ball 模式不在此偵測。上報前先補送最新位置，讓伺服器這一段軌跡含穿越。
+ * 上報前先補送最新位置，讓伺服器這一段軌跡含穿越。
  */
 function detectGoal(): void {
   if (soccerState.mode !== 'striker') return;
@@ -752,7 +675,6 @@ function detectGoal(): void {
 
 /**
  * 計分 HUD（比分 / 倒數 / 我的隊伍角色 / 半場重置提示）— 對齊 legacy updateSoccerMatchHud。
- * ball 模式：誰都能得分 → 不顯示「前鋒 / 防守」角色與半場重置提示；比分照舊。
  */
 function updateMatchHud(): void {
   const team = soccerState.myTeam;

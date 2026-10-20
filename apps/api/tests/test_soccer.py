@@ -114,7 +114,7 @@ def test_striker模式進球驗證與半場重置與勝負(
             t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
             go = _countdown_to_go(client, clock, s1)
             assert go["mode"] == "striker"
-            assert go["ball"] is None  # striker 模式沒有共用球
+            assert "ball" not in go
             assert go["match"]["phase"] == "period" and go["match"]["period"] == 1
             # F9A-A：14×7×5、內半徑 0.30、管半徑 0.10、門面離底線 1.5m（goalZ=5.5）、護罩 0.20
             y, gz, _z0, _z1 = f9a_cross()
@@ -309,7 +309,7 @@ def test_未帶mode預設striker(client: TestClient, teacher_ticket: str, clock:
             t.send_json({"type": "soccer_start", "durationSec": 30})
             go = _countdown_to_go(client, clock, s1)
             assert go["mode"] == "striker"
-            assert go["ball"] is None
+            assert "ball" not in go
             assert go["match"]["sets"] == {"blue": 0, "red": 0}
 
 

@@ -315,10 +315,23 @@ class ArenaStopMsg(_RoomScopedModel):
     type: Literal["arena_stop"]
 
 
+class SoccerStartMode:
+    """開賽玩法。推球（ball）已移除：舊客戶端仍可能送 mode=ball，解析成功後拒絕開賽。"""
+
+    STRIKER = "striker"
+
+    @staticmethod
+    def playable(mode: str | None) -> str | None:
+        """可開賽回 'striker'。推球回 None，呼叫端不要開賽、也不要當驗證錯誤丟整條連線。"""
+        if mode == "ball":
+            return None
+        return SoccerStartMode.STRIKER
+
+
 class SoccerStartMsg(_RoomScopedModel):
     """開始足球。durationSec 下限 5 秒由 handler clamp（對齊 legacy Math.max(5, …)）。
 
-    mode 缺省 'striker'（FAI 前鋒穿門）。'ball' 是隱藏選配，只有明確指定才啟用。
+    mode 缺省 'striker'（FAI 前鋒穿門）。'ball' 仍收得進來，交給 SoccerStartMode 拒絕。
     """
 
     type: Literal["soccer_start"]

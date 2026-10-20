@@ -88,6 +88,7 @@ from .protocol import (
     SoccerResetMsg,
     SoccerSetStrikerMsg,
     SoccerSetTeamMsg,
+    SoccerStartMode,
     SoccerStartMsg,
     SoccerStateReqMsg,
     SoccerStopMsg,
@@ -757,6 +758,9 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     await arena.stop()
                 # ----- 足球 -----
                 case SoccerStartMsg():
+                    if SoccerStartMode.playable(valid.mode) is None:
+                        logger.info("[Soccer] 推球模式已移除，拒絕開賽")
+                        continue
                     await soccer.start(valid.durationSec, valid.mode, tie_break=valid.tieBreak)
                     await _notify_not_in_game(
                         room,

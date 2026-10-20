@@ -122,10 +122,6 @@ export class SoccerFieldVisuals {
   private myDrone: SoccerDroneModel | null = null;
   private scoreboards: SoccerScoreboard[] = [];
   private lights: PointLight[] = [];
-  private sharedBall: Mesh | null = null;
-  private sharedBallMat: StandardMaterial | null = null;
-  private sharedBallR = 0;
-  private sharedBallGlow = 0;
   private clones = new Map<string, SoccerCloneVisual>();
   private sparks: Spark[] = [];
   private active = false;
@@ -245,8 +241,7 @@ export class SoccerFieldVisuals {
         this.scoreboards.length +
         this.sparks.length +
         this.clones.size +
-        (this.myDrone ? 1 : 0) +
-        (this.sharedBall ? 1 : 0),
+        (this.myDrone ? 1 : 0),
     );
   }
 
@@ -905,7 +900,6 @@ export class SoccerFieldVisuals {
 
     if (!soccerState.active) return;
     this.syncClones();
-    this.syncSharedBall();
     for (const [id, c] of this.clones) {
       const o = soccerState.others.get(id);
       if (!o) continue;
@@ -1038,58 +1032,6 @@ export class SoccerFieldVisuals {
     label.parent = model.root;
     if (o.hasPos) model.pose(o.pos.x, o.pos.y, o.pos.z, o.pos.yaw, 0, 0, 0);
     return { root: model.root, model, appliedTeam: o.team, appliedStriker: striker };
-  }
-
-  private syncSharedBall(): void {
-    const b = soccerState.ball;
-    const want = soccerState.mode === 'ball' && !!b && b.hasPos;
-    if (!want) {
-      if (this.sharedBall) {
-        this.sharedBall.dispose(false, true);
-        this.sharedBall = null;
-        this.sharedBallMat = null;
-        this.sharedBallR = 0;
-      }
-      return;
-    }
-    const ball = b;
-    if (!ball) return;
-    if (!this.sharedBall || this.sharedBallR !== ball.r) {
-      this.sharedBall?.dispose(false, true);
-      this.sharedBallR = ball.r;
-      const mesh = MeshBuilder.CreateSphere(
-        'soccerSharedBall',
-        { diameter: ball.r * 2, segments: 20 },
-        this.scene,
-      );
-      const mat = new StandardMaterial('soccerSharedBallMat', this.scene);
-      mat.diffuseColor = hex(0xffd60a);
-      mat.emissiveColor = hex(0xffd60a).scale(0.42);
-      mat.specularColor = new Color3(0.3, 0.3, 0.3);
-      mesh.material = mat;
-      mesh.isPickable = false;
-      const seams = MeshBuilder.CreateIcoSphere(
-        'soccerSharedBallSeams',
-        { radius: ball.r * 1.002, subdivisions: 1 },
-        this.scene,
-      );
-      const seamMat = new StandardMaterial('soccerSharedBallSeamMat', this.scene);
-      seamMat.emissiveColor = hex(0x1a1a1a);
-      seamMat.disableLighting = true;
-      seamMat.wireframe = true;
-      seams.material = seamMat;
-      seams.isPickable = false;
-      seams.parent = mesh;
-      this.sharedBall = mesh;
-      this.sharedBallMat = mat;
-      this.sharedBallGlow = 0.42;
-    }
-    this.sharedBall.position.set(ball.pos.x, ball.pos.y, ball.pos.z);
-    const glow = soccerState.ballNear ? 0.95 : 0.42;
-    if (glow !== this.sharedBallGlow && this.sharedBallMat) {
-      this.sharedBallGlow = glow;
-      this.sharedBallMat.emissiveColor = hex(0xffd60a).scale(glow);
-    }
   }
 
   private burstGoal(): void {
@@ -1321,10 +1263,6 @@ export class SoccerFieldVisuals {
     this.lights = [];
     for (const s of this.sparks) s.mesh.dispose(false, true);
     this.sparks = [];
-    this.sharedBall?.dispose(false, true);
-    this.sharedBall = null;
-    this.sharedBallMat = null;
-    this.sharedBallR = 0;
     for (const c of this.clones.values()) c.model.dispose();
     this.clones.clear();
 
