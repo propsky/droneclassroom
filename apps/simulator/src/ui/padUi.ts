@@ -96,7 +96,10 @@ function resolveScene(): Scene {
   if (overlayShow('login-modal')) {
     const account = $('login-pane-account') && !$('login-pane-account')!.hidden;
     const items = account
-      ? [...qAll('#login-tabs .login-tab'), ...qAll('#acct-mode-switch, #acct-login-btn')]
+      ? [
+          ...qAll('#login-tabs .login-tab'),
+          ...qAll('#acct-mode-switch, #acct-register-switch, #acct-login-btn'),
+        ]
       : qAll('#emoji-picker .emoji-btn');
     return {
       id: 'login',

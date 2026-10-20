@@ -87,42 +87,73 @@ export type AuthErrorCode =
   | 'password_required'
   /** 401：憑證不對 / token 失效 */
   | 'unauthorized'
+  /** 403：授權到期等 */
+  | 'forbidden'
   /** 404：邀請連結無效 / 已使用 */
   | 'not_found'
+  /** 409：email 已被註冊 */
+  | 'conflict'
+  /** 422：欄位驗證 */
+  | 'validation'
+  /** 429：登入嘗試過於頻繁 */
+  | 'rate_limited'
   /** 連不上伺服器（離線 / 網路錯誤） */
   | 'network'
-  /** 其他伺服器錯誤（5xx / 422 / 非 JSON 回應） */
+  /** 其他伺服器錯誤（5xx / 非 JSON 回應） */
   | 'server';
 
 export type AuthResult<T> =
   | { ok: true; data: T }
-  | { ok: false; code: AuthErrorCode; status: number };
+  | { ok: false; code: AuthErrorCode; status: number; detail: string };
+
+/** 把 HTTP 錯誤體收成 UI 用的 code + detail。純函式，不發請求。 */
+export class StudentAuthClient {
+  /** FastAPI `{detail: string | {code}}`；其他形狀當空字串。 */
+  static readDetail(body: unknown): string {
+    if (!body || typeof body !== 'object') return '';
+    const detail = (body as { detail?: unknown }).detail;
+    if (typeof detail === 'string') return detail;
+    if (detail && typeof detail === 'object' && 'code' in detail) {
+      const code = (detail as { code?: unknown }).code;
+      return typeof code === 'string' ? code : '';
+    }
+    return '';
+  }
+
+  static classify(status: number, detail: string): AuthErrorCode {
+    if (status === 401 && /password[_ -]?required/i.test(detail)) return 'password_required';
+    if (status === 401) return 'unauthorized';
+    if (status === 403) return 'forbidden';
+    if (status === 404) return 'not_found';
+    if (status === 409) return 'conflict';
+    if (status === 422) return 'validation';
+    if (status === 429) return 'rate_limited';
+    if (status === 0) return 'network';
+    return 'server';
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<AuthResult<T>> {
   let res: Response;
   try {
     res = await fetch(API_BASE + path, init);
   } catch {
-    return { ok: false, code: 'network', status: 0 };
+    return { ok: false, code: 'network', status: 0, detail: '' };
   }
   if (res.ok) {
     try {
       return { ok: true, data: (await res.json()) as T };
     } catch {
-      return { ok: false, code: 'server', status: res.status };
+      return { ok: false, code: 'server', status: res.status, detail: '' };
     }
   }
-  let code: AuthErrorCode =
-    res.status === 404 ? 'not_found' : res.status === 401 ? 'unauthorized' : 'server';
-  // FastAPI 慣例錯誤體 {detail: string | {code: string}} → 辨識「這個帳號需要密碼」
+  let detail = '';
   try {
-    const body = (await res.json()) as { detail?: string | { code?: string } };
-    const detail = typeof body.detail === 'string' ? body.detail : (body.detail?.code ?? '');
-    if (res.status === 401 && /password[_ -]?required/i.test(detail)) code = 'password_required';
+    detail = StudentAuthClient.readDetail(await res.json());
   } catch {
-    /* 非 JSON 錯誤體（proxy 502 等）→ 維持狀態碼推斷 */
+    /* 非 JSON 錯誤體（proxy 502 等）→ 只靠狀態碼 */
   }
-  return { ok: false, code, status: res.status };
+  return { ok: false, code: StudentAuthClient.classify(res.status, detail), status: res.status, detail };
 }
 
 const postJson = (body: unknown): RequestInit => ({

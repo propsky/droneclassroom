@@ -260,11 +260,12 @@ function markLocalComplete(levelId: string, timeMs: number): void {
 function hydrateProgressFromCache(): void {
   const session = loadStudentSession();
   if (!session) return;
-  const cached = loadProgressCache(
-    session.me.id,
-    progressCacheScope(session.me.progressMode, session.me.teamId),
-  );
-  if (!cached) return;
+  // 沒有這位學生、這個範圍的快取 → 清成空，避免換帳號後還留著上一個人的勾勾
+  const cached =
+    loadProgressCache(
+      session.me.id,
+      progressCacheScope(session.me.progressMode, session.me.teamId),
+    ) ?? {};
   progressState.progress = cached;
   bus.emit('progress-updated', {});
 }
