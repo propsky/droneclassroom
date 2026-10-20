@@ -104,4 +104,15 @@ describe('progressQueue', () => {
     });
     expect(progressState.progress).toEqual({ '2-1': { bestTimeMs: 9000, attempts: 2 } });
   });
+
+  it('換帳號且沒有快取時清掉畫面上的舊進度', async () => {
+    studentSession.mockReturnValue({ me: { id: 9 } });
+    const { handleProgressSync, refreshProgressFromCache, progressState } = await import(
+      './progressQueue'
+    );
+    handleProgressSync({ '1-1': { bestTimeMs: 1000, attempts: 1 } });
+    expect(progressState.progress['1-1']).toBeTruthy();
+    refreshProgressFromCache();
+    expect(progressState.progress).toEqual({});
+  });
 });

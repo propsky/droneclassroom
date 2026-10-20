@@ -1,7 +1,7 @@
 // Overlay 元件：登入 modal（快速進場：名字 + emoji + 房間碼｜學生帳號：班級碼+學生碼 / email+密碼）、
 // 邀請設密碼頁（?invite=TOKEN）、關卡 intro、3-2-1 倒數、關卡選單、
 // header 按鈕列（模式切換 / 回家 / 視角 / 全螢幕 / 改名 / 登出帳號）與 Blockly 工具列按鈕。
-import type { StudentLoginRequest, StudentLoginResponse } from '@creafly/shared';
+import type { StudentLoginResponse } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import {
   acceptInvite,
@@ -30,6 +30,7 @@ import { togglePause, resumeGame } from '../core/pause';
 import { GameSession } from '../core/session';
 import { goHome } from '../core/physics';
 import { iconHtml, mountIcons } from './icons';
+import { StudentAccountForm, type AccountMode } from './studentAccountForm';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -140,23 +141,38 @@ function setLoginTab(tab: 'guest' | 'account'): void {
   if (paneAcct) paneAcct.hidden = tab !== 'account';
 }
 
-// ---- 帳號分頁狀態：碼登入 ↔ email 登入；密碼欄預設隱藏（伺服器說需要才展開）----
-let acctMode: 'code' | 'email' | 'register' = 'code';
+// ---- 帳號分頁狀態：班級碼登入 / email 登入 / 自行註冊；密碼欄預設隱藏（伺服器說需要才展開）----
+let acctMode: AccountMode = 'code';
 let acctPwShown = false;
 
-function setAcctMode(mode: 'code' | 'email' | 'register'): void {
+function applyAccountLink(id: string, label: string, next: AccountMode): void {
+  const link = $(id);
+  if (!link) return;
+  link.hidden = false;
+  link.textContent = label;
+  link.dataset['next'] = next;
+}
+
+/** 只顯示這個模式的欄位與連結。註冊中按鈕維持「建立帳號」，不會被改回「登入」。 */
+function setAcctMode(mode: AccountMode): void {
   acctMode = mode;
+  const chrome = StudentAccountForm.chrome(mode);
   const codeFields = $('acct-code-fields');
   const emailFields = $('acct-email-fields');
   const regFields = $('acct-register-fields');
-  if (codeFields) codeFields.hidden = mode !== 'code';
-  if (emailFields) emailFields.hidden = mode !== 'email';
-  if (regFields) regFields.hidden = mode !== 'register';
-  const link = $('acct-mode-switch');
-  if (link) link.textContent = mode === 'code' ? '用 email 登入' : '用班級碼登入';
-  const btn = $('acct-login-btn');
-  if (btn) btn.textContent = mode === 'register' ? '建立帳號' : '登入';
+  if (codeFields) codeFields.hidden = !chrome.showCode;
+  if (emailFields) emailFields.hidden = !chrome.showEmail;
+  if (regFields) regFields.hidden = !chrome.showRegister;
+  applyAccountLink('acct-mode-switch', chrome.modeLink.label, chrome.modeLink.next);
+  applyAccountLink('acct-register-switch', chrome.altLink.label, chrome.altLink.next);
+  const btn = $('acct-login-btn') as HTMLButtonElement | null;
+  if (btn && !btn.disabled) btn.textContent = chrome.submitLabel;
   setAcctError(null);
+}
+
+function followAccountLink(id: string): void {
+  const next = $(id)?.dataset['next'];
+  if (next === 'code' || next === 'email' || next === 'register') setAcctMode(next);
 }
 
 function setAcctPwShown(shown: boolean): void {
@@ -175,15 +191,24 @@ function setAcctError(text: string | null): void {
 
 function setAcctPending(on: boolean): void {
   const btn = $('acct-login-btn') as HTMLButtonElement | null;
-  if (btn) {
-    btn.disabled = on;
-    btn.textContent = on ? '登入中…' : '登入';
-  }
+  if (!btn) return;
+  const chrome = StudentAccountForm.chrome(acctMode);
+  btn.disabled = on;
+  btn.textContent = on ? chrome.pendingLabel : chrome.submitLabel;
 }
 
 /** 學生碼正規化：只留英數、大寫、最多 2 碼（'01'…，保留前導零） */
 function normalizeStudentCode(raw: string): string {
   return raw.replace(/[^0-9a-zA-Z]/g, '').toUpperCase().slice(0, 2);
+}
+
+/** 登入後立刻拉目前這份進度。WS progress_sync 之後仍會整份覆蓋。 */
+function syncProgressFromServer(token: string): void {
+  void fetchStudentProgress(token).then((prog) => {
+    if (!prog.ok) return;
+    if (loadStudentSession()?.token !== token) return;
+    handleProgressSync(prog.data.progress);
+  });
 }
 
 /**
@@ -194,10 +219,14 @@ function onStudentLoggedIn(
   data: StudentLoginResponse,
   finishLogin: () => void,
   onJoin: () => void,
+  welcome: 'back' | 'new',
 ): void {
   saveStudentSession(data.token, data.me, data.expiresIn);
+  // 先用這位學生自己的本機快取（沒有就清掉上一個人的勾勾），再向伺服器要目前這份進度。
+  // WS 進房後的 progress_sync 仍會整份覆蓋；GET 讓勾勾不必等房間連上。
   refreshProgressFromCache();
   studentSession = loadStudentSession();
+  syncProgressFromServer(data.token);
   player.name = data.me.name;
   player.emoji = data.me.emoji;
   player.roomCode = '';
@@ -205,111 +234,70 @@ function onStudentLoggedIn(
   syncAccountUi();
   setAcctError(null);
   finishLogin();
-  toast(`✓ 歡迎回來 ${data.me.name}${data.me.emoji}！`, 'success');
+  const hello =
+    welcome === 'new'
+      ? `✓ 帳號建立好了，歡迎 ${data.me.name}${data.me.emoji}！`
+      : `✓ 歡迎回來 ${data.me.name}${data.me.emoji}！`;
+  toast(hello, 'success');
   setTimeout(onJoin, 200);
 }
 
-/** 帳號分頁送出：驗欄位 → POST /auth/student/login → 401 需密碼時展開密碼欄（零阻力小學生流程） */
+/** 帳號分頁送出。註冊 / email / 班級碼各讀自己的欄位（見 StudentAccountForm.decide）。 */
 async function submitAccountLogin(finishLogin: () => void, onJoin: () => void): Promise<void> {
-  const req: StudentLoginRequest = {};
-  if (acctMode === 'code') {
-    const teamInput = $('acct-team-code') as HTMLInputElement | null;
-    const codeInput = $('acct-student-code') as HTMLInputElement | null;
-    const teamCode = normalizeRoomCode(teamInput?.value ?? '');
-    const studentCode = normalizeStudentCode(codeInput?.value ?? '');
-    if (teamCode.length < 4) {
-      setAcctError('班級碼是 4 碼英數，在老師發的小卡上');
-      teamInput?.focus();
-      return;
-    }
-    if (studentCode.length < 2) {
-      setAcctError('學生碼是 2 碼，例如 01');
-      codeInput?.focus();
-      return;
-    }
-    req.teamCode = teamCode;
-    req.studentCode = studentCode;
-    const pw = acctPwShown ? (($('acct-code-pw') as HTMLInputElement | null)?.value ?? '') : '';
-    if (pw) req.password = pw;
-  } else {
-    const emailInput = $('acct-email') as HTMLInputElement | null;
-    const pwInput = $('acct-email-pw') as HTMLInputElement | null;
-    const email = (emailInput?.value ?? '').trim();
-    const pw = pwInput?.value ?? '';
-    if (!email || !email.includes('@')) {
-      setAcctError('請輸入 email');
-      emailInput?.focus();
-      return;
-    }
-    if (!pw) {
-      setAcctError('請輸入密碼');
-      pwInput?.focus();
-      return;
-    }
-    req.email = email;
-    req.password = pw;
-  }
-
-  if (acctMode === 'register') {
-    const name = (($('acct-reg-name') as HTMLInputElement | null)?.value ?? '').trim();
-    const email = (($('acct-reg-email') as HTMLInputElement | null)?.value ?? '').trim();
-    const password = ($('acct-reg-pw') as HTMLInputElement | null)?.value ?? '';
-    if (!name) {
-      setAcctError('請輸入名字');
-      return;
-    }
-    if (!email.includes('@')) {
-      setAcctError('請輸入 email');
-      return;
-    }
-    if (password.length < 8) {
-      setAcctError('密碼至少 8 碼');
-      return;
-    }
-    setAcctPending(true);
-    const created = await studentRegister({ name, email, password });
-    setAcctPending(false);
-    if (created.ok) {
-      onStudentLoggedIn(created.data, finishLogin, onJoin);
-      return;
-    }
-    setAcctError(created.code === 'network' ? '連不上伺服器' : '註冊失敗：email 可能已被使用，或密碼太短');
+  const input = (id: string): string => ($(id) as HTMLInputElement | null)?.value ?? '';
+  const decision = StudentAccountForm.decide(acctMode, {
+    teamCode: input('acct-team-code'),
+    studentCode: input('acct-student-code'),
+    codePasswordShown: acctPwShown,
+    codePassword: input('acct-code-pw'),
+    email: input('acct-email'),
+    emailPassword: input('acct-email-pw'),
+    regName: input('acct-reg-name'),
+    regEmail: input('acct-reg-email'),
+    regPassword: input('acct-reg-pw'),
+  });
+  if (!decision.ok) {
+    setAcctError(decision.message);
+    ($(StudentAccountForm.focusId(decision.focus)) as HTMLInputElement | null)?.focus();
     return;
   }
 
   setAcctPending(true);
-  const res = await studentLogin(req);
-  setAcctPending(false);
-  if (res.ok) {
-    onStudentLoggedIn(res.data, finishLogin, onJoin);
+  if (decision.kind === 'register') {
+    const created = await studentRegister(decision.body);
+    setAcctPending(false);
+    if (created.ok) {
+      onStudentLoggedIn(created.data, finishLogin, onJoin, 'new');
+      return;
+    }
+    setAcctError(StudentAccountForm.failureMessage('register', created.code, created.detail));
     return;
   }
-  if (res.code === 'password_required') {
+
+  const res = await studentLogin(decision.body);
+  setAcctPending(false);
+  if (res.ok) {
+    onStudentLoggedIn(res.data, finishLogin, onJoin, 'back');
+    return;
+  }
+  if (res.code === 'password_required' && acctMode === 'code') {
     // 這個帳號有設密碼 → 展開密碼欄讓學生補填再送一次
     setAcctPwShown(true);
-    setAcctError('這個帳號有設定密碼，輸入密碼後再按一次登入');
+    setAcctError(StudentAccountForm.failureMessage('code', res.code, res.detail));
     ($('acct-code-pw') as HTMLInputElement | null)?.focus();
     return;
   }
-  if (res.code === 'network') {
-    setAcctError('連不上伺服器，確認網路後再試一次');
-    return;
-  }
-  setAcctError(
-    acctMode === 'code' ? '登入失敗：班級碼、學生碼或密碼不對，再檢查一下' : '登入失敗：email 或密碼不對',
-  );
+  const kind = acctMode === 'code' ? 'code' : 'email';
+  setAcctError(StudentAccountForm.failureMessage(kind, res.code, res.detail));
 }
 
 /** 帳號分頁 / tab 切換的事件掛載（initPlayer 呼叫一次） */
 function initAccountLogin(finishLogin: () => void, onJoin: () => void): void {
   $('login-tab-guest')?.addEventListener('click', () => setLoginTab('guest'));
   $('login-tab-account')?.addEventListener('click', () => setLoginTab('account'));
-  $('acct-mode-switch')?.addEventListener('click', () =>
-    setAcctMode(acctMode === 'code' ? 'email' : 'code'),
-  );
-  $('acct-register-switch')?.addEventListener('click', () =>
-    setAcctMode(acctMode === 'register' ? 'code' : 'register'),
-  );
+  $('acct-mode-switch')?.addEventListener('click', () => followAccountLink('acct-mode-switch'));
+  $('acct-register-switch')?.addEventListener('click', () => followAccountLink('acct-register-switch'));
+  setAcctMode(acctMode);
 
   // 碼欄位：自動大寫 / 只留英數；任何輸入清錯誤
   const teamInput = $('acct-team-code') as HTMLInputElement | null;
@@ -324,8 +312,8 @@ function initAccountLogin(finishLogin: () => void, onJoin: () => void): void {
     if (codeInput.value !== v) codeInput.value = v;
     setAcctError(null);
   });
-  ['acct-code-pw', 'acct-email', 'acct-email-pw'].forEach((id) =>
-    $(id)?.addEventListener('input', () => setAcctError(null)),
+  ['acct-code-pw', 'acct-email', 'acct-email-pw', 'acct-reg-name', 'acct-reg-email', 'acct-reg-pw'].forEach(
+    (id) => $(id)?.addEventListener('input', () => setAcctError(null)),
   );
   // Enter 送出（帳號分頁）
   document.querySelectorAll<HTMLInputElement>('#login-pane-account input').forEach((el) =>
@@ -514,7 +502,7 @@ function initInvite(inviteToken: string, finishLogin: () => void, onJoin: () => 
       if (res.ok) {
         stripInviteParam();
         modal.classList.remove('show');
-        onStudentLoggedIn(res.data, finishLogin, onJoin);
+        onStudentLoggedIn(res.data, finishLogin, onJoin, 'back');
         return;
       }
       if (res.code === 'network') {
@@ -662,7 +650,9 @@ export function initPlayer(onJoin: () => void): void {
     if (roomInput()?.readOnly) setRoomLocked(false);
   });
   // Enter 送出
-  document.querySelectorAll<HTMLInputElement>('#login-modal input').forEach((el) =>
+  // 只綁快速進場的欄位。帳號分頁的 Enter 另走「登入 / 建立帳號」，
+  // 不能連隱藏的「開始飛行」一起按（否則會用訪客名字進場）。
+  document.querySelectorAll<HTMLInputElement>('#login-pane-guest input').forEach((el) =>
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') ($('login-start') as HTMLButtonElement | null)?.click();
     }),
@@ -830,6 +820,7 @@ export function initPlayer(onJoin: () => void): void {
     hideLoginModal();
     bus.emit('player-ready', {});
     setTimeout(onJoin, 200);
+    syncProgressFromServer(studentSession.token);
     void fetchStudentMe(studentSession.token).then((res) => {
       if (res.ok) {
         // 驗證通過：身分以 DB 最新為準（老師改名 / 換 emoji 下次開頁生效）
