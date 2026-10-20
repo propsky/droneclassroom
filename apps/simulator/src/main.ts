@@ -20,7 +20,7 @@ import {
 } from './core/program';
 import { meetsMinimumPlayRequirements, probeBrowserCapabilities, parseSceneEnv } from '@creafly/shared';
 import { bus, toast } from './core/events';
-import { initInputs, tickInputDevices, collectControlFrame, isTouchDevice } from './input';
+import { initInputs, tickInputDevices, collectControlFrame, touchJoysticksShouldShow } from './input';
 import {
   initRecordingSession,
   beginFrame,
@@ -40,6 +40,7 @@ import { initHud, updateHudFrame } from './ui/hud';
 import { initOnboarding } from './ui/onboarding';
 import { initOverlays, initPlayer, syncViewButton } from './ui/overlays';
 import { initRealToolbar } from './ui/realToolbar';
+import { TouchJoystickToggle } from './ui/touchJoystickToggle';
 import { initHeaderOverflow } from './ui/headerOverflow';
 import { PortraitChrome } from './ui/portraitChrome';
 import { initLevelComplete } from './ui/levelComplete';
@@ -169,6 +170,7 @@ const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
 document.getElementById('view-btn')?.addEventListener('click', doToggleView);
 PortraitChrome.init(); // 直式：先收起選單／活動關卡，虛擬搖桿才量得到縮後的區域
 initInputs({ toggleView: doToggleView });
+TouchJoystickToggle.init();
 initCalibrationOverlay(); // 搖桿校正精靈 overlay（在 initInputs 之後：狀態機已就緒）
 initPadSettings();
 initPadHint();
@@ -250,8 +252,8 @@ if (!meetsMinimumPlayRequirements(browserCaps)) {
 // ---- 離線可玩：註冊 Service Worker（僅正式 build；docs/offline.md）----
 initPwa();
 
-// 觸控裝置首次提示
-if (isTouchDevice && !sessionStorage.getItem('creafly_hint_shown')) {
+// 虛擬搖桿有出現時才提示（桌機滑鼠預設沒有搖桿）
+if (touchJoysticksShouldShow() && !sessionStorage.getItem('creafly_hint_shown')) {
   sessionStorage.setItem('creafly_hint_shown', '1');
   setTimeout(() => toast('👆 用畫面下方的兩根搖桿控制無人機'), 800);
 }
