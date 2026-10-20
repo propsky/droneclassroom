@@ -27,11 +27,14 @@ export function initVirtualJoystick(): void {
   const rightZone = document.getElementById('joystick-right');
   if (!leftZone || !rightZone) return;
 
+  // 圓盤跟區域一起縮（直式把區域收到 132，避免左右桿互壓）。橫式區域仍是 170 → 維持 130。
+  const zoneWidth = Math.min(leftZone.clientWidth || 170, rightZone.clientWidth || 170);
+  const nippleSize = Math.min(130, Math.max(96, Math.round(zoneWidth - 8)));
   const commonOpts = {
     mode: 'static' as const,
     position: { left: '50%', top: '50%' },
     color: 'white',
-    size: 130,
+    size: nippleSize,
     restJoystick: true,
     restOpacity: 0.5,
     dynamicPage: false,
