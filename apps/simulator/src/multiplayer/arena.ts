@@ -92,8 +92,13 @@ export function initArena(): void {
   }
 }
 
-export function enterArena(): void {
-  if (arenaState.active) return;
+export function enterArena(opts?: { mode?: 'balloon' | 'tag'; field?: 'grid' | 'playground' }): void {
+  if (arenaState.active) {
+    // 已在場內：老師改傳另一種大亂鬥時只切模式與場地，不重進一輪
+    if (opts?.mode === 'balloon' || opts?.mode === 'tag') arenaState.mode = opts.mode;
+    if (opts?.field) setArenaField(opts.field);
+    return;
+  }
   // 先退出關卡／足球（GameSession 呼叫各自的 onExit），再建立大亂鬥
   GameSession.enter('arena');
   arenaState.active = true;
@@ -126,6 +131,9 @@ export function enterArena(): void {
   sendToServer({ type: 'arena_join' }); // 未連線時靜默丟棄；ws-connected 後會補送
   if (posTimer) GameSession.clearTracked(posTimer);
   posTimer = GameSession.trackInterval(sendArenaPos, POS_SEND_MS);
+
+  if (opts?.mode === 'balloon' || opts?.mode === 'tag') arenaState.mode = opts.mode;
+  if (opts?.field) setArenaField(opts.field);
 
   stateHud('🏟️ 大亂鬥：等待老師開始…');
   toast('🏟️ 進入大亂鬥！等老師按開始', 'success');

@@ -1,4 +1,5 @@
 export * from './levels';
+export * from './classLevelSend';
 export * from './levelKit';
 export * from './levelGoalPresets';
 export * from './levelEditorUtils';
