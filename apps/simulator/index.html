@@ -27,7 +27,10 @@
                 <span id="room-tag-code" class="room-tag-code"></span>
             </button>
         </div>
-        <div class="header-right">
+        <button id="portrait-menu-btn" class="header-btn portrait-menu-btn" type="button" aria-expanded="false" aria-controls="header-tools" title="選單">
+            <span class="btn-ic" data-icon="menu"></span><span>選單</span>
+        </button>
+        <div id="header-tools" class="header-right">
             <!-- 群組 1：關卡 / 回家 -->
             <div class="header-group">
                 <div id="level-selector" class="level-selector">
@@ -397,11 +400,16 @@
     </div>
 </div>
 
-<!-- 遊戲入口按鈕群（右下直排；與左下控制說明分欄） -->
+<!-- 遊戲入口（右下）。直式收成「活動」小按鈕，預設收合；橫式／桌機維持三顆直排。 -->
 <div id="entry-group">
-    <button id="soccer-mp-btn" class="entry-btn entry-soccer-mp" title="多人足球對戰：前鋒穿對方圓環得分"><span class="btn-ic" data-icon="flag"></span><span>足球對戰</span></button>
-    <button id="soccer-btn" class="entry-btn entry-soccer" title="足球自由練習：從正面進門就累加分數"><span class="btn-ic" data-icon="target"></span><span>足球練習</span></button>
-    <button id="arena-btn" class="entry-btn entry-arena" title="多人大亂鬥：全班一起搶氣球 / 鬼抓人"><span class="btn-ic" data-icon="users"></span><span>大亂鬥</span></button>
+    <button id="entry-drawer-toggle" class="entry-btn entry-drawer-toggle" type="button" aria-expanded="false" aria-controls="entry-drawer" title="活動關卡">
+        <span class="btn-ic" data-icon="flag"></span><span>活動</span>
+    </button>
+    <div id="entry-drawer" class="entry-drawer">
+        <button id="soccer-mp-btn" class="entry-btn entry-soccer-mp" title="多人足球對戰：前鋒穿對方圓環得分"><span class="btn-ic" data-icon="flag"></span><span>足球對戰</span></button>
+        <button id="soccer-btn" class="entry-btn entry-soccer" title="足球自由練習：從正面進門就累加分數"><span class="btn-ic" data-icon="target"></span><span>足球練習</span></button>
+        <button id="arena-btn" class="entry-btn entry-arena" title="多人大亂鬥：全班一起搶氣球 / 鬼抓人"><span class="btn-ic" data-icon="users"></span><span>大亂鬥</span></button>
+    </div>
 </div>
 
 <!-- 飛行手感（練習／對戰都顯示；三檔定高 + 選配無定高） -->

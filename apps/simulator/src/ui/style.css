@@ -1706,6 +1706,14 @@ body.joystick-forced:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   gap: var(--sp-2);
   align-items: stretch;
 }
+/* 直式才把三顆入口收進抽屜；橫式／桌機用 contents，按鈕仍是 #entry-group 的直排子項 */
+#entry-drawer {
+  display: contents;
+}
+#entry-drawer-toggle {
+  display: none;
+  min-width: 0;
+}
 .entry-btn {
   --entry-c: var(--brand);
   display: flex;
@@ -2429,5 +2437,157 @@ body:has(#pad-ui-hint.show) #toast.show {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* =============================================================================
+ * 直式手機（PortraitChrome.QUERY / STICK_PX）
+ * 選單收成漢堡、活動關卡收成小按鈕；搖桿圓盤留出安全區。
+ * 橫式與桌機不進這條媒體查詢。
+ * ========================================================================== */
+#portrait-menu-btn {
+  display: none;
+  margin-left: auto;
+}
+
+@media (orientation: portrait) and (max-width: 520px) {
+  body {
+    --stick-size: 132px;
+    --portrait-control-band: calc(
+      max(var(--sp-5), env(safe-area-inset-bottom, 0px))
+      + var(--stick-size)
+      + var(--sp-5)
+      + var(--sp-2)
+    );
+  }
+
+  #app {
+    grid-template-rows: calc(56px + env(safe-area-inset-top, 0px)) 1fr;
+  }
+
+  #portrait-menu-btn {
+    display: inline-flex;
+  }
+
+  /* 工具列收進抽屜，預設不佔畫面、也不蓋到搖桿 */
+  #header-tools {
+    display: none;
+  }
+  body.portrait-menu-open #header-tools {
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    z-index: var(--z-modal);
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    left: max(var(--sp-3), env(safe-area-inset-left, 0px));
+    right: max(var(--sp-3), env(safe-area-inset-right, 0px));
+    max-height: calc(
+      100dvh - 56px - env(safe-area-inset-top, 0px) - var(--portrait-control-band)
+    );
+    overflow: auto;
+    align-items: stretch;
+    gap: var(--sp-2);
+    margin: 0;
+    padding: var(--sp-3);
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-2);
+  }
+  body.portrait-menu-open #header-tools > .header-group,
+  body.portrait-menu-open #header-tools > .header-more,
+  body.portrait-menu-open #header-tools > #player-hud {
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    width: 100%;
+  }
+  body.portrait-menu-open #header-tools .header-sep {
+    display: none;
+  }
+  /* 蓋過窄螢幕 icon-only：抽屜裡要看得到文字 */
+  body.portrait-menu-open #header-tools .header-btn {
+    width: auto;
+    height: 36px;
+    padding: 0 var(--sp-3);
+    justify-content: flex-start;
+  }
+  body.portrait-menu-open #header-tools .header-btn > span:not(.btn-ic) {
+    display: inline;
+  }
+  body.portrait-menu-open #portrait-menu-btn {
+    background: var(--bg-3);
+    border-color: var(--brand);
+  }
+  /* 下拉改在抽屜裡往下長，避免 absolute 面板掉進搖桿區 */
+  body.portrait-menu-open .level-menu-panel,
+  body.portrait-menu-open .header-more-panel,
+  body.portrait-menu-open #player-dropdown {
+    position: static;
+    top: auto;
+    right: auto;
+    left: auto;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    max-height: 240px;
+    box-shadow: none;
+  }
+
+  /* 虛擬搖桿：縮小、左右分開，底緣讓出 home indicator */
+  .joystick-zone {
+    width: var(--stick-size);
+    height: var(--stick-size);
+    bottom: max(var(--sp-5), env(safe-area-inset-bottom, 0px));
+  }
+  #joystick-left {
+    left: max(var(--sp-3), env(safe-area-inset-left, 0px));
+  }
+  #joystick-right {
+    right: max(var(--sp-3), env(safe-area-inset-right, 0px));
+  }
+
+  /* 活動關卡：預設只留一顆小按鈕，貼在操控帶上緣 */
+  #entry-group {
+    flex-direction: column-reverse;
+    right: max(var(--sp-3), env(safe-area-inset-right, 0px));
+    bottom: var(--portrait-control-band);
+    align-items: flex-end;
+  }
+  #entry-drawer-toggle {
+    display: inline-flex;
+  }
+  #entry-drawer {
+    display: none;
+  }
+  body.entry-open #entry-drawer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    align-items: stretch;
+  }
+  body.entry-open #entry-drawer-toggle {
+    border-color: var(--brand);
+  }
+
+  /* 飛行手感改到左下、操控帶之上，不跟右下活動鈕搶搖桿 */
+  #soccer-feel.soccer-feel {
+    top: auto;
+    right: auto;
+    left: max(var(--sp-3), env(safe-area-inset-left, 0px));
+    bottom: var(--portrait-control-band);
+    max-width: min(220px, 46vw);
+    z-index: var(--z-hud);
+  }
+
+  .hud-fixed {
+    top: calc(56px + env(safe-area-inset-top, 0px) + var(--sp-4));
+  }
+
+  #toast {
+    bottom: calc(var(--portrait-control-band) + var(--sp-3));
+  }
+  body.touch-device:not(.gamepad-connected):not(.ble-connected) .pad-hint.show,
+  body.joystick-forced:not(.gamepad-connected):not(.ble-connected) .pad-hint.show {
+    bottom: calc(var(--portrait-control-band) + var(--sp-3));
   }
 }

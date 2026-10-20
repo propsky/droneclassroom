@@ -103,8 +103,36 @@ export function initHeaderOverflow(): void {
 
   let scheduled = false;
 
+  /**
+   * 直式選單抽屜收合時 #header-tools 是 display:none。
+   * 這時子項 offsetParent 為空，若照常 cleanup 會把群組標成 inline display:none，
+   * 之後打開抽屜也叫不回來。收合時只還原群組，並讓左側（logo／模式）仍可收成 icon。
+   */
+  const releaseHiddenDrawer = (): void => {
+    const kids = Array.from(right.children) as HTMLElement[];
+    kids.forEach((k) => {
+      if (k.classList.contains('header-group') || k.classList.contains('header-sep')) k.style.display = '';
+    });
+    document.body.classList.remove('header-compact');
+    if (left && left.scrollWidth > left.clientWidth + 1) document.body.classList.add('header-compact');
+  };
+
   /** 冪等重排：每次都從完整狀態量起，不夠再逐級降級 */
   const relayout = (): void => {
+    const toolsStyle = getComputedStyle(right);
+    // 直式抽屜打開：面板是 position:fixed 且撐滿寬，右緣會貼近視窗而被誤判成溢出。
+    // 按鈕改由抽屜自己換行，不再塞進「更多」。
+    if (toolsStyle.position === 'fixed') {
+      document.body.classList.remove('header-compact');
+      restoreAll();
+      syncMore();
+      cleanupSeps();
+      return;
+    }
+    if (toolsStyle.display === 'none') {
+      releaseHiddenDrawer();
+      return;
+    }
     document.body.classList.remove('header-compact');
     restoreAll();
     syncMore();
