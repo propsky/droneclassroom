@@ -22,6 +22,7 @@ import type {
   TeacherToServer,
   TeamInfo,
 } from '@creafly/shared';
+import { ClassLevelSend } from '@creafly/shared';
 import type { TeacherArenaMsg, TeacherSoccerMsg } from '../ws';
 import { fetchTeamCurriculum } from '../api';
 import { clearEditorRoute, parseEditorRoute } from '../editorRoute';
@@ -34,6 +35,7 @@ import { attachInstantTip, rosterManageUi } from './rosterManage';
 import { openStudentsPanel, type StudentsPanel } from './students';
 import { mountLevelsManage, type LevelsManagePanel } from './levelsManage';
 import { openLevelEditor, type LevelEditorContext } from './levelEditor';
+import { levelSelectHtml } from './levelSelect';
 
 export interface DashboardView {
   setWsStatus(connected: boolean): void;
@@ -94,44 +96,6 @@ function avatarChip(emoji: string | null | undefined, connected?: boolean): stri
   const presence =
     connected === undefined ? '' : `<span class="presence ${connected ? 'on' : 'off'}"></span>`;
   return `<span class="avatar-chip" aria-hidden="true">${esc(emoji ?? '')}${presence}</span>`;
-}
-
-/** 關卡下拉：班級 curriculum 優先，否則退回 /api/levels 三章 */
-function levelSelectHtml(
-  curriculum: CurriculumResponse | null,
-  levels: LevelsResponse | null,
-): string {
-  if (curriculum && curriculum.groups.length > 0) {
-    return curriculum.groups
-      .map(
-        (g) =>
-          `<optgroup label="${esc(g.label)}">` +
-          g.levels
-            .map(
-              (l) =>
-                `<option value="${esc(l.levelId)}">${esc(l.levelId)} ${esc(l.title)}</option>`,
-            )
-            .join('') +
-          `</optgroup>`,
-      )
-      .join('');
-  }
-  return levelOptions(levels);
-}
-
-/** 關卡下拉：由 /api/levels 動態產生，三章全列（每章一個 optgroup） */
-function levelOptions(levels: LevelsResponse | null): string {
-  if (!levels || levels.chapters.length === 0) {
-    return '<option value="" disabled selected>（讀不到關卡清單）</option>';
-  }
-  return levels.chapters
-    .map(
-      (ch) =>
-        `<optgroup label="第 ${ch.chapter} 章 ${esc(ch.name)}">` +
-        ch.levels.map((l) => `<option value="${esc(l.id)}">${esc(l.id)} ${esc(l.name)}</option>`).join('') +
-        `</optgroup>`,
-    )
-    .join('');
 }
 
 /** 倒數時鐘：對 endTime（伺服器絕對時間戳，legacy 慣例）每 500ms 倒推；
@@ -299,6 +263,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                   <select id="level-select">${levelSelectHtml(null, levels)}</select>
                 </div>
               </div>
+              <p class="note">「活動」會把全班送進足球或大亂鬥畫面。開賽、計時與規則仍用各分頁的開始鈕。</p>
             </div>
             <div class="card-actions">
               <button class="btn btn-ghost" id="btn-lock-level" title="鎖定後學生無法自行切換關卡，只能由老師廣播切關（遲到連上的學生也會套用）">${ICONS.lockOpen}鎖定關卡</button>
@@ -554,6 +519,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 賽局進行中時附加在 confirm 的提醒（伺服器會智能停止比賽，這裡只是提示） */
   const gameWarn = (): string =>
     gameInProgress() ? '\n注意：目前有比賽進行中，切換將自動結束比賽。' : '';
+  /** 傳到這個關卡會不會結束目前賽局。送進正在打的那一場不會結束。 */
+  const switchEndsGame = (levelId: string): boolean =>
+    (['countdown', 'running'].includes(gameState.arena) && ClassLevelSend.stopsArena(levelId)) ||
+    (['countdown', 'running', 'break', 'golden', 'pk', 'penalty'].includes(gameState.soccer) &&
+      ClassLevelSend.stopsSoccer(levelId));
+  const levelLabel = (levelId: string): string => ClassLevelSend.find(levelId)?.title ?? levelId;
 
   // 關卡鎖定：點擊送出切換請求，按鈕狀態等伺服器回送（setLevelLock）才更新 —
   // 開關以伺服器為準，多裝置 / 重整後台也同步
@@ -574,10 +545,11 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   on('btn-load-level', () => {
     const levelId = levelSelect.value;
     if (!levelId) return;
-    if (gameInProgress() && !confirm(`目前有比賽進行中，切換將自動結束比賽。\n確定全班載入 ${levelId}？`)) {
+    const label = levelLabel(levelId);
+    if (switchEndsGame(levelId) && !confirm(`目前有比賽進行中，切換將自動結束比賽。\n確定全班載入 ${label}？`)) {
       return;
     }
-    send({ type: 'load_level', levelId }, `全班載入 ${levelId}`);
+    send({ type: 'load_level', levelId }, `全班載入 ${label}`);
   });
   on('btn-reset-all', () => {
     if (!confirm(`確定要重置所有學生？${gameWarn()}`)) return;
@@ -586,6 +558,10 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   on('btn-race-start', () => {
     const levelId = levelSelect.value;
     if (!levelId) return;
+    if (ClassLevelSend.isActivity(levelId)) {
+      toast('活動請用「全班載入此關卡」。開賽請到大亂鬥或足球分頁。', 'error');
+      return;
+    }
     if (!confirm(`開始比賽模式（${levelId}）？所有學生會同步載入並計時${gameWarn()}`)) return;
     send({ type: 'race_start', levelId }, `比賽開始（${levelId}）`);
   });

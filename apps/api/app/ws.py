@@ -39,6 +39,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from .accounts import resolve_session, resolve_student_session
 from .auth import WS_CLOSE_BAD_ORIGIN, WS_CLOSE_UNAUTHORIZED, TeacherAuth, origin_allowed
+from .class_level_send import ClassLevelSend
 from .config import Settings
 from .db.models import Student, Teacher, Team
 from .entitlement import build_register_entitlement
@@ -239,9 +240,13 @@ async def _apply_broadcast(room: Room, payload: TeacherBroadcastPayload) -> None
     if payload.type in ("load_level", "race_start", "reset_all"):
         # 智能停止：賽局（含倒數）進行中老師切關 → 先結束該賽局
         # （end 廣播 reason:'level_switch'）再轉發關卡廣播。
-        # 同一 handler 內依序 await，學生保證先收到 end 再收到關卡廣播
-        await room.arena.stop("level_switch")
-        await room.soccer.stop("level_switch")
+        # 同一 handler 內依序 await，學生保證先收到 end 再收到關卡廣播。
+        # 送進「正在進行的那一場」不結束它（足球對戰／大亂鬥），還沒進場的學生要加入。
+        level_id = payload.levelId if payload.type in ("load_level", "race_start") else ""
+        if ClassLevelSend.stops_arena(level_id):
+            await room.arena.stop("level_switch")
+        if ClassLevelSend.stops_soccer(level_id):
+            await room.soccer.stop("level_switch")
     if payload.type in ("load_level", "race_start"):
         # 記住課程關卡：遲到 / 重整的學生連上時補載入
         room.roster.current_level_id = payload.levelId

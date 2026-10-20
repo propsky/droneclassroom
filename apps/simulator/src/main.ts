@@ -28,6 +28,7 @@ import {
   setInFixedTick,
 } from './core/recordingSession';
 import { tickFlightPhysics, tickRecordedLevel } from './core/simTick';
+import { GameSession } from './core/session';
 import { getStudentToken } from './net/studentAuth';
 import { API_BASE } from './net/backend';
 import { createSceneWorld, applySceneEnv, applyLevelFloor } from './render/scene';
@@ -57,6 +58,7 @@ import {
 import { initAudio } from './ui/audio';
 import { initEndCountdown } from './ui/endCountdown';
 import { initBroadcastBanner } from './ui/broadcastBanner';
+import { ClassLevelCommand } from './net/classLevelCommand';
 import { initWs, rejoin } from './net/ws';
 import { isPreviewMode } from './preview';
 import { canLoadLevel, firstAllowedLevelId, loadEntitlement } from './net/entitlement';
@@ -109,6 +111,18 @@ new PlaygroundScene(world.scene);
 const soccerVisuals = new SoccerFieldVisuals(world.scene, droneVisual, world.shadowGenerator);
 const cameraRig = new CameraRig(world.scene);
 cameraRig.snapBehindDrone();
+
+// 老師全班傳送：活動切場次、一般關卡載入。先綁好再連線，遲到補送才切得到。
+ClassLevelCommand.bind({
+  exitTransient: () => GameSession.exitTransient(),
+  loadChapter: (levelId) => {
+    void loadLevel(levelId, { bypassGuard: true });
+  },
+  enterSoccerPractice,
+  enterSoccerMatch,
+  enterArena: (mode, field) => enterArena({ mode, field }),
+  chapterTitle: (levelId) => levelState.levels.find((l) => l.id === levelId)?.name ?? null,
+});
 
 // ---- UI / 輸入 / 音效 / 網路 ----
 initHud();
