@@ -96,7 +96,6 @@ export function readBroadcast(s: BroadcastInput): BroadcastView {
     s.status === 'running' ||
     s.status === 'golden' ||
     s.status === 'break' ||
-    s.status === 'penalty' ||
     s.status === 'pk' ||
     s.status === 'countdown';
   const pk = s.status === 'pk';

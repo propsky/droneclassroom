@@ -425,7 +425,7 @@ export interface SoccerBallState {
 export interface SoccerStateMsg {
   type: 'soccer_state';
   /** 結束是 'done'。break / golden / pk 是階段一的賽制階段 */
-  status: 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'penalty' | 'done';
+  status: 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'done';
   /** 玩法（缺省視為 'striker'） */
   mode?: SoccerMode;
   endTime: number; durationSec: number;
@@ -457,9 +457,9 @@ export interface SoccerGoalOkMsg {
   type: 'soccer_goal_ok';
   team: SoccerTeam; by: string; byName: string;
   scores: Record<SoccerTeam, number>;
-  /** 推球模式：烏龍球（把球推進自家門，得分歸對隊；by = 最後觸球者） */
+  /** 烏龍：進了自己隊的門，雙方都不加分，scores 是當下比分（沒有變） */
   own?: boolean;
-  /** PK 罰球命中（比分在 match.pkScores，不計入正規局） */
+  /** PK 點球命中（比分在 match.pkScores，不計入正規局） */
   pk?: boolean;
 }
 export interface SoccerScoresMsg {
@@ -468,34 +468,9 @@ export interface SoccerScoresMsg {
   armed: Record<SoccerTeam, boolean>;
   status: string; endTime: number;
   match?: SoccerMatchMeta;
-  /** PK 換人時附帶，客戶端把輪到的人送到罰球點 */
+  /** PK 換人時附帶，客戶端把輪到的人送到點球點 */
   spawns?: SoccerSpawn[];
 }
-/** 犯規理由：自家圓環、搶跑、得分後未正確返場。階段二都會接著罰球。 */
-export type SoccerFoulReason = 'own_ring' | 'false_start' | 'no_return';
-
-export interface SoccerFoulMsg {
-  type: 'soccer_foul';
-  team: SoccerTeam;
-  by: string;
-  byName: string;
-  reason: SoccerFoulReason;
-}
-
-/** 罰球：10 秒，受益隊攻擊手對犯規隊一名防守 */
-export interface SoccerPenaltyMsg {
-  type: 'soccer_penalty';
-  reason: SoccerFoulReason;
-  attackTeam: SoccerTeam;
-  defendTeam: SoccerTeam;
-  by: string;
-  byName: string;
-  strikerId: string | null;
-  defenderId: string | null;
-  endTime: number;
-  spawns?: SoccerSpawn[];
-}
-
 /** 黃牌（本局出場）或紅牌（整場出場）。按隊伍累計，不是墜機。 */
 export interface SoccerCardMsg {
   type: 'soccer_card';
@@ -548,7 +523,7 @@ export interface SoccerResumeMsg {
 /** 學生端會收到的所有 soccer_* 訊息（ws 分派 → multiplayer/soccer 用） */
 export type SoccerServerMsg =
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerPenaltyMsg
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg
   | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg;
 
@@ -561,7 +536,7 @@ export type ServerToClient =
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
   | ArenaResumeMsg
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg | SoccerFoulMsg | SoccerPenaltyMsg
+  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg
   | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg;
 

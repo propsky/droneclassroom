@@ -1856,6 +1856,65 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   display: none;
 }
 
+/* 進球公告：置中大字，停住後淡出。不擋操作。 */
+.goal-announce {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-0) 28%, transparent);
+  opacity: 0;
+  transition: opacity 600ms ease;
+}
+.goal-announce.is-live {
+  display: flex;
+}
+.goal-announce.is-on {
+  opacity: 1;
+}
+.goal-announce-card {
+  width: min(520px, calc(100% - 32px));
+  padding: 28px 24px 22px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--bg-1) 92%, transparent);
+  color: var(--text-1);
+  text-align: center;
+  box-shadow: var(--shadow, 0 18px 50px rgba(0, 0, 0, 0.45));
+  border: 3px solid var(--accent);
+}
+.goal-announce.is-own .goal-announce-card {
+  border-color: var(--warn);
+}
+.goal-announce-kicker {
+  margin: 0 0 6px;
+  letter-spacing: 0.18em;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.goal-announce-title {
+  margin: 0 0 8px;
+  font-size: 40px;
+  line-height: 1.15;
+}
+.goal-announce-who {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+.goal-announce-who[hidden] {
+  display: none;
+}
+.goal-announce-score {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
 /* 比賽結束蓋板 */
 .soccer-end {
   position: fixed;

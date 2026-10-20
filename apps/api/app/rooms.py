@@ -142,7 +142,6 @@ class Room:
             "break",
             "golden",
             "pk",
-            "penalty",
         )
 
     def reject_reason(

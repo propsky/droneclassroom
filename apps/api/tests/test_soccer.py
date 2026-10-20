@@ -313,19 +313,23 @@ def test_未帶mode預設striker(client: TestClient, teacher_ticket: str, clock:
             assert go["match"]["sets"] == {"blue": 0, "red": 0}
 
 
-def test_非攻擊手進自家圓環犯規(
+def test_穿出自家圓環是烏龍_比分不變(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """防守飛進自家圓環記犯規；攻擊手進自家圓環不算；人還在裡面不重複記。"""
+    """防守整顆穿出自家圓環：雙方都不加分，公告 own。只停在圓環裡不算。沒進場的同學也收得到。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s3:
+        with (
+            client.websocket_connect("/") as s1,
+            client.websocket_connect("/") as s3,
+            client.websocket_connect("/") as s4,
+        ):
             _register(s1, t, "小明")  # 藍前鋒
-            _register(s3, t, "小美")  # 先加入會是紅？兩人：s1 藍、s3 紅
+            _register(s3, t, "小美")
+            _register(s4, t, "小路")  # 在房間裡，但不進足球
             _join_soccer(s1)
             _join_soccer(s3)
-            # 把小美換到藍隊當防守
             t.send_json({"type": "soccer_set_team", "studentId": "s2", "team": "blue"})
             settle(client)
             assert soccer.players[_gkey("小美")].team == "blue"
@@ -333,41 +337,29 @@ def test_非攻擊手進自家圓環犯規(
             t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
             _countdown_to_go(client, clock, s1)
 
-            # 防守進入藍隊自家門 → 公告並改判 10 秒罰球
-            y, gz, _z0, _z1 = f9a_cross()
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0})
-            tick(client)
-            foul = recv_until(s3, "soccer_foul")
-            assert foul["reason"] == "own_ring" and foul["by"] == "s2"
-            assert foul["team"] == "blue"
-            assert soccer.foul_count == 1
-            assert soccer.status == "penalty"
-            assert soccer.scores == {"blue": 0, "red": 0}
-            # 還在裡面 → 不重複
-            tick(client)
-            assert soccer.foul_count == 1
-
-            # 攻擊手進自家圓環不是犯規
+            y, _gz, z0, z1 = f9a_cross()
+            # 停在自家門面：沒有整顆穿出，不公告、不加分
             clock.advance(3000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0})
-            tick(client)
-            assert soccer.foul_count == 1
-
-            # 罰球時間到，回到進行中（節時鐘有暫停）
-            clock.advance(10_000)
-            tick(client)
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -z0, "yaw": 0})
+            settle(client)
+            assert soccer.scores == {"blue": 0, "red": 0}
             assert soccer.status == "running"
 
-            # 防守離開再進入 → 再記一次，並再開一次罰球
-            clock.advance(3000)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0, "yaw": 0})
-            tick(client)
-            assert soccer.players[_gkey("小美")].in_own_ring is False
-            clock.advance(3000)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0})
-            tick(client)
-            assert soccer.foul_count == 2
-            assert soccer.status == "penalty"
+            # 由場內穿出自家圓環（往 -z）
+            clock.advance(400)
+            s3.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": -z1, "yaw": 0})
+            settle(client)
+            ok = recv_until(s3, "soccer_goal_ok")
+            assert ok["own"] is True
+            assert ok["team"] == "blue"
+            assert ok["byName"] == "小美"
+            assert ok["scores"] == {"blue": 0, "red": 0}
+            assert soccer.scores == {"blue": 0, "red": 0}
+            assert soccer.status == "running"
+            assert soccer.armed == {"blue": True, "red": True}
+            # 老師與沒進場的學生都看得到
+            assert recv_until(t, "soccer_goal_ok")["own"] is True
+            assert recv_until(s4, "soccer_goal_ok")["scores"] == {"blue": 0, "red": 0}
 
 
 def test_三局兩勝與局間休息(

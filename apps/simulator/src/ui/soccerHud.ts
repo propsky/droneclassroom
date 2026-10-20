@@ -85,8 +85,6 @@ export interface SoccerHudInput {
   pkScores: { blue: number; red: number };
   pkTurn: 'blue' | 'red' | null;
   pkRound: number;
-  foul: boolean;
-  foulReason?: 'own_ring' | 'false_start' | 'no_return' | null;
   card?: 'yellow' | 'red' | null;
   disabled?: boolean;
   feelLabel?: string;
@@ -97,7 +95,7 @@ function fmtClock(endTime: number, now: number): string {
   return `${Math.floor(rem / 60)}:${String(rem % 60).padStart(2, '0')}`;
 }
 
-/** 多人足球 HUD 一行字：局數、本節比分、休息／黃金／PK、回半場與犯規 */
+/** 多人足球 HUD 一行字：局數、本節比分、休息／黃金／PK、回半場 */
 export function formatSoccerMatchLine(s: SoccerHudInput): string {
   const me = s.myTeam === 'red' ? '紅隊' : s.myTeam === 'blue' ? '藍隊' : '—';
   const role = s.mode === 'striker' ? (s.myStriker ? '・前鋒' : '・防守') : '';
@@ -108,13 +106,6 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
     (s.status === 'running' || s.status === 'golden')
       ? '｜全隊先退回半場'
       : '';
-  const foul = s.foul
-    ? s.foulReason === 'false_start'
-      ? '｜犯規：搶跑'
-      : s.foulReason === 'no_return'
-        ? '｜犯規：未回半場'
-        : '｜犯規：進了自家圓環'
-    : '';
   const card =
     s.card === 'red'
       ? '｜紅牌・整場出場'
@@ -142,24 +133,18 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   }
   if (s.status === 'golden') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `黃金進球｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${foul}${card}${feel}`;
-  }
-  if (s.status === 'penalty') {
-    const t = s.endTime ? fmtClock(s.endTime, s.now) : '0:10';
-    const why =
-      s.foulReason === 'false_start' ? '搶跑' : s.foulReason === 'no_return' ? '未返場' : '自家圓環';
-    return `罰球 10 秒｜${why}｜${t}｜${who}${card}`;
+    return `黃金進球｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${card}${feel}`;
   }
   if (s.status === 'pk') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
     const side = s.pkTurn === 'red' ? '紅方罰球' : '藍方罰球';
     const mine =
       s.pkTurn && s.pkTurn === s.myTeam && (s.pkMine ?? s.myStriker) ? '｜輪到你' : '';
-    return `PK 第${s.pkRound || 1}輪｜${side}｜點球 ${s.pkScores.blue}:${s.pkScores.red}｜${t}｜${who}${mine}${foul}`;
+    return `PK 第${s.pkRound || 1}輪｜${side}｜點球 ${s.pkScores.blue}:${s.pkScores.red}｜${t}｜${who}${mine}`;
   }
   if (s.status === 'running') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `${sets}｜第${s.period || 1}局 藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${foul}${card}${feel}`;
+    return `${sets}｜第${s.period || 1}局 藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${card}${feel}`;
   }
   return `三局兩勝｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜等待開始｜${who}${feel}`;
 }

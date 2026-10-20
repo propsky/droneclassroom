@@ -99,7 +99,6 @@ function hud(over: Partial<SoccerHudInput> = {}): SoccerHudInput {
     pkScores: { blue: 0, red: 0 },
     pkTurn: null,
     pkRound: 0,
-    foul: false,
     ...over,
   };
 }
@@ -149,11 +148,11 @@ describe('F9A 階段一 HUD 賽制', () => {
     expect(pk).toContain('輪到你');
   });
 
-  it('非攻擊手進自家圓環只在字尾標犯規', () => {
+  it('非攻擊手的計分列不寫犯規', () => {
     const line = formatSoccerMatchLine(
-      hud({ status: 'running', myStriker: false, foul: true, endTime: 60_000 }),
+      hud({ status: 'running', myStriker: false, endTime: 60_000 }),
     );
-    expect(line).toContain('犯規：進了自家圓環');
+    expect(line).not.toContain('犯規');
     expect(line).toContain('・防守');
   });
 });

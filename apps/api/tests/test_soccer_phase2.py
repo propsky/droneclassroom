@@ -1,5 +1,6 @@
-"""F9A 階段二：穿環權威、假得分、搶跑、未返場、罰球、黃紅牌、墜機。"""
+"""F9A 階段二：穿環權威、假得分、倒數鎖位、未返場、烏龍、黃紅牌、墜機。"""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.games.soccer_presets import F9A_A
@@ -40,7 +41,7 @@ def test_護罩穿過開口才算_打到框與只到球心都不算() -> None:
     assert shield_passes_ring((0, y, inside), (0, y, behind), **kw)
 
 
-def test_假得分與未返場罰球(
+def test_假得分與未返場再攻不算(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
     soccer = client.app.state.soccer
@@ -101,22 +102,23 @@ def test_假得分與未返場罰球(
             assert soccer.scores["blue"] == 1
             assert soccer.players[_gkey("小明")].needs_return is True
 
-            # 沒回半場又穿一次 → 不算分，改罰球
+            # 沒回半場又穿一次 → 不算分，也不罰球
             clock.advance(400)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
             settle(client)
             clock.advance(400)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
+            s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 1
-            assert soccer.status == "penalty"
-            assert soccer.penalty_reason == "no_return"
-            assert soccer.penalty_attack == "red"
+            assert soccer.status == "running"
+            assert soccer.armed["blue"] is False
 
 
-def test_搶跑罰球後才開局(
+def test_倒數離開起飛點不採用_照常開局(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
+    """已報到又離開：座標丟掉，人留在起飛點。倒數不被打斷，時間到照常 GO。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -132,16 +134,18 @@ def test_搶跑罰球後才開局(
             settle(client)
             clock.advance(500)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1.2, "z": -4.0, "yaw": 3.14})
-            foul = recv_until(s1, "soccer_foul")
-            assert foul["reason"] == "false_start"
-            assert soccer.status == "penalty"
-            assert soccer.penalty_attack == "red"
+            settle(client)
+            ming = soccer.players[_gkey("小明")]
+            assert ming.z == pytest.approx(-6.25)
+            assert soccer.status == "countdown"
 
-            clock.advance(3000)
+            clock.advance(500)
             tick(client)
-            assert soccer.status == "penalty"  # 倒數不會在搶跑後直接 GO
-
-            clock.advance(8000)
+            assert recv_until(s1, "soccer_countdown")["n"] == 2
+            clock.advance(1000)
+            tick(client)
+            assert recv_until(s1, "soccer_countdown")["n"] == 1
+            clock.advance(1000)
             tick(client)
             assert soccer.status == "running"
             assert recv_until(s1, "soccer_go")["match"]["period"] == 1
@@ -260,10 +264,10 @@ def test_墜機本局排除下一局恢復(
             assert soccer.players[_gkey("小明")].striker is True
 
 
-def test_得分後全員回半場_隊友沒回就再攻判罰球且不算分(
+def test_得分後全員回半場_隊友沒回就再攻不算分(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """F9A.8.4：得分隊任何一人沒回己方半場，前鋒再穿門 → 罰球，比分不加。"""
+    """F9A.8.4：得分隊任何一人沒回己方半場，前鋒再穿門不算分，也不罰球。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -311,10 +315,11 @@ def test_得分後全員回半場_隊友沒回就再攻判罰球且不算分(
             settle(client)
             clock.advance(400)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
+            s1.send_json({"type": "soccer_goal"})
             settle(client)
-            assert soccer.status == "penalty"
-            assert soccer.penalty_reason == "no_return"
+            assert soccer.status == "running"
             assert soccer.scores["blue"] == 1
+            assert soccer.armed["blue"] is False
 
 
 def test_兩次警告升黃牌_兩張黃牌升紅牌(
@@ -398,10 +403,10 @@ def test_前鋒墜機可暫停換人每局一次(
             assert soccer.players[_gkey("小美")].striker is True
 
 
-def test_人留在自家圓環罰球時間到不會連判(
+def test_停在自家圓環不處分(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """防守一直停在自家圓環：罰球結束後同一筆不再開，離開再進來才算下一筆。"""
+    """人留在自家圓環裡：比分與賽況都不動。沒有整顆穿出就不算烏龍。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -417,44 +422,23 @@ def test_人留在自家圓環罰球時間到不會連判(
 
             y, gz, _z0, _z1 = f9a_cross()
             inside = {"type": "soccer_pos", "x": 0, "y": y, "z": -gz, "yaw": 0}
+            clock.advance(3000)
             s3.send_json(inside)
             tick(client)
-            assert soccer.status == "penalty"
-            assert soccer.foul_count == 1
-            assert soccer.players[_gkey("小美")].in_own_ring is True
-
-            # 客戶端位置權威，人還在圓環裡（罰球點傳送被蓋掉）
-            for _ in range(4):
+            assert soccer.status == "running"
+            assert soccer.scores == {"blue": 0, "red": 0}
+            for _ in range(3):
                 clock.advance(500)
                 s3.send_json(inside)
                 settle(client)
-            assert soccer.foul_count == 1
-            assert soccer.status == "penalty"
-
-            clock.advance(10_000)
-            tick(client)
             assert soccer.status == "running"
-            clock.advance(400)
-            s3.send_json(inside)
-            settle(client)
-            assert soccer.foul_count == 1
-            assert soccer.status == "running"
-
-            clock.advance(400)
-            s3.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 0, "yaw": 0})
-            settle(client)
-            assert soccer.players[_gkey("小美")].in_own_ring is False
-            clock.advance(400)
-            s3.send_json(inside)
-            settle(client)
-            assert soccer.foul_count == 2
-            assert soccer.status == "penalty"
+            assert soccer.scores == {"blue": 0, "red": 0}
 
 
-def test_未返場同一輪只判一次_回半場後才能再判(
+def test_未返場再攻不算分_回齊之後下一球才算(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """再攻與再越線不會把罰球連開。全員回到己方之後，下一輪違規仍會判。"""
+    """得分隊有人沒回就再穿：比分不加、不罰球。全員回到己方後，下一球照常計分。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -484,8 +468,11 @@ def test_未返場同一輪只判一次_回半場後才能再判(
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 1
+            assert soccer.players[_gkey("小明")].needs_return is True
+            assert soccer.players[_gkey("小美")].needs_return is True
+            assert soccer.players[_gkey("小華")].needs_return is False
 
-            # 前鋒回家，防守還在對方半場，前鋒又穿門 → 第一次罰球
+            # 前鋒回家，防守還在對方半場，前鋒又穿門 → 不算
             clock.advance(1000)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": -1, "yaw": 0})
             tick(client)
@@ -494,60 +481,29 @@ def test_未返場同一輪只判一次_回半場後才能再判(
             settle(client)
             clock.advance(400)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
-            settle(client)
-            assert soccer.status == "penalty"
-            assert soccer.foul_count == 1
-            assert soccer.scores["blue"] == 1
-            assert soccer.return_sanctioned["blue"] is True
-
-            clock.advance(10_000)
-            tick(client)
-            assert soccer.status == "running"
-
-            # 罰球一結束又穿一次、再從己方越線：不再開罰球，比分不加
-            clock.advance(1000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
-            settle(client)
-            clock.advance(400)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
-            assert soccer.foul_count == 1
-            assert soccer.scores["blue"] == 1
             assert soccer.status == "running"
+            assert soccer.scores["blue"] == 1
+            assert soccer.armed["blue"] is False
 
+            # 從己方再越線也不把下一球作廢
             clock.advance(1000)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": -1, "yaw": 0})
             settle(client)
             clock.advance(400)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": 1, "yaw": 0})
             settle(client)
-            assert soccer.foul_count == 1
             assert soccer.status == "running"
-            # 越線那筆仍讓下一顆進球不算
-            assert soccer.annul_goal["blue"] is True
+            assert soccer.scores["blue"] == 1
 
-            # 全員回到己方，這一輪結案（下一顆仍因越線作廢，再下一顆才算）
+            # 全員回到己方，下一球計分，並且又把得分隊鎖住
             clock.advance(1000)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": -1, "yaw": 0})
             s3.send_json({"type": "soccer_pos", "x": 0.2, "y": 1, "z": -1, "yaw": 0})
             tick(client)
             assert soccer.armed["blue"] is True
-            assert soccer.return_sanctioned["blue"] is False
 
-            clock.advance(1000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
-            settle(client)
-            clock.advance(400)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
-            s1.send_json({"type": "soccer_goal"})
-            settle(client)
-            assert soccer.scores["blue"] == 1
-            assert soccer.annul_goal["blue"] is False
-
-            clock.advance(1000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 1, "z": -1, "yaw": 0})
-            tick(client)
             clock.advance(1000)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
             settle(client)
@@ -557,20 +513,7 @@ def test_未返場同一輪只判一次_回半場後才能再判(
             settle(client)
             assert soccer.scores["blue"] == 2
             assert soccer.armed["blue"] is False
-
-            # 再進一球後又沒回來就攻：仍會判，規則沒有關掉
-            clock.advance(1000)
-            s3.send_json({"type": "soccer_pos", "x": 0.2, "y": 1, "z": 2, "yaw": 0})
-            settle(client)
-            clock.advance(1000)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
-            settle(client)
-            clock.advance(400)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z1, "yaw": 0})
-            settle(client)
-            assert soccer.status == "penalty"
-            assert soccer.foul_count == 2
-            assert soccer.scores["blue"] == 2
+            assert soccer.status == "running"
 
 
 def test_F9A_B每隊最多3人() -> None:
