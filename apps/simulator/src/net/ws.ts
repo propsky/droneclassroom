@@ -3,7 +3,7 @@
 // 房間：register 帶 roomCode/roomPassword（缺省 = 預設房），room_joined / room_rejected / room_closed
 // 只轉成 bus 事件給 ui/overlays.ts 的登入 modal 與 header 房間標籤處理。
 import type { RegisterMsg, RoomInfo, ServerToClient, SoccerBallMsg, StudentToServer } from '@creafly/shared';
-import { WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
+import { ClassLevelSend, WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
 import { applyEntitlement, grantOfflineGrace, clearEntitlement, isOnlineOnlyMode } from './entitlement';
@@ -13,6 +13,7 @@ import { handleCompleteAck, handleProgressSync, initProgressQueue, reportComplet
 import { getStudentToken } from './studentAuth';
 import { armLevelStart, levelState, resetMission } from '../core/level';
 import { GameSession } from '../core/session';
+import { ClassLevelCommand } from './classLevelCommand';
 import { loadLevel } from './levelLoad';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
@@ -105,9 +106,20 @@ export function initWs(): void {
     if (pendingLevelId) {
       const id = pendingLevelId;
       pendingLevelId = null;
-      void loadLevel(id, { bypassGuard: true });
+      announceClassLevel(id);
     }
   });
+}
+
+/** 老師全班傳送：活動立刻切場次；一般關卡退出多人模式後載入（含尚未在記憶體的關卡）。 */
+function announceClassLevel(levelId: string): void {
+  const text = ClassLevelCommand.apply(levelId);
+  if (text) toast(`📋 ${text}`, 'success');
+}
+
+/** 測試與連線共用的進站分派。 */
+export function ingestServerMessage(msg: ServerToClient | SoccerBallMsg): void {
+  handleMessage(msg);
 }
 
 /** 登入完成後呼叫（含重新整理後自動重連） */
@@ -326,17 +338,14 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       handleLevelLoadResponse(msg.levelId, false);
       break;
     case 'load_level': {
-      if (levelState.levels.length === 0) {
-        // 關卡資料還沒載完（剛連上就收到伺服器補送的鎖定關卡）→ 暫存待補
+      // 活動（足球／大亂鬥）不依賴 chapter JSON，人在場內也要立刻切過去。
+      // 一般關卡若清單還沒到（剛連上就收到補送）先暫存；清單有了但仍沒有這筆
+      // （自訂關卡）也要退出多人模式，再由 loadLevel 跟伺服器要定義。
+      if (!ClassLevelSend.isActivity(msg.levelId) && levelState.levels.length === 0) {
         pendingLevelId = msg.levelId;
         break;
       }
-      const level = levelState.levels.find((l) => l.id === msg.levelId);
-      if (level) {
-        exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再載入
-        void loadLevel(msg.levelId, { bypassGuard: true });
-        toast(`📋 老師切換到：${level.name}`, 'success');
-      }
+      announceClassLevel(msg.levelId);
       break;
     }
     case 'lock_level':
@@ -354,6 +363,11 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
       toast('🔄 老師廣播：重置', 'success');
       break;
     case 'race_start':
+      if (ClassLevelSend.isActivity(msg.levelId || '')) {
+        // 活動沒有章節計時賽；當成全班傳送進該畫面
+        announceClassLevel(msg.levelId);
+        break;
+      }
       exitMultiplayerForLevel(); // 多人模式中收到 → 先退出再開賽
       setMode('manual');
       void loadLevel(msg.levelId || '1-4', { bypassGuard: true });
