@@ -2,6 +2,7 @@
 import type {
   AltitudeZone,
   BalloonDef,
+  HeadingYawMode,
   HeadingZone,
   LevelDef,
   ObstacleDef,
@@ -16,6 +17,7 @@ import {
   DEFAULT_RING_COLOR,
   DEFAULT_RING_SPIN,
   DEFAULT_ZONE_MARKER_DIAMETER,
+  HEADING_TOLERANCE_DEG,
   OBSTACLE_PHYSICS_SOLID,
   PHYSICS_DEFAULTS,
   balloonDiameter,
@@ -204,7 +206,7 @@ export function propsPanelHtml(): string {
                     <select id="le-zone-type" class="field-input">
                       <option value="position">位置區域</option>
                       <option value="altitude">高度</option>
-                      <option value="heading">朝向</option>
+                      <option value="heading">轉角</option>
                     </select>
                   </div>
                   <div class="lvl-props-grid" id="le-zone-position">
@@ -220,8 +222,15 @@ export function propsPanelHtml(): string {
                     <div class="field"><label class="field-label" for="le-zone-maxy">maxY</label><input id="le-zone-maxy" type="number" step="0.5" min="0" class="mono"></div>
                   </div>
                   <div class="lvl-props-grid" id="le-zone-heading" hidden>
-                    <div class="field"><label class="field-label" for="le-zone-yaw">目標 yaw</label><input id="le-zone-yaw" type="number" step="15" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-tol">容差</label><input id="le-zone-tol" type="number" step="5" min="5" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-yaw">目標角（度）</label><input id="le-zone-yaw" type="number" step="15" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-tol">容差（度）</label><input id="le-zone-tol" type="number" step="1" min="0" class="mono"></div>
+                    <div class="field">
+                      <label class="field-label" for="le-zone-yaw-mode">判定方式</label>
+                      <select id="le-zone-yaw-mode" class="field-input">
+                        <option value="accumulated">累積轉角（多轉一圈不算）</option>
+                        <option value="facing">機頭朝向（面對該方向即可）</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -377,7 +386,8 @@ export function createPropsController(host: PropsHost): PropsController {
       } else if (ztype === 'heading') {
         const hz = z as HeadingZone;
         q<HTMLInputElement>(root, '#le-zone-yaw').value = String(hz.targetYaw ?? 0);
-        q<HTMLInputElement>(root, '#le-zone-tol').value = String(hz.tolerance ?? 30);
+        q<HTMLInputElement>(root, '#le-zone-tol').value = String(hz.tolerance ?? HEADING_TOLERANCE_DEG);
+        q<HTMLSelectElement>(root, '#le-zone-yaw-mode').value = hz.yawMode ?? 'accumulated';
       }
     }
 
@@ -486,14 +496,18 @@ export function createPropsController(host: PropsHost): PropsController {
           maxY: maxYRaw === '' ? undefined : Number(maxYRaw),
         };
       } else if (ztype === 'heading') {
+        const yawRaw = Number(q<HTMLInputElement>(root, '#le-zone-yaw').value);
+        const tolRaw = Number(q<HTMLInputElement>(root, '#le-zone-tol').value);
+        const yawMode = q<HTMLSelectElement>(root, '#le-zone-yaw-mode').value as HeadingYawMode;
         next = {
           type: 'heading',
           x,
           z,
           label,
           triggerRadius,
-          targetYaw: Number(q<HTMLInputElement>(root, '#le-zone-yaw').value) || 0,
-          tolerance: Number(q<HTMLInputElement>(root, '#le-zone-tol').value) || 30,
+          targetYaw: Number.isFinite(yawRaw) ? yawRaw : 0,
+          tolerance: Number.isFinite(tolRaw) && tolRaw >= 0 ? tolRaw : HEADING_TOLERANCE_DEG,
+          yawMode: yawMode === 'facing' ? 'facing' : 'accumulated',
         };
       } else {
         const minYRaw = q<HTMLInputElement>(root, '#le-zone-pos-miny').value.trim();
@@ -526,7 +540,7 @@ export function createPropsController(host: PropsHost): PropsController {
       '#le-balloon-diam', '#le-color', '#le-color-hex',
       '#le-zone-minx', '#le-zone-maxx', '#le-zone-minz', '#le-zone-maxz',
       '#le-zone-pos-miny', '#le-zone-pos-maxy',
-      '#le-zone-miny', '#le-zone-maxy', '#le-zone-yaw', '#le-zone-tol',
+      '#le-zone-miny', '#le-zone-maxy', '#le-zone-yaw', '#le-zone-tol', '#le-zone-yaw-mode',
       '#le-zone-marker', '#le-zone-trigger',
       '#le-phys-collidable', '#le-phys-mass', '#le-phys-restitution', '#le-phys-friction', '#le-phys-gravity',
     ];

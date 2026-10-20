@@ -88,12 +88,24 @@ export interface PositionZone extends PassZoneBase {
   maxY?: number;
 }
 
+/**
+ * accumulated：從本關開始的有號累積轉角（不折 360，多轉一圈不算）。
+ * facing：機頭朝向（折回 360° 的最短角差），給「面對某方向」用。
+ */
+export type HeadingYawMode = 'accumulated' | 'facing';
+
 export interface HeadingZone extends PassZoneBase {
   type: 'heading';
-  /** 目標 yaw（度） */
+  /**
+   * 目標角（度）。
+   * yawMode=accumulated（預設）時是累積轉角，例如左轉一整圈要寫 360，不是 0。
+   * yawMode=facing 時是機頭朝向。
+   */
   targetYaw: number;
-  /** 容差（度） */
+  /** 容差（度）。省略時用 HEADING_TOLERANCE_DEG */
   tolerance: number;
+  /** 預設 accumulated。facing 必須在關卡上寫明。 */
+  yawMode?: HeadingYawMode;
 }
 
 export type PassZoneDef = AltitudeZone | PositionZone | HeadingZone;

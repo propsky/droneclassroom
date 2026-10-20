@@ -3,19 +3,22 @@
 import type { LevelDef, BalloonDef } from '@creafly/shared';
 import {
   isChapterDef,
-  normalizeDeg,
   signedYawDiffDeg,
-  RAD2DEG,
   PREVIEW_LEVEL_ID,
   detSin,
-  detHypot2,
   detHypot3,
   ringPassRadius,
   balloonPopRadius,
   ringBobAmp,
   ringSpin,
-  zoneTriggerRadius,
   obstacleIsCollidable,
+  FaceYawJudge,
+  LandingJudge,
+  OrderJudge,
+  PassZoneJudge,
+  RingJudge,
+  YawAccumulator,
+  type Pose,
 } from '@creafly/shared';
 import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
@@ -80,6 +83,29 @@ export const levelState = {
 let ringFaceHintAt = 0; // 「機頭沒對準圈」提示節流
 let lastFaceAligned: boolean | null = null;
 let lastFaceRing = -1;
+/** 上一 tick 的累積轉角（度）。用來分辨「停在目標角」和「掃過去」。 */
+let previousYawDeg = 0;
+
+function currentYawDeg(): number {
+  return YawAccumulator.fromRadians(droneState.yaw);
+}
+
+/** 把「上一 tick 的角」對齊現在，避免重置後第一個 tick 被看成大幅轉動。 */
+function sampleYaw(): void {
+  previousYawDeg = currentYawDeg();
+}
+
+function currentPose(): Pose {
+  const p = droneState.position;
+  return {
+    x: p.x,
+    y: p.y,
+    z: p.z,
+    accumulatedYawDeg: currentYawDeg(),
+    previousYawDeg,
+    grounded: droneState.isGrounded,
+  };
+}
 /** 3-2-1 倒數世代：切關／離場遞增，舊的 setTimeout 回呼直接作廢 */
 let countdownToken = 0;
 let countdownTimer: ReturnType<typeof setTimeout> | null = null;
@@ -201,6 +227,7 @@ export function bootstrapLevelForReplay(level: LevelDef): void {
       .map((o) => ({ x: o.x, y: o.y, z: o.z, half: o.size / 2 })),
   );
   resetDroneState();
+  sampleYaw();
 }
 
 /** 實際套用關卡資料（授權通過後；老師廣播 bypass 亦走此） */
@@ -241,6 +268,7 @@ export function applyLoadLevel(levelId: string): void {
   );
 
   resetDroneState();
+  sampleYaw();
   bus.emit('trail-clear', {});
   bus.emit('level-loaded', { level });
   stateHud(level.hud ?? level.name);
@@ -272,6 +300,7 @@ export function clearLevel(): void {
   lastFaceAligned = null;
   lastFaceRing = -1;
   setSolidObstacles([]);
+  sampleYaw();
   // 清飛行軌跡（進大亂鬥 / 足球的唯一共同出口在這裡統一發，呼叫端不必各自補）；
   // 墨水線與參考虛線由 pen.ts / render 端監聽 level-cleared 清除
   bus.emit('trail-clear', {});
@@ -351,6 +380,7 @@ GameSession.onExit('level', exitLevel);
 export function resetMission(): void {
   recordAction({ a: 'reset' });
   resetDroneState();
+  sampleYaw();
   levelState.rings.forEach((r) => (r.passed = false));
   levelState.ringsCollected = 0;
   bus.emit('rings-reset', {});
@@ -373,23 +403,21 @@ export function tickLevel(nowMs: number): void {
     checkDuration();
   }
   updateFaceGuidance();
+  sampleYaw();
 }
 
 function checkRings(nowMs: number): void {
   const s = levelState;
   const p = droneState.position;
   s.rings.forEach((ring, i) => {
-    if (ring.passed) return;
+    if (!RingJudge.isNext(s.rings.map((r) => r.passed), i)) return;
     const ry = ringWorldY(i, ring.y, nowMs, ringBobAmp(ring));
     const dist = detHypot3(p.x - ring.x, p.y - ry, p.z - ring.z);
-    if (dist >= ringPassRadius(ring)) return;
-    // 旋轉鑽圈關：faceYaw 圈必須機頭對準才算穿過
+    if (!RingJudge.inRange(dist, ringPassRadius(ring))) return;
+    // 旋轉鑽圈：faceYaw 比的是機頭朝向（最短角差），不是累積轉了幾度。
     if (ring.faceYaw !== undefined && ring.faceYaw !== null) {
-      const yawDeg = normalizeDeg(droneState.yaw * RAD2DEG);
-      const target = normalizeDeg(ring.faceYaw);
-      let d = Math.abs(yawDeg - target);
-      if (d > 180) d = 360 - d;
-      if (d > (ring.faceTol ?? 35)) {
+      const yawDeg = currentYawDeg();
+      if (!FaceYawJudge.aligned(yawDeg, ring.faceYaw, FaceYawJudge.tolerance(ring.faceTol))) {
         if (nowMs - ringFaceHintAt > 1500) {
           ringFaceHintAt = nowMs;
           stateHud('🔄 轉向紅圈、機頭對準再穿過！');
@@ -410,11 +438,8 @@ function checkRings(nowMs: number): void {
   if (!flags.programRunning && allDone && !s.manualComplete) {
     const level = s.current;
     if (level?.returnHome) {
-      const dx = p.x - HOME_POSITION.x;
-      const dz = p.z - HOME_POSITION.z;
-      const overPad = detHypot2(dx, dz) < 1.5; // 水平距離，不看高度
-      const landed = droneState.isGrounded;
-      if (overPad && landed) {
+      const overPad = LandingJudge.overPad(p.x, p.z, undefined, HOME_POSITION.x, HOME_POSITION.z);
+      if (overPad && droneState.isGrounded) {
         manualLevelComplete();
       } else {
         s.awaitingReturn = true;
@@ -471,32 +496,11 @@ function checkZones(): void {
   const s = levelState;
   const zones = s.current?.passZones;
   if (!zones?.length) return;
-  const p = droneState.position;
+  const pose = currentPose();
   zones.forEach((zone, i) => {
-    if (s.zoneProgress[i]) return;
     // 必須照順序：前一步沒完成，這一步尚未啟用
-    if (i > 0 && !s.zoneProgress[i - 1]) return;
-    if (zone.type === 'altitude') {
-      if (outsideZoneTrigger(zone, p)) return;
-      if (zone.minY !== undefined && p.y < zone.minY) return;
-      if (zone.maxY !== undefined && p.y > zone.maxY) return;
-    } else if (zone.type === 'position') {
-      if (zone.minX !== undefined && p.x < zone.minX) return;
-      if (zone.maxX !== undefined && p.x > zone.maxX) return;
-      if (zone.minZ !== undefined && p.z < zone.minZ) return;
-      if (zone.maxZ !== undefined && p.z > zone.maxZ) return;
-      if (zone.minY !== undefined && p.y < zone.minY) return;
-      if (zone.maxY !== undefined && p.y > zone.maxY) return;
-    } else if (zone.type === 'heading') {
-      if (outsideZoneTrigger(zone, p)) return;
-      const yawDeg = normalizeDeg(droneState.yaw * RAD2DEG);
-      const target = normalizeDeg(zone.targetYaw);
-      let diff = Math.abs(yawDeg - target);
-      if (diff > 180) diff = 360 - diff;
-      if (diff > (zone.tolerance || 20)) return;
-    } else {
-      return;
-    }
+    if (!OrderJudge.isActive(s.zoneProgress, i)) return;
+    if (!PassZoneJudge.satisfies(zone, pose)) return;
     s.zoneProgress[i] = true;
     const done = s.zoneProgress.filter(Boolean).length;
     bus.emit('zone-passed', { index: i, done, total: zones.length });
@@ -511,14 +515,6 @@ function checkZones(): void {
       }
     }
   });
-}
-
-function outsideZoneTrigger(
-  zone: { x: number; z: number; triggerRadius?: number },
-  p: { x: number; z: number },
-): boolean {
-  const r = zoneTriggerRadius(zone);
-  return r !== null && detHypot2(p.x - zone.x, p.z - zone.z) > r;
 }
 
 function checkBalloons(): void {
@@ -571,11 +567,17 @@ export function getFaceGuidance(): FaceGuidance | null {
   const idx = s.rings.findIndex((r) => !r.passed && r.faceYaw != null);
   const ring = idx >= 0 ? s.rings[idx] : undefined;
   if (!ring) return null;
-  const yawDeg = normalizeDeg(droneState.yaw * RAD2DEG);
-  const target = normalizeDeg(ring.faceYaw ?? 0);
+  const yawDeg = currentYawDeg();
+  const target = ring.faceYaw ?? 0;
   const signed = signedYawDiffDeg(target, yawDeg);
-  const tol = ring.faceTol ?? 40;
-  return { ringIndex: idx, aligned: Math.abs(signed) <= tol, yawDeg, targetDeg: target, signed };
+  const tol = FaceYawJudge.tolerance(ring.faceTol);
+  return {
+    ringIndex: idx,
+    aligned: FaceYawJudge.aligned(yawDeg, target, tol),
+    yawDeg,
+    targetDeg: target,
+    signed,
+  };
 }
 
 /** 對準狀態改變時發事件（render 把目標圈變綠） */
