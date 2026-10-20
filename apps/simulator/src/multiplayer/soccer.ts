@@ -390,6 +390,12 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
     case 'soccer_scores': {
       const prev = soccerState.status;
       if (msg.status) soccerState.status = msg.status as SoccerMatchStatus;
+      // 罰球結束只靠比分訊息把 status 改回進行中；不清掉的話畫面會一直掛著罰球
+      if (prev === 'penalty' && soccerState.status !== 'penalty') {
+        soccerState.penalty = null;
+        soccerState.foulNote = false;
+        soccerState.foulReason = null;
+      }
       if (msg.endTime) soccerState.endTime = msg.endTime;
       if (msg.scores) soccerState.scores = msg.scores;
       if (msg.armed) soccerState.armed = msg.armed;

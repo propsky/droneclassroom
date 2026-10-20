@@ -273,6 +273,31 @@ def shield_passes_ring(
     )
 
 
+class PenaltyFlow:
+    """同一輪違規只開一次罰球。純判斷，不改賽局物件。
+
+    F9A.8.4／F9A.9.1：沒回半場再攻，判一次罰球，接著那顆不算。
+    人留在自家圓環裡也是同一筆違規，離開再進來才是下一筆。
+    """
+
+    LIVE = ("running", "golden")
+
+    @staticmethod
+    def own_ring_occupied(*, striker: bool, disabled: bool, inside: bool) -> bool:
+        """非攻擊手、還能飛、護罩在自家圓環開口裡。"""
+        return (not striker) and (not disabled) and inside
+
+    @staticmethod
+    def open_own_ring(*, status: str, occupied: bool, already_inside: bool) -> bool:
+        """進行中或黃金進球、這次才進圓環，才開罰球。人留在裡面不重複。"""
+        return status in PenaltyFlow.LIVE and occupied and not already_inside
+
+    @staticmethod
+    def open_no_return(*, armed: bool, sanctioned: bool) -> bool:
+        """這一輪返場還沒判過，才因再攻或再越線開罰球。"""
+        return (not armed) and (not sanctioned)
+
+
 def shield_overlaps_opening(
     x: float,
     y: float,

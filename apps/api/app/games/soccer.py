@@ -15,6 +15,7 @@
   'striker'（預設）= FAI 前鋒穿門：只有攻擊手穿對方圓環得分；得分後該隊
     全員先回己方半場才能再攻（F9A.8.4）。穿環看整顆護罩與行進方向，伺服器不單信
     soccer_goal；搶跑、未返場、非攻擊手進自家圓環改判 10 秒罰球。
+    同一輪未返場或留在自家圓環只開一次，避免罰球結束又立刻再判。
     警告／黃牌／紅牌按隊伍計（F9A.9）。墜機是安全事件，本局少一人，不發紅牌（F9A.8.5）。
     開賽先起槳再 3-2-1，倒數鎖控。
     賽制：一節 durationSec（預設 3 分鐘）、三局兩勝、局間休息。
@@ -43,6 +44,7 @@ from .soccer_rules import (
     PENALTY_SEC,
     RED_CLOSING_MPS,
     YELLOW_CLOSING_MPS,
+    PenaltyFlow,
     false_start_radius,
     shield_overlaps_opening,
     shield_passes_ring,
@@ -256,6 +258,8 @@ class SoccerGame(BaseGame):
         self.team_yellows: dict[str, int] = {"blue": 0, "red": 0}
         # 違規之後的下一顆進球不算（F9A.8.4）
         self.annul_goal: dict[str, bool] = {"blue": False, "red": False}
+        # 這一輪「得分後未返場」已經開過罰球。回半場（armed）之後才清。
+        self.return_sanctioned: dict[str, bool] = {"blue": False, "red": False}
         # 前鋒失能後的暫停換人，每局一次（F9A.8.5）
         self.timeout_used: dict[str, bool] = {"blue": False, "red": False}
         self.penalty_attack: str | None = None
@@ -464,12 +468,18 @@ class SoccerGame(BaseGame):
             p.needs_return = False
             p.in_own_ring = False
         self.armed = {"blue": True, "red": True}
+        self.return_sanctioned = {"blue": False, "red": False}
 
     def _sync_armed(self) -> None:
-        """得分隊還有人沒回己方半場 → armed=false（整隊都不能再攻）。"""
+        """得分隊還有人沒回己方半場 → armed=false（整隊都不能再攻）。
+
+        全員回到己方後，這一輪的未返場罰球也一起結案，下一輪才能再判。
+        """
         for team in SOCCER_TEAM_NAMES:
             pending = any(p.needs_return for p in self._flying(team))
             self.armed[team] = not pending
+            if self.armed[team]:
+                self.return_sanctioned[team] = False
 
     def _mark_team_return(self, team: str) -> None:
         """進球後，還能飛的隊員全都要回自己半場。"""
@@ -1025,7 +1035,8 @@ class SoccerGame(BaseGame):
         """回到己方半場的隊員解除 needs_return。全員到齊才恢復可攻。"""
         changed = False
         for p in self._active():
-            if p.needs_return and self._on_own_half(p):
+            # 伺服器剛把人放到罰球點時 last_pos_ms 是空的，那個座標不算飛回家。
+            if p.needs_return and p.last_pos_ms is not None and self._on_own_half(p):
                 p.needs_return = False
                 changed = True
         if changed:
@@ -1318,8 +1329,12 @@ class SoccerGame(BaseGame):
         if self.status not in ("running", "golden") or not p.striker:
             return
         if not self.armed.get(p.team, True):
-            # 隊上還有人沒回來就再攻：罰球，這一球不算（F9A.8.4）
-            await self._begin_penalty(self._other_team(p.team), p.team, "no_return", p)
+            # 隊上還有人沒回來就再攻：這一輪只判一次罰球，球不算（F9A.8.4）
+            if PenaltyFlow.open_no_return(
+                armed=False,
+                sanctioned=self.return_sanctioned.get(p.team, False),
+            ):
+                await self._begin_penalty(self._other_team(p.team), p.team, "no_return", p)
             return
         if self.annul_goal.get(p.team):
             self.annul_goal[p.team] = False
@@ -1338,7 +1353,11 @@ class SoccerGame(BaseGame):
             return
         if self._z_on_own_half(p.team, prev_z) and not self._z_on_own_half(p.team, p.z):
             self.annul_goal[p.team] = True
-            await self._begin_penalty(self._other_team(p.team), p.team, "no_return", p)
+            if PenaltyFlow.open_no_return(
+                armed=False,
+                sanctioned=self.return_sanctioned.get(p.team, False),
+            ):
+                await self._begin_penalty(self._other_team(p.team), p.team, "no_return", p)
 
     def _z_on_own_half(self, team: str, z: float) -> bool:
         cfg = self._teams[team]
@@ -1357,16 +1376,17 @@ class SoccerGame(BaseGame):
             goal_r=self.field.goal_r,
             shield_r=self.field.shield_r,
         )
-        entered = (not p.striker) and (not p.disabled) and inside
-        if self.status not in ("running", "golden"):
-            if not inside:
-                p.in_own_ring = False
-            return
-        if entered and not p.in_own_ring:
+        occupied = PenaltyFlow.own_ring_occupied(
+            striker=p.striker, disabled=p.disabled, inside=inside
+        )
+        if PenaltyFlow.open_own_ring(
+            status=self.status, occupied=occupied, already_inside=p.in_own_ring
+        ):
             p.in_own_ring = True
             await self._begin_penalty(self._other_team(p.team), p.team, "own_ring", p)
-        elif not inside:
-            p.in_own_ring = False
+            return
+        # 罰球進行中也要記住人還在不在裡面，否則時間一到會把同一筆再判一次
+        p.in_own_ring = occupied
 
     def _pick_defender(self, team: str | None) -> SoccerPlayer | None:
         if team not in SOCCER_TEAM_NAMES:
@@ -1400,6 +1420,8 @@ class SoccerGame(BaseGame):
             self.penalty_remain_ms = None
             self.penalty_resume = "prestart"
         self.foul_count += 1
+        if reason == "no_return":
+            self.return_sanctioned[defend] = True
         self.penalty_attack = attack
         self.penalty_defend = defend
         self.penalty_reason = reason
@@ -1416,7 +1438,6 @@ class SoccerGame(BaseGame):
             striker.spawn_x, striker.spawn_z = x, z
             striker.x, striker.y, striker.z = x, 0.4, z
             striker.last_pos_ms = None
-            striker.needs_return = False
             striker.pending_cross = False
             striker.vx = striker.vy = striker.vz = 0.0
         if defender is not None:
@@ -1424,7 +1445,6 @@ class SoccerGame(BaseGame):
             defender.spawn_x, defender.spawn_z = 0.0, z_def
             defender.x, defender.y, defender.z = 0.0, 0.4, z_def
             defender.last_pos_ms = None
-            defender.in_own_ring = False
             defender.vx = defender.vy = defender.vz = 0.0
         self.status = "penalty"
         self.end_time = int(self.now_ms() + PENALTY_SEC * 1000)
@@ -1486,6 +1506,9 @@ class SoccerGame(BaseGame):
         resume = self.penalty_resume
         remain = self.penalty_remain_ms
         self._clear_penalty()
+        for q in self._active():
+            # 罰球時計下的穿越不能在恢復後拿去換一顆正規進球。
+            q.pending_cross = False
         if resume == "prestart":
             # 搶跑發生在開賽前，罰球結束後才真正開局，出生點回到起飛區
             self._assign_spawns()
