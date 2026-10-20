@@ -26,17 +26,23 @@ describe('練習穿環漏判', () => {
   const y = SOCCER_FIELD.goalY;
   const exit = far.goalZ - far.halfThick;
 
-  it('整顆沿進攻方向離開環厚才算，擦框、只到門面、反向、飛在環上方都不算', () => {
+  it('沿進攻方向離開環厚，開口內緣算；只打到框、只到門面、反向、飛在環外都不算', () => {
     const approach = far.goalZ + 0.8;
     const through = exit - far.shieldR - 0.15;
     const centered: Array<{ x: number; y: number; z: number }> = [];
     for (let z = approach; z >= through; z -= 0.04) centered.push({ x: 0, y, z });
     expect(step(centered)).toBe(true);
 
-    const graze = far.goalR - far.shieldR + 0.05;
+    // 舊規則只收內半徑 − 護罩（約 0.10）。貼近開口內緣（仍在洞裡）現在要算。
+    const graze = far.goalR - 0.02;
     const grazing: Array<{ x: number; y: number; z: number }> = [];
     for (let z = approach; z >= through; z -= 0.04) grazing.push({ x: graze, y, z });
-    expect(step(grazing)).toBe(false);
+    expect(step(grazing)).toBe(true);
+
+    const frame = far.goalR + far.shieldR + 0.05;
+    const onFrame: Array<{ x: number; y: number; z: number }> = [];
+    for (let z = approach; z >= through; z -= 0.04) onFrame.push({ x: frame, y, z });
+    expect(step(onFrame)).toBe(false);
 
     const partial: Array<{ x: number; y: number; z: number }> = [];
     for (let z = approach; z >= far.goalZ; z -= 0.04) partial.push({ x: 0, y, z });
@@ -75,7 +81,7 @@ describe('練習穿環漏判', () => {
     expect(shieldPassesRing(prev, curr, far)).toBe(false);
   });
 
-  it('離開環厚當下帽緣擦到框，不算穿', () => {
+  it('開口裡穿過後才往框緣側移，仍然算穿', () => {
     const points: Array<{ x: number; y: number; z: number }> = [];
     const start = far.goalZ + 0.5;
     const end = exit - far.shieldR - 0.05;
@@ -83,6 +89,6 @@ describe('練習穿環漏判', () => {
       const x = z < exit ? 0.25 : 0.02;
       points.push({ x, y: far.goalY, z });
     }
-    expect(step(points)).toBe(false);
+    expect(step(points)).toBe(true);
   });
 });

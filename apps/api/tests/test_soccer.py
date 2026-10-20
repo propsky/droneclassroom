@@ -149,7 +149,7 @@ def test_striker模式進球驗證與半場重置與勝負(
             settle(client)
             assert soccer.scores["blue"] == 0
 
-            # 整顆護罩沿 +z 穿過：後緣過門面、球心在淨空半徑內才算
+            # 護罩沿 +z 穿過開口：後緣離開環厚才算
             clock.advance(3000)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": z0, "yaw": 0})
             settle(client)
