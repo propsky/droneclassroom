@@ -1,6 +1,7 @@
 // 大亂鬥 HUD：右上計分板（倒數計時 + 場地標示 + 即時排行）＋右下進出場按鈕。
 // 純 DOM，由 multiplayer/arena.ts 呼叫；名字用 textContent 寫入（不吃使用者輸入的 HTML）。
-import type { ArenaPlayerState, ArenaScoreEntry } from '@creafly/shared';
+import type { ArenaPlayerState, ArenaResultWinner, ArenaScoreEntry } from '@creafly/shared';
+import { ArenaResultsCopy } from '@creafly/shared';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -96,4 +97,65 @@ export function updateArenaScoreboard(
       );
     });
   }
+}
+
+/** 時間到的結算蓋板。沒有關閉鈕，等老師再來一輪或切關才收。 */
+export function showArenaResults(
+  mode: 'balloon' | 'tag',
+  winner: ArenaResultWinner,
+  ranking: ArenaScoreEntry[],
+  myId = '',
+): void {
+  const root = $('arena-results');
+  if (!root) return;
+  const kicker = $('arena-results-kicker');
+  const title = $('arena-results-title');
+  const detail = $('arena-results-detail');
+  const wait = $('arena-results-wait');
+  const list = $('arena-results-list');
+  if (kicker) kicker.textContent = ArenaResultsCopy.kicker();
+  if (title) title.textContent = ArenaResultsCopy.title(mode, winner);
+  if (detail) detail.textContent = ArenaResultsCopy.detail(mode);
+  if (wait) wait.textContent = ArenaResultsCopy.waitHint();
+  if (list) fillArenaResultsList(list, mode, ranking, myId);
+  root.hidden = false;
+}
+
+export function hideArenaResults(): void {
+  const root = $('arena-results');
+  if (root) root.hidden = true;
+}
+
+function fillArenaResultsList(
+  list: HTMLElement,
+  mode: 'balloon' | 'tag',
+  ranking: ArenaScoreEntry[],
+  myId: string,
+): void {
+  list.textContent = '';
+  if (!ranking.length) {
+    const empty = document.createElement('li');
+    empty.className = 'arena-results-empty';
+    empty.textContent = '這場沒有玩家成績';
+    list.appendChild(empty);
+    return;
+  }
+  ranking.forEach((entry, index) => {
+    const row = document.createElement('li');
+    const rank = index + 1;
+    row.className = 'arena-results-row' + (rank <= 3 ? ` rank-${rank}` : '') + (entry.id === myId ? ' me' : '');
+    const place = document.createElement('span');
+    place.className = 'arena-results-rank mono';
+    place.textContent = String(rank);
+    const name = document.createElement('span');
+    name.className = 'arena-results-name';
+    const who = `${entry.emoji || ''}${entry.name || '?'}`;
+    const role = mode === 'tag' ? ArenaResultsCopy.roleLabel(entry.role) : '';
+    name.textContent = role ? `${who}　${role}` : who;
+    const stat = document.createElement('b');
+    stat.className = 'arena-results-stat mono';
+    stat.textContent = ArenaResultsCopy.stat(mode, entry);
+    row.append(place, name, stat);
+    list.appendChild(row);
+  });
 }
