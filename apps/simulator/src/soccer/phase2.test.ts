@@ -31,13 +31,17 @@ describe('F9A 階段二穿環', () => {
     expect(shieldPassesRing({ x: 0, y, z: before }, { x: 0, y, z: through }, ring)).toBe(true);
   });
 
-  it('球心到門面但後緣沒過、擦框、反向都不算', () => {
+  it('球心到門面但後緣沒過、打到框沒進開口、反向都不算；貼近開口內緣要算', () => {
     expect(
       shieldPassesRing({ x: 0, y, z: before }, { x: 0, y, z: SOCCER_FIELD.goalZ }, ring),
     ).toBe(false);
-    const graze = SOCCER_FIELD.goalR - SOCCER_BALL_R + 0.05;
+    const rim = SOCCER_FIELD.goalR - 0.02;
     expect(
-      shieldPassesRing({ x: graze, y, z: before }, { x: graze, y, z: through }, ring),
+      shieldPassesRing({ x: rim, y, z: before }, { x: rim, y, z: through }, ring),
+    ).toBe(true);
+    const frame = SOCCER_FIELD.goalR + SOCCER_BALL_R + 0.05;
+    expect(
+      shieldPassesRing({ x: frame, y, z: before }, { x: frame, y, z: through }, ring),
     ).toBe(false);
     expect(shieldPassesRing({ x: 0, y, z: through }, { x: 0, y, z: before }, ring)).toBe(false);
   });

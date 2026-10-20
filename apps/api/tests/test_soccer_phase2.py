@@ -8,7 +8,7 @@ from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 from tests.test_soccer import _countdown_to_go, _gkey, _join_soccer, _register, f9a_cross
 
 
-def test_護罩整顆穿過才算_擦框與只到球心都不算() -> None:
+def test_護罩穿過開口才算_打到框與只到球心都不算() -> None:
     y, gz, z0, z1 = f9a_cross()
     kw = {
         "goal_z": gz,
@@ -24,9 +24,12 @@ def test_護罩整顆穿過才算_擦框與只到球心都不算() -> None:
     # 後緣過了門面中心，還沒離開環厚
     partial = gz + F9A_A.shield_r + F9A_A.goal_tube * 0.4
     assert not shield_passes_ring((0, y, z0), (0, y, partial), **kw)
-    # 徑向大於淨空（內半徑 − 護罩），護罩擦到框
-    graze = F9A_A.goal_r - F9A_A.shield_r + 0.05
-    assert not shield_passes_ring((graze, y, z0), (graze, y, z1), **kw)
+    # 貼近開口內緣（舊淨空 內半徑−護罩 約 0.10 會漏）要算
+    rim = F9A_A.goal_r - 0.02
+    assert shield_passes_ring((rim, y, z0), (rim, y, z1), **kw)
+    # 球體打在框管上，沒有進入開口
+    frame = F9A_A.goal_r + F9A_A.shield_r + 0.05
+    assert not shield_passes_ring((frame, y, z0), (frame, y, z1), **kw)
     # 往回穿，行進方向不對（機頭朝向不在這個函式裡）
     assert not shield_passes_ring((0, y, z1), (0, y, z0), **kw)
     # 從球門後方（端牆與門面之間）穿回場內不算；由場內向外才算
@@ -52,7 +55,7 @@ def test_假得分與未返場罰球(
             _countdown_to_go(client, clock, s1)
 
             y, gz, z0, z1 = f9a_cross()
-            graze = F9A_A.goal_r - F9A_A.shield_r + 0.05
+            frame = F9A_A.goal_r + F9A_A.shield_r + 0.05
             # 人突然出現在圓環中心，沒有穿越段
             clock.advance(3000)
             s1.send_json({"type": "soccer_pos", "x": 0, "y": y, "z": gz, "yaw": 0})
@@ -70,12 +73,12 @@ def test_假得分與未返場罰球(
             settle(client)
             assert soccer.scores["blue"] == 0
 
-            # 擦框
+            # 打到框管、球體沒進開口
             clock.advance(400)
-            s1.send_json({"type": "soccer_pos", "x": graze, "y": y, "z": z0, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": frame, "y": y, "z": z0, "yaw": 0})
             settle(client)
             clock.advance(400)
-            s1.send_json({"type": "soccer_pos", "x": graze, "y": y, "z": z1, "yaw": 0})
+            s1.send_json({"type": "soccer_pos", "x": frame, "y": y, "z": z1, "yaw": 0})
             s1.send_json({"type": "soccer_goal"})
             settle(client)
             assert soccer.scores["blue"] == 0
