@@ -395,7 +395,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-body">
-              <p class="hint">FAI 前鋒穿門（預設）：只有攻擊手穿對方圓環得分，得分後該隊還能飛的人要回己方半場。三局兩勝、局間休息；平手先 PK，再黃金進球。打進自己的門不算分。推球模式不在這裡選。</p>
+              <p class="hint">前鋒穿門：只有攻擊手穿對方圓環得分，得分後該隊還能飛的人要回己方半場。三局兩勝、局間休息；平手先 PK，再黃金進球。打進自己的門不算分。</p>
               <div class="ctl-grid">
                 <div class="field">
                   <label class="field-label" for="soccer-dur">每局時長</label>
@@ -1381,7 +1381,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           soccer.armed = msg.armed;
           soccer.status = msg.status;
           soccer.endTime = msg.endTime;
-          soccer.mode = msg.mode ?? 'striker'; // 缺省視為 'striker'
+          soccer.mode = 'striker';
           applySoccerMatch(msg.match);
           renderSoccerRoster(msg.players);
           renderSoccerScore();

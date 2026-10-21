@@ -39,7 +39,7 @@ class SoccerClassSpec:
     goal_inset: float
     # 內圈底部離地。圓心高 = 底部 + 內半徑
     inner_bottom: float
-    # 球形護罩半徑（球半徑；出生點間距用這個，不拿推球模式的 BALL_RADIUS）
+    # 球形護罩半徑（出生點間距用這個）
     shield_r: float
     # F9A.3.1 標的最大厚度 T（公尺）
     thickness_max: float

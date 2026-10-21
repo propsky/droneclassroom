@@ -1,18 +1,15 @@
-"""停止 / 智能停止 / 推球模式測試。
+"""停止 / 智能停止測試。
 
 - arena_stop / soccer_stop：倒數中或進行中皆可停，end 廣播 reason:'teacher_stop' 後回 idle
 - 智能停止：老師在賽局中 broadcast load_level / race_start / reset_all →
   先收到 end（reason:'level_switch'）再收到關卡廣播（順序保證）
-- 推球模式（mode:'ball'，缺省）：伺服器模擬共用球 —— 推球位移、牆反彈、
-  進球得分 / 烏龍歸對隊 / 球重置、client soccer_goal 上報忽略
+- 舊客戶端送 mode=ball：拒絕開賽，連線與後續 striker 開賽都還在
 
 tick 相關流程全部用假時鐘（conftest.clock）＋ 手動 tick（conftest.tick），不 sleep。
 """
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.games.soccer import BALL_RADIUS
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
@@ -37,15 +34,6 @@ def _countdown_to_go(client: TestClient, clock: FakeClock, ws, game: str) -> dic
         clock.advance(1000)
         tick(client)
     return recv_until(ws, f"{game}_go")
-
-
-def _ball_until_moved(ws) -> dict:
-    """收 soccer_ball 直到球離開中場（z≠0），回傳該球狀態。"""
-    for _ in range(10):
-        ball = recv_until(ws, "soccer_ball")["ball"]
-        if ball["z"] != 0:
-            return ball
-    raise AssertionError("10 則 soccer_ball 內球都沒動")
 
 
 def _types_until(ws, msg_type: str) -> list[str]:
@@ -154,7 +142,6 @@ def test_soccer_stop_進行中依當下比分判勝(
             assert end["scores"] == {"blue": 0, "red": 2}
             settle(client)
             assert soccer.status == "idle"
-            assert soccer.ball is None  # 停止後球收走
 
 
 # ---------- 智能停止（老師在賽局中切關）----------
@@ -242,198 +229,23 @@ def test_智能停止_賽局idle時不發end(client: TestClient, teacher_ticket:
             assert "soccer_end" not in seen
 
 
-def test_推球半徑與客戶端同一份() -> None:
-    """BALL_RADIUS 要跟 client SOCCER_PUSH_BALL_R 相同。機體 0.8 不是護罩、也不是 0.6。"""
-    from app.games.soccer import DRONE_RADIUS
-
-    assert BALL_RADIUS == 0.6
-    assert DRONE_RADIUS == 0.8
-
-
-# ---------- 推球模式（mode:'ball'，須明確指定；缺省已改 striker）----------
-
-
-def _start_ball_game(client: TestClient, teacher_ticket_ws, clock: FakeClock, s1, s2) -> dict:
-    """開一場 ball 模式（隱藏選配，明確帶 mode）並吃完倒數，回傳 soccer_go。"""
-    teacher_ticket_ws.send_json({"type": "soccer_start", "durationSec": 60, "mode": "ball"})
-    go = _countdown_to_go(client, clock, s1, "soccer")
-    return go
-
-
-def test_ball模式_開賽下發場地與球_推球位移與廣播(
+def test_舊客戶端送ball模式被拒絕且不崩潰(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
-    """明確 mode=ball 才推球；GO 下發 field/ball；貼近球 → 推球位移 + soccer_ball。"""
+    """mode=ball 不開賽、狀態維持 idle、連線還在；接著仍可開前鋒穿門。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
-            _register(s1, t, "小明")  # 藍隊
-            _register(s2, t, "小華")  # 紅隊
-            _join(s1, "soccer")
-            _join(s2, "soccer")
-            go = _start_ball_game(client, t, clock, s1, s2)
-            assert go["mode"] == "ball"
-            assert go["ball"]["x"] == 0.0 and go["ball"]["z"] == 0.0
-            assert go["ball"]["r"] == BALL_RADIUS
-            assert go["ball"]["y"] == pytest.approx(soccer.field.goal_y)
-            assert go["field"]["halfZ"] == 7.0
-
-            # 藍隊員從球後方貼近（距 1.0 < 球半徑 + 機 0.8）→ 沿法線（+z）推
-            s1.send_json(
-                {"type": "soccer_pos", "x": 0, "y": soccer.field.goal_y, "z": -1.0, "yaw": 0}
-            )
-            tick(client)
-            assert soccer.ball.z > 0  # 球被往 +z（紅隊門）推
-            assert soccer.ball.last_touch is soccer.players["g:小明"]
-            # GO 那個 tick 已廣播過一則球在中場（z=0）的 soccer_ball，收到推球後的那則為止
-            ball_msg = _ball_until_moved(s1)
-            assert ball_msg["z"] > 0 and ball_msg["r"] == BALL_RADIUS
-            assert _ball_until_moved(t)["z"] > 0  # 老師端也收到
-
-
-def test_ball模式_牆反彈(client: TestClient, teacher_ticket: str, clock: FakeClock) -> None:
-    """球衝向側牆 → 位置 clamp 在 halfX - r、法向速度反向 ×0.7。"""
-    soccer = client.app.state.soccer
-    with teacher_connect(client, teacher_ticket) as t:
-        recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+        with client.websocket_connect("/") as s1:
             _register(s1, t, "小明")
-            _register(s2, t, "小華")
             _join(s1, "soccer")
-            _join(s2, "soccer")
-            _start_ball_game(client, t, clock, s1, s2)
-
-            soccer.ball.x, soccer.ball.vx = -2.2, -10.0  # 直衝 -x 牆
-            tick(client)  # x: -2.2 - 0.8 = -3.0 → 超出 -(halfX - 球半徑) → 反彈
-            assert soccer.ball.x == -(3.5 - BALL_RADIUS)
-            assert soccer.ball.vx > 0  # 反向且衰減
-
-
-def test_ball模式_進球烏龍與重置(
-    client: TestClient, teacher_ticket: str, clock: FakeClock
-) -> None:
-    """球心過門面且在門環內 → 攻方得分；守方最後觸球 = 烏龍，雙方都不加分。
-    正規進球後球重置中場、進球隊 armed=false。烏龍也重置球，但不鎖返場。"""
-    soccer = client.app.state.soccer
-    with teacher_connect(client, teacher_ticket) as t:
-        recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
-            _register(s1, t, "小明")  # 藍隊
-            _register(s2, t, "小華")  # 紅隊
-            _join(s1, "soccer")
-            _join(s2, "soccer")
-            _start_ball_game(client, t, clock, s1, s2)
-
-            # 藍隊員最後觸球、球由場內穿越 +z 門面 → 藍得分、非烏龍
-            ball = soccer.ball
-            gz = soccer.field.goal_z
-            gy = soccer.field.goal_y
-            ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 0.0, gy, gz - 0.6, 10.0
-            tick(client)  # z += 0.8，跨越門面且球心在內半徑內
-            ok = recv_until(s1, "soccer_goal_ok")
-            assert ok["team"] == "blue" and ok["own"] is False
-            assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 0}
-            assert soccer.armed["blue"] is False  # 進球隊退回（過中線恢復）
-            # 球重置中場（懸浮高度）、速度歸零、清最後觸球者
-            b = soccer.ball
-            assert (b.x, b.z) == (0.0, 0.0)
-            assert b.y == pytest.approx(gy)
-            assert (b.vx, b.vy, b.vz) == (0.0, 0.0, 0.0)
-            assert b.last_touch is None
-
-            # 藍隊員把球推進自家（-z）門 → 烏龍：比分不變、own=true、球回中場
-            b.last_touch = soccer.players["g:小明"]
-            b.x, b.y, b.z, b.vz = 0.0, gy, -(gz - 0.6), -10.0
-            tick(client)
-            ok = recv_until(s1, "soccer_goal_ok")
-            assert ok["team"] == "blue" and ok["own"] is True
-            assert ok["by"] == "s1" and ok["scores"] == {"blue": 1, "red": 0}
-            assert soccer.scores == {"blue": 1, "red": 0}
-            assert soccer.armed["red"] is True
-            assert soccer.ball.z == 0.0
-
-
-def test_ball模式_從球門後方穿回不得分(
-    client: TestClient, teacher_ticket: str, clock: FakeClock
-) -> None:
-    """球在門面與端牆之間，穿回場內不得分，球也不重置。"""
-    soccer = client.app.state.soccer
-    with teacher_connect(client, teacher_ticket) as t:
-        recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
-            _register(s1, t, "小明")
-            _register(s2, t, "小華")
-            _join(s1, "soccer")
-            _join(s2, "soccer")
-            _start_ball_game(client, t, clock, s1, s2)
-
-            ball = soccer.ball
-            gz = soccer.field.goal_z
-            gy = soccer.field.goal_y
-            ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 0.0, gy, gz + 0.4, -10.0
-            tick(client)
-            assert soccer.scores == {"blue": 0, "red": 0}
-            assert soccer.ball.z < gz
-            assert soccer.ball.z != 0.0
-
-            ball = soccer.ball
-            ball.last_touch = soccer.players["g:小華"]
-            ball.x, ball.y, ball.z, ball.vz = 0.0, gy, -(gz + 0.4), 10.0
-            tick(client)
-            assert soccer.scores == {"blue": 0, "red": 0}
-            assert soccer.ball.z > -gz
-
-
-def test_ball模式_門環外撞端牆反彈不進球(
-    client: TestClient, teacher_ticket: str, clock: FakeClock
-) -> None:
-    """球撞端牆但不在門環半徑內 → 反彈、不得分。"""
-    soccer = client.app.state.soccer
-    with teacher_connect(client, teacher_ticket) as t:
-        recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
-            _register(s1, t, "小明")
-            _register(s2, t, "小華")
-            _join(s1, "soccer")
-            _join(s2, "soccer")
-            _start_ball_game(client, t, clock, s1, s2)
-
-            ball = soccer.ball
-            ball.last_touch = soccer.players["g:小明"]
-            ball.x, ball.y, ball.z, ball.vz = 2.0, soccer.field.goal_y, 6.3, 15.0  # x=2 在內半徑外
-            tick(client)
-            assert soccer.scores == {"blue": 0, "red": 0}  # 沒進球
-            assert soccer.ball.z == 7.0 - BALL_RADIUS  # 端牆反彈
-            assert soccer.ball.vz < 0
-
-
-def test_ball模式_client進球上報忽略(
-    client: TestClient, teacher_ticket: str, clock: FakeClock
-) -> None:
-    """ball 模式下 client 的 soccer_goal 一律忽略（進門由伺服器球物理判定）。"""
-    soccer = client.app.state.soccer
-    with teacher_connect(client, teacher_ticket) as t:
-        recv_until(t, "student_list")
-        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
-            _register(s1, t, "小明")  # 藍隊前鋒
-            _register(s2, t, "小華")
-            _join(s1, "soccer")
-            _join(s2, "soccer")
-            _start_ball_game(client, t, clock, s1, s2)
-
-            # 藍前鋒人在對方門環內宣告進球（striker 模式會算）→ ball 模式忽略
-            s1.send_json(
-                {
-                    "type": "soccer_pos",
-                    "x": 0,
-                    "y": soccer.field.goal_y,
-                    "z": soccer.field.goal_z,
-                    "yaw": 0,
-                }
-            )
-            s1.send_json({"type": "soccer_goal"})
+            t.send_json({"type": "soccer_start", "durationSec": 60, "mode": "ball"})
             settle(client)
-            assert soccer.scores == {"blue": 0, "red": 0}
+            assert soccer.status == "idle"
+            assert soccer.mode == "striker"
+
+            t.send_json({"type": "soccer_start", "durationSec": 30, "mode": "striker"})
+            go = _countdown_to_go(client, clock, s1, "soccer")
+            assert go["mode"] == "striker"
+            assert "ball" not in go
+            assert soccer.status == "running"

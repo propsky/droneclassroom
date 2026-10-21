@@ -106,12 +106,8 @@ export interface ArenaStateReqMsg { type: 'arena_state_req' }
 /** 老師手動停止大亂鬥（倒數中或進行中皆可；伺服器廣播 arena_end reason:'teacher_stop'） */
 export interface ArenaStopMsg { type: 'arena_stop' }
 
-/**
- * 足球玩法。
- * 'striker' = FAI 前鋒穿門（預設）。
- * 'ball' = 推球進門（隱藏選配：預設流程不提供，僅明確指定 mode 時啟用）。
- */
-export type SoccerMode = 'ball' | 'striker';
+/** 足球玩法。前鋒穿對方圓環。推球（ball）已移除。 */
+export type SoccerMode = 'striker';
 /** 局數打平之後怎麼走。預設 pk_then_golden（WDSC：先各 3 球 PK，再黃金進球）。 */
 export type SoccerTieBreak = 'pk_then_golden' | 'golden_then_pk';
 export interface SoccerStartMsg {
@@ -426,13 +422,6 @@ export interface SoccerMatchMeta {
   tieBreak?: SoccerTieBreak;
 }
 
-/** 推球模式的球狀態（伺服器模擬，~12.5Hz 廣播；客戶端內插渲染） */
-export interface SoccerBallState {
-  x: number; y: number; z: number;
-  /** 球半徑（下發以便客戶端渲染與預測接觸，資料驅動） */
-  r: number;
-}
-
 export interface SoccerStateMsg {
   type: 'soccer_state';
   /** 結束是 'done'。break / golden / pk 是階段一的賽制階段 */
@@ -446,7 +435,6 @@ export interface SoccerStateMsg {
   players: SoccerPlayerState[];
   spawns?: SoccerSpawn[];
   field?: SoccerFieldDef;
-  ball?: SoccerBallState | null;
   /** 三局兩勝／黃金進球／PK。舊伺服器可能不帶 */
   match?: SoccerMatchMeta;
 }
@@ -458,11 +446,8 @@ export interface SoccerGoMsg {
   endTime: number; spawns: SoccerSpawn[]; players: SoccerPlayerState[];
   field?: SoccerFieldDef;
   mode?: SoccerMode;
-  ball?: SoccerBallState | null;
   match?: SoccerMatchMeta;
 }
-/** 推球模式：球位置廣播（每 tick，僅 running 期間） */
-export interface SoccerBallMsg { type: 'soccer_ball'; ball: SoccerBallState }
 export interface SoccerPlayersMsg { type: 'soccer_players'; players: SoccerPlayerState[] }
 export interface SoccerGoalOkMsg {
   type: 'soccer_goal_ok';
@@ -534,7 +519,7 @@ export interface SoccerResumeMsg {
 /** 學生端會收到的所有 soccer_* 訊息（ws 分派 → multiplayer/soccer 用） */
 export type SoccerServerMsg =
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg
+  | SoccerGoalOkMsg | SoccerScoresMsg
   | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg;
 
@@ -547,7 +532,7 @@ export type ServerToClient =
   | ArenaBalloonMsg | ArenaCaughtMsg | ArenaRespawnMsg | ArenaScoresMsg | ArenaEndMsg
   | ArenaResumeMsg
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
-  | SoccerBallMsg | SoccerGoalOkMsg | SoccerScoresMsg
+  | SoccerGoalOkMsg | SoccerScoresMsg
   | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg;
 

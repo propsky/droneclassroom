@@ -70,7 +70,7 @@ export function showSoccerMatchHud(on: boolean): void {
 /** 左下比分列。純函式，方便測試賽制文案（不碰 DOM） */
 export interface SoccerHudInput {
   status: string;
-  mode: 'ball' | 'striker';
+  mode: 'striker';
   scores: { blue: number; red: number };
   sets: { blue: number; red: number };
   period: number;
@@ -115,14 +115,6 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
           ? '｜本局少一人'
           : '';
   const feel = s.feelLabel ? `｜手感${s.feelLabel}` : '';
-
-  if (s.mode === 'ball') {
-    let t = '等待開始';
-    if (s.status === 'running' && s.endTime) t = fmtClock(s.endTime, s.now);
-    else if (s.status === 'countdown') t = '3-2-1…';
-    else if (s.status === 'done') t = '結束';
-    return `藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}`;
-  }
 
   const sets = `局數 ${s.sets.blue}:${s.sets.red}`;
   if (s.status === 'countdown') return `三局兩勝｜第${s.period || 1}局｜起槳｜3-2-1…｜${who}${feel}`;

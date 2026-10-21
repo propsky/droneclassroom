@@ -4,12 +4,6 @@ from app.games.soccer_presets import F9A_A
 from app.games.soccer_rules import OwnGoal
 
 
-def test_最後觸球者守門才是烏龍() -> None:
-    assert OwnGoal.by_touch(toucher_team="blue", scoring_team="red")
-    assert not OwnGoal.by_touch(toucher_team="blue", scoring_team="blue")
-    assert not OwnGoal.by_touch(toucher_team=None, scoring_team="blue")
-
-
 def test_護罩穿出自家圓環才算_反向穿回不算() -> None:
     y = F9A_A.goal_y
     gz = F9A_A.half_z - F9A_A.goal_inset

@@ -20,7 +20,7 @@ def false_start_radius(ball_r: float) -> float:
 
     出生點沿底線的間距是一顆球徑（2 × 球半徑）。半徑取球半徑，
     每個人的圓才剛好接到隔壁的點、不會把隔壁的出生點也算成自己的。
-    ball_r 是 F9A 護罩半徑（與 client SOCCER_BALL_R 同一份），不是推球模式的大球。
+    ball_r 是 F9A 護罩半徑（與 client SOCCER_BALL_R 同一份）。
     """
     return ball_r
 
@@ -275,11 +275,6 @@ def shield_passes_ring(
 
 class OwnGoal:
     """進了自己隊的門：雙方都不加分。純判斷，不改賽局物件。"""
-
-    @staticmethod
-    def by_touch(*, toucher_team: str | None, scoring_team: str) -> bool:
-        """最後觸球的人屬於守這顆門的隊，就是打進自己的門。"""
-        return toucher_team in ("blue", "red") and toucher_team != scoring_team
 
     @staticmethod
     def shield_into_own(

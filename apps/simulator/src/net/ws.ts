@@ -2,7 +2,7 @@
 // 指數退避重連 3s→30s；close code 4000（同名擠下線）/ 4001（被踢 / 關房）不重連；斷線不影響單機遊玩。
 // 房間：register 帶 roomCode/roomPassword（缺省 = 預設房），room_joined / room_rejected / room_closed
 // 只轉成 bus 事件給 ui/overlays.ts 的登入 modal 與 header 房間標籤處理。
-import type { RegisterMsg, RoomInfo, ServerToClient, SoccerBallMsg, StudentToServer } from '@creafly/shared';
+import type { RegisterMsg, RoomInfo, ServerToClient, StudentToServer } from '@creafly/shared';
 import { ClassLevelSend, WS_CLOSE_KICKED, WS_CLOSE_REPLACED } from '@creafly/shared';
 import { bus, toast } from '../core/events';
 import { wsUrl } from './backend';
@@ -118,7 +118,7 @@ function announceClassLevel(levelId: string): void {
 }
 
 /** 測試與連線共用的進站分派。 */
-export function ingestServerMessage(msg: ServerToClient | SoccerBallMsg): void {
+export function ingestServerMessage(msg: ServerToClient): void {
   handleMessage(msg);
 }
 
@@ -176,8 +176,7 @@ export function connectToTeacher(): void {
 
   ws.onmessage = (ev) => {
     try {
-      // soccer_ball 不在 shared 的 ServerToClient 匯總裡（只進 SoccerServerMsg）→ 這裡補上
-      const msg = JSON.parse(String(ev.data)) as ServerToClient | SoccerBallMsg;
+      const msg = JSON.parse(String(ev.data)) as ServerToClient;
       handleMessage(msg);
     } catch {
       /* 非 JSON 訊息忽略 */
@@ -288,7 +287,7 @@ function exitMultiplayerForLevel(): void {
 }
 
 /** 處理老師廣播；arena_* / soccer_* 分派給 multiplayer/（ws 只分派、不處理） */
-function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
+function handleMessage(msg: ServerToClient): void {
   switch (msg.type) {
     case 'welcome':
       wsState.myId = msg.id;
@@ -398,7 +397,6 @@ function handleMessage(msg: ServerToClient | SoccerBallMsg): void {
     case 'soccer_arm':
     case 'soccer_go':
     case 'soccer_players':
-    case 'soccer_ball': // 推球模式：共用球位置廣播（~12.5Hz）
     case 'soccer_goal_ok':
     case 'soccer_scores':
     case 'soccer_card':
