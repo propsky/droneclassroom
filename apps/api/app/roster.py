@@ -193,6 +193,11 @@ class Roster:
         """老師斷線：移出集合。"""
         self._teachers.discard(ws)
 
+    @property
+    def teacher_count(self) -> int:
+        """還看著這間房的老師連線數。0 = 沒人能按開始，等待名單要放開。"""
+        return len(self._teachers)
+
     # ---------- 學生協定 ----------
 
     async def register(self, record: StudentRecord, name: str, emoji: str) -> None:

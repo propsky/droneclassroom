@@ -26,6 +26,8 @@ import type {
 } from '@creafly/shared';
 import { ArenaRanking, ClassLevelSend, SoccerPenaltyLabel } from '@creafly/shared';
 import { ArenaResultsPanel } from './arenaResultsPanel';
+import { DispatchCard } from './dispatchCard';
+import type { DispatchStateMsg } from '@creafly/shared';
 import { SoccerFieldChoice } from './soccerFieldChoice';
 import { SoccerResultsPanel } from './soccerResultsPanel';
 import { SoccerRulesetForm } from './soccerRuleset';
@@ -53,6 +55,8 @@ export interface DashboardView {
   onSoccerMsg(msg: TeacherSoccerMsg): void;
   /** 關卡鎖定狀態（伺服器回送為準）→ 鎖定按鈕 UI */
   setLevelLock(locked: boolean): void;
+  /** 教師派送名單（伺服器記憶體；重連也靠這則補畫面） */
+  onDispatch(msg: DispatchStateMsg): void;
   /** 房間列表 + 選定房 + 班級清單（伺服器 room_list）→ 班級列 / 名冊卡頭 / 連線位址；teams 缺省 = 舊伺服器（退回房間列） */
   setRooms(rooms: RoomInfo[], selected: string | null, teams?: TeamInfo[]): void;
   /** /me 回來身分更新 → topbar 名稱 */
@@ -315,6 +319,18 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         <section class="tab-panel" id="panel-level-manage"></section>
 
         <section class="tab-panel" id="panel-arena">
+          <div class="card" id="arena-dispatch">
+            <div class="card-head"><h2 class="card-title">教師派送</h2></div>
+            <div class="card-body">
+              <p class="note">勾選後一次派送，或對某一位按「派送」。學生留在目前關卡看等待看板、不能飛，也不需自己按確認。你按「開始大亂鬥」才進場。上限 8 人。超過會提示，比賽中不能再加。</p>
+              <div id="arena-dispatch-list" class="dispatch-list"></div>
+              <p class="hint" id="arena-dispatch-status"></p>
+            </div>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" id="arena-dispatch-selected">派送勾選的學生</button>
+              <button type="button" class="btn btn-ghost" id="arena-dispatch-cancel">取消等待名單</button>
+            </div>
+          </div>
           <div class="card">
             <div class="card-head">
               <h2 class="card-title">大亂鬥</h2>
@@ -324,7 +340,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-body">
-              <p class="note">學生先點自己畫面的「大亂鬥」進場，老師再按「開始大亂鬥」（全場一起倒數起跑）。</p>
+              <p class="note">派送名單上的人會在你按「開始大亂鬥」時一起進場並倒數。還沒派送、也沒有比賽時，學生仍可自己點右下角進場；一有名單或比賽開始，那個按鈕會關掉。</p>
               <div class="field">
                 <span class="field-label">模式（開賽時套用）</span>
                 <div class="mode-pick">
@@ -383,10 +399,22 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         </section>
 
         <section class="tab-panel" id="panel-soccer">
+          <div class="card" id="soccer-dispatch">
+            <div class="card-head"><h2 class="card-title">教師派送</h2></div>
+            <div class="card-body">
+              <p class="note">勾選後一次派送，或對某一位按「派送」。學生留在目前關卡看等待看板、不能飛。你按「開始足球賽」才進場並自動分隊。上限 6 人（3v3）。超過會提示，比賽中不能再加。</p>
+              <div id="soccer-dispatch-list" class="dispatch-list"></div>
+              <p class="hint" id="soccer-dispatch-status"></p>
+            </div>
+            <div class="card-actions">
+              <button type="button" class="btn btn-primary" id="soccer-dispatch-selected">派送勾選的學生</button>
+              <button type="button" class="btn btn-ghost" id="soccer-dispatch-cancel">取消等待名單</button>
+            </div>
+          </div>
           <div class="card">
             <div class="card-head"><h2 class="card-title">隊伍名單</h2></div>
             <div class="card-body">
-              <p class="note">學生先點「足球對戰（多人）」進場（自動平均分隊）→ 點「設為前鋒」指定前鋒（每隊 1 名，換隊後系統自動補位）、點「換隊」把學生調到對面。</p>
+              <p class="note">開始後自動平均分隊。進場後可點「設為前鋒」（每隊 1 名，換隊後系統自動補位）、點「換隊」把學生調到對面。還沒派送、也沒有比賽時，學生仍可自己點右下角進場。</p>
               <div class="soccer-teams">
                 <div class="team-col blue"><h3>藍隊</h3><div id="soccer-blue"><div class="empty">尚無人加入</div></div></div>
                 <div class="team-col red"><h3>紅隊</h3><div id="soccer-red"><div class="empty">尚無人加入</div></div></div>
@@ -1029,6 +1057,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
 
   const rosterCard = root.querySelector<HTMLElement>('.roster-card')!;
   const tbody = root.querySelector<HTMLElement>('#student-tbody')!;
+  const dispatchUi = DispatchCard.bind(root, (msg) => opts.sendGame(msg));
   const chipsEl = root.querySelector<HTMLElement>('#room-chips')!;
   const stripLabelEl = root.querySelector<HTMLElement>('#room-strip-label')!;
   const roomHintEl = root.querySelector<HTMLElement>('#room-hint')!;
@@ -1540,6 +1569,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           break;
       }
     },
+    onDispatch(msg: DispatchStateMsg): void {
+      dispatchUi.apply(msg);
+    },
     setLevelLock(locked: boolean): void {
       levelLocked = locked;
       drawLockBtn();
@@ -1595,6 +1627,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         if (b.time != null) return 1;
         return 0;
       });
+      dispatchUi.syncStudents(sorted);
       const online = String(sorted.filter((s) => s.connected).length);
       countEl.textContent = online; // topbar 膠囊
       rosterCountEl.textContent = online; // 名冊卡頭

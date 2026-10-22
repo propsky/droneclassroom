@@ -885,6 +885,7 @@ class SoccerGame(BaseGame):
         logger.info(
             "[Soccer] 結束：藍 %d : %d 紅 → winner=%s（%s）", blue, red, self.winner, reason
         )
+        await self._notify_match_end(reason)
 
     # ---------- 回半場。舊的 PK 換人訊息收下但不做。 ----------
 

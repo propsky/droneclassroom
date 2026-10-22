@@ -466,6 +466,7 @@ class ArenaGame(BaseGame):
         await self._broadcast_teachers(msg)  # 老師後台也要收到結束 / 勝負
         await self.broadcast_scores()
         logger.info("[Arena] 結束：%s winner=%s（%s）", self.mode, winner, reason)
+        await self._notify_match_end(reason)
 
     # ---------- tick（legacy setInterval 80ms 的對應）----------
 

@@ -103,6 +103,7 @@ async function enterDashboard(): Promise<void> {
       onArena: (msg) => view.onArenaMsg(msg),
       onSoccer: (msg) => view.onSoccerMsg(msg),
       onLock: (locked) => view.setLevelLock(locked),
+      onDispatch: (msg) => view.onDispatch(msg),
       onRooms: (rooms, selected, teams) => view.setRooms(rooms, selected, teams),
       onUnauthorized: () => {
         clearSession();

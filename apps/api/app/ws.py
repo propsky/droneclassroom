@@ -57,6 +57,8 @@ from .protocol import (
     ArenaStopMsg,
     CompleteAckMsg,
     CompleteLevelMsg,
+    DispatchAddMsg,
+    DispatchCancelMsg,
     LevelLoadDeniedMsg,
     LevelLoadOkMsg,
     LevelLoadReqMsg,
@@ -78,7 +80,6 @@ from .protocol import (
     RoomRejectedMsg,
     RoomSelectMsg,
     RoomUpdateMsg,
-    ShowMessagePayload,
     SoccerCrashMsg,
     SoccerGoalMsg,
     SoccerJoinMsg,
@@ -102,6 +103,7 @@ from .replay_verify import ReplayVerifier, VerifyOutcome
 from .rest import known_level_ids
 from .rooms import Room, RoomLimitError, RoomManager
 from .roster import StudentRecord, send_safe
+from .teacher_dispatch import TeacherDispatch
 
 logger = logging.getLogger("creafly.api.ws")
 
@@ -259,14 +261,6 @@ async def _apply_broadcast(room: Room, payload: TeacherBroadcastPayload) -> None
         room.roster.level_locked = payload.locked
         await room.roster.send_raw_to_teachers(payload.model_dump_json())
     await room.roster.broadcast_to_students(payload)
-
-
-async def _notify_not_in_game(room: Room, player_ids: set[str], text: str) -> None:
-    """賽局開始時提醒「在房內但沒加入賽局」的學生（賽局訊息只發給已 join 者）。"""
-    data = ShowMessagePayload(type="show_message", text=text).model_dump_json()
-    for s in room.roster.students:
-        if s.ws is not None and s.connected and s.id not in player_ids:
-            await send_safe(s.ws, data)
 
 
 _REPLAY_CACHE_MAX = 2000
@@ -454,6 +448,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 if student_id is not None:
                     # 空進度也送：client 以此確認同步完成（進房即知道哪些關已完成）
                     await send_safe(ws, progress_sync_msg(progress_rows).model_dump_json())
+                await TeacherDispatch.on_register(room, record)
                 continue
             if room is None:
                 # 帶 ?room= 連上但還沒進房：其餘訊息一律忽略（先 register）
@@ -515,6 +510,9 @@ async def _student_endpoint(ws: WebSocket) -> None:
                             )
                 # ----- 大亂鬥 -----
                 case ArenaJoinMsg():
+                    if not TeacherDispatch.allow_join(room, "arena", record):
+                        logger.info("[Dispatch] %s 派送或比賽中，拒絕自行加入大亂鬥", record.name)
+                        continue
                     await soccer.leave(record)  # 與足球互斥（legacy 只有足球→大亂鬥單向，補齊雙向）
                     await arena.join(record)
                 case ArenaLeaveMsg():
@@ -525,6 +523,9 @@ async def _student_endpoint(ws: WebSocket) -> None:
                     await arena.pop(record, valid)
                 # ----- 足球 -----
                 case SoccerJoinMsg():
+                    if not TeacherDispatch.allow_join(room, "soccer", record):
+                        logger.info("[Dispatch] %s 派送或比賽中，拒絕自行加入足球", record.name)
+                        continue
                     await arena.leave(record)  # 與大亂鬥互斥（legacy soccerJoin 行為）
                     await soccer.join(record)
                 case SoccerLeaveMsg():
@@ -602,6 +603,7 @@ async def _send_rejected(ws: WebSocket, reason: RejectReason) -> None:
 
 async def _leave_room(room: Room, record: StudentRecord) -> None:
     """學生換房：從舊房的賽局與名冊整筆移出（連線不動）。"""
+    await TeacherDispatch.drop(room, record)
     await room.arena.drop(record)
     await room.soccer.drop(record)
     await room.roster.detach(record)
@@ -746,12 +748,18 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                         await _apply_broadcast(target_room, valid.payload)
                 # ----- 大亂鬥 -----
                 case ArenaStartMsg():
-                    await arena.start(valid)
-                    # 賽局訊息只發給已 join 的學生 → 沒進大亂鬥畫面的人會完全沒反應；
-                    # 用廣播橫幅提醒他們加入（老師「按了開始學生卻沒動靜」的第三大成因）
-                    await _notify_not_in_game(
-                        room, set(arena.players), "🎈 老師開始了大亂鬥！點右下角「大亂鬥」加入"
+                    await TeacherDispatch.launch(
+                        room,
+                        "arena",
+                        arena_mode=valid.mode,
+                        arena_field=valid.field,
                     )
+                    await arena.start(valid)
+                    await TeacherDispatch.after_start(room, "arena")
+                case DispatchAddMsg():
+                    await TeacherDispatch.add(room, valid.activity, valid.studentIds)
+                case DispatchCancelMsg():
+                    await TeacherDispatch.cancel(room, valid.activity, valid.studentIds)
                 case ArenaStateReqMsg():
                     await arena.send_snapshot_to(ws)
                 case ArenaStopMsg():
@@ -761,17 +769,14 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     if SoccerStartMode.playable(valid.mode) is None:
                         logger.info("[Soccer] 推球模式已移除，拒絕開賽")
                         continue
+                    await TeacherDispatch.launch(room, "soccer")
                     await soccer.start(
                         valid.durationSec,
                         valid.mode,
                         tie_break=valid.tieBreak,
                         ruleset=valid.ruleset,
                     )
-                    await _notify_not_in_game(
-                        room,
-                        set(soccer.players),
-                        "⚽ 老師開始了足球對戰！點右下角「足球對戰」加入",
-                    )
+                    await TeacherDispatch.after_start(room, "soccer")
                 case SoccerStateReqMsg():
                     await soccer.send_snapshot_to(ws)
                 case SoccerStopMsg():
@@ -793,7 +798,7 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        rooms.remove_teacher(ws)
+        await rooms.remove_teacher(ws)
 
 
 # ---------- 未知路徑 ----------

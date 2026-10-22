@@ -18,6 +18,7 @@ import type {
   SoccerStateMsg,
   SoccerTimeoutNotice,
   SoccerWarningMsg,
+  DispatchStateMsg,
   StudentInfo,
   TeacherBroadcastPayload,
   TeacherToServer,
@@ -44,6 +45,8 @@ export interface TeacherWsHandlers {
   onSoccer(msg: TeacherSoccerMsg): void;
   /** 關卡鎖定狀態（連上時伺服器補送 + 廣播後回送 → 開關 UI 以伺服器為準） */
   onLock(locked: boolean): void;
+  /** 教師派送名單（足球／大亂鬥各一則） */
+  onDispatch(msg: DispatchStateMsg): void;
   /** 房間列表 + 目前選定房間（建立/關閉/設定/人數變動/切房時伺服器推送）；
    *  teams = 老師的持久化班級清單（含未開房的）；舊伺服器 / 無 DB 缺省 → undefined */
   onRooms(rooms: RoomInfo[], selected: string | null, teams?: TeamInfo[]): void;
@@ -224,6 +227,9 @@ export class TeacherWs {
         break;
       case 'lock_level':
         this.handlers.onLock(msg.locked);
+        break;
+      case 'dispatch_state':
+        this.handlers.onDispatch(msg);
         break;
       case 'room_list': {
         this.selectedRoom = msg.selected;

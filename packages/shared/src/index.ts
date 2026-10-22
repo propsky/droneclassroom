@@ -1,6 +1,7 @@
 export * from './levels';
 export * from './arenaRanking';
 export * from './classLevelSend';
+export * from './teacherDispatch';
 export * from './levelKit';
 export * from './levelGoalPresets';
 export * from './levelEditorUtils';
