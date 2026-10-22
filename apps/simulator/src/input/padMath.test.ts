@@ -9,19 +9,43 @@ import {
 } from './padMath';
 
 describe('normalizeGamepadAxis', () => {
-  it('置中值為 0、range 為 1 時直通', () => {
-    expect(normalizeGamepadAxis(0.5, 0, 1, 0.1)).toBe(0.5);
-    expect(normalizeGamepadAxis(-0.8, 0, 1, 0.1)).toBe(-0.8);
-  });
-
-  it('死區內回傳 0', () => {
-    expect(normalizeGamepadAxis(0.05, 0, 1, 0.1)).toBe(0);
-  });
-
-  it('套用 center / range 校正', () => {
-    expect(normalizeGamepadAxis(0.2, 0.1, 0.5, 0.05)).toBeCloseTo(0.2);
+  it('死區為 0 時置中直通，並夾在 ±1', () => {
+    expect(normalizeGamepadAxis(0.5, 0, 1, 0)).toBe(0.5);
+    expect(normalizeGamepadAxis(-0.8, 0, 1, 0)).toBe(-0.8);
     expect(normalizeGamepadAxis(1.5, 0, 1, 0)).toBe(1);
     expect(normalizeGamepadAxis(-2, 0, 1, 0)).toBe(-1);
+  });
+
+  it('死區內與邊界回傳 0', () => {
+    expect(normalizeGamepadAxis(0.05, 0, 1, 0.1)).toBe(0);
+    expect(normalizeGamepadAxis(-0.05, 0, 1, 0.1)).toBe(0);
+    expect(normalizeGamepadAxis(0.1, 0, 1, 0.1)).toBe(0);
+    expect(normalizeGamepadAxis(-0.1, 0, 1, 0.1)).toBe(0);
+  });
+
+  it('死區外扣除再縮放，滿舵仍為 ±1', () => {
+    // (0.5 - 0.1) / 0.9
+    expect(normalizeGamepadAxis(0.5, 0, 1, 0.1)).toBeCloseTo(0.4 / 0.9, 12);
+    // (0.8 - 0.1) / 0.9
+    expect(normalizeGamepadAxis(-0.8, 0, 1, 0.1)).toBeCloseTo(-0.7 / 0.9, 12);
+    expect(normalizeGamepadAxis(1, 0, 1, 0.1)).toBe(1);
+    expect(normalizeGamepadAxis(-1, 0, 1, 0.1)).toBe(-1);
+    // 0.75 與 0.5 都是二進位精確：(0.75 - 0.5) / 0.5 = 0.5
+    expect(normalizeGamepadAxis(0.75, 0, 1, 0.5)).toBe(0.5);
+    expect(normalizeGamepadAxis(-0.75, 0, 1, 0.5)).toBe(-0.5);
+  });
+
+  it('套用 center / range 校正後再縮放死區', () => {
+    // (0.2 - 0.1) / 0.5 = 0.2；(0.2 - 0.05) / 0.95
+    expect(normalizeGamepadAxis(0.2, 0.1, 0.5, 0.05)).toBeCloseTo(0.15 / 0.95, 12);
+    expect(normalizeGamepadAxis(0.6, 0.1, 0.5, 0.2)).toBe(1);
+    expect(normalizeGamepadAxis(1.5, 0, 1, 0)).toBe(1);
+    expect(normalizeGamepadAxis(-2, 0, 1, 0)).toBe(-1);
+  });
+
+  it('死區 ≥ 1 時整段為 0', () => {
+    expect(normalizeGamepadAxis(1, 0, 1, 1)).toBe(0);
+    expect(normalizeGamepadAxis(-0.4, 0, 1, 1.5)).toBe(0);
   });
 });
 
