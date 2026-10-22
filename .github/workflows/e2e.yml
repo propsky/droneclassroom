@@ -1,39 +1,51 @@
 name: E2E
 
+# 這個 repo 原本沒有 CI。只在相關 PR 與手動觸發時跑，
+# 不在 push main、也不排程，避免洗版與失敗信。
 on:
   pull_request:
-  push:
-    branches:
-      - main
+    paths:
+      - 'apps/simulator/**'
+      - 'apps/api/**'
+      - 'packages/shared/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   chromium:
     runs-on: ubuntu-latest
     env:
-      # 固定指到本機閉掉的埠，避免工作流程讀到正式 DATABASE_URL。
+      # 固定指到本機閉掉的埠。不使用任何 secret，也不讀正式 DATABASE_URL。
       # Playwright 啟動 API 時會再覆寫成連不上的位址；本章測試的瀏覽器也不開 WebSocket。
       DATABASE_URL: postgresql+asyncpg://127.0.0.1:9/creafly_e2e_do_not_use
       TEST_DATABASE_URL: ""
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
 
       - name: Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: 安裝
         run: pnpm install --frozen-lockfile
