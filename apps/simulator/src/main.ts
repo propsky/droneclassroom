@@ -21,6 +21,7 @@ import {
 import { meetsMinimumPlayRequirements, probeBrowserCapabilities, parseSceneEnv } from '@creafly/shared';
 import { bus, toast } from './core/events';
 import { initInputs, tickInputDevices, collectControlFrame, touchJoysticksShouldShow } from './input';
+import { registerJoystickLayout } from './input/joystick';
 import {
   initRecordingSession,
   beginFrame,
@@ -44,6 +45,7 @@ import { initRealToolbar } from './ui/realToolbar';
 import { TouchJoystickToggle } from './ui/touchJoystickToggle';
 import { initHeaderOverflow } from './ui/headerOverflow';
 import { PortraitChrome } from './ui/portraitChrome';
+import { TouchJoystickLayout } from './ui/touchJoystickLayout';
 import { initLevelComplete } from './ui/levelComplete';
 import { initCalibrationOverlay } from './ui/calibrationOverlay';
 import { initPadSettings, initPadHint } from './ui/padSettings';
@@ -184,6 +186,7 @@ setLevelLoadGuard((levelId) => {
 const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
 document.getElementById('view-btn')?.addEventListener('click', doToggleView);
 PortraitChrome.init(); // 直式：先收起選單／活動關卡，虛擬搖桿才量得到縮後的區域
+registerJoystickLayout(() => TouchJoystickLayout.apply(document));
 initInputs({ toggleView: doToggleView });
 TouchJoystickToggle.init();
 initCalibrationOverlay(); // 搖桿校正精靈 overlay（在 initInputs 之後：狀態機已就緒）
