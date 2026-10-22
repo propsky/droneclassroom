@@ -21,12 +21,15 @@ export interface PrefStore {
  * 預設開：`matchMedia('(pointer: coarse)')`。手機、平板的主要指標是手指。
  * 預設關：桌機滑鼠／觸控板是 `(pointer: fine)`。
  *
- * 故意不用下面這幾個舊條件（桌機上會誤開，生產環境才會在滑鼠電腦看到兩根搖桿）：
- * - `'ontouchstart' in window`（部分桌機 Chrome 恆為 true）
- * - `navigator.maxTouchPoints > 0`（觸控螢幕筆電、或桌機驅動誤報）
- * - `(any-pointer: coarse)`（有觸控螢幕、但正在用滑鼠的筆電也會中）
+ * Windows 觸控筆電的 Chrome 通常是 `(pointer: fine)`（主要指標是滑鼠）
+ * 加上 `(any-pointer: coarse)`（螢幕可以點）。這種裝置預設要顯示搖桿。
  *
- * 這種裝置要搖桿時，用工具列「觸控搖桿」打開；選擇記在 localStorage，蓋過預設，也蓋過 `?joystick=1`。
+ * 仍然不用下面兩個舊條件（沒有觸控螢幕的桌機也會中，生產環境會在滑鼠電腦看到兩根搖桿）：
+ * - `'ontouchstart' in window`（部分桌機 Chrome 恆為 true）
+ * - `navigator.maxTouchPoints > 0`（桌機驅動誤報）
+ *
+ * 純滑鼠桌機（pointer fine 且沒有 any-pointer coarse）維持關閉。
+ * 使用者在工具列按過「觸控搖桿」之後，選擇記在 localStorage，蓋過預設，也蓋過 `?joystick=1`。
  */
 export class TouchJoystickPreference {
   static readonly STORAGE_KEY = 'creafly_touch_joysticks';
@@ -38,6 +41,24 @@ export class TouchJoystickPreference {
     } catch {
       return false;
     }
+  }
+
+  /** 裝置上有觸控螢幕（即使目前主要指標是滑鼠）。matchMedia 不可用時當沒有。 */
+  static anyPointerIsCoarse(env: PointerEnv | null | undefined): boolean {
+    try {
+      return !!env?.matchMedia('(any-pointer: coarse)').matches;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 預設要不要顯示搖桿。
+   * 手機／平板的主要指標是手指，或 Windows 觸控筆電這類 hybrid（fine + any-pointer coarse）。
+   * 純滑鼠桌機是 false。
+   */
+  static deviceShowsJoysticks(env: PointerEnv | null | undefined): boolean {
+    return TouchJoystickPreference.primaryPointerIsCoarse(env) || TouchJoystickPreference.anyPointerIsCoarse(env);
   }
 
   /**
@@ -69,7 +90,7 @@ export class TouchJoystickPreference {
    * 解析最終要不要顯示。
    * 1. 使用者明確選過 → 用那個值（蓋過預設，也蓋過網址）
    * 2. 否則 `?joystick=1` → 顯示（既有直式測試與教室投影）
-   * 3. 否則看主要指標是不是 coarse
+   * 3. 否則看裝置預設（主要指標 coarse，或有觸控螢幕）
    */
   static resolve(override: boolean | null, coarsePointer: boolean, urlForced = false): boolean {
     if (override !== null) return override;
