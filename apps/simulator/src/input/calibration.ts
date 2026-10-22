@@ -4,12 +4,16 @@
 // 狀態機不碰 DOM；ui/calibrationOverlay.ts 訂閱 calib-view。
 import { bus, toast, type CoreEventMap } from '../core/events';
 import { urlPresetOverrides } from './padMath';
+import { ChannelPanel, type ChannelDetail, type ChannelRowId } from './channelMap';
+
+export type { ChannelDetail, ChannelRowId };
+import { YawExpoPreference } from './yawExpoPref';
 
 export type CalibView = CoreEventMap['calib-view'];
 
 export type StickFn = 'throttle' | 'yaw' | 'pitch' | 'roll';
 export type ButtonFn = 'takeoff' | 'land' | 'reset';
-export type AxisArm = { kind: 'axis' | 'button'; index: number };
+export type AxisArm = { kind: 'axis' | 'button'; index: number; invert?: boolean };
 
 export interface GamepadConfig {
   deadzone: number;
@@ -28,8 +32,13 @@ export interface GamepadConfig {
   /**
    * 選用的解鎖來源。飛行迴圈不讀這個欄位，
    * 鍵盤與虛擬搖桿仍走開始 + 起飛。null = 這次明確跳過。
+   * invert 只給對應表面板的反轉顯示，飛行不讀。
    */
   arm?: AxisArm | null;
+  /**
+   * 起飛／降落／重置列的表頭反轉。飛行仍看按下邊緣，不讀這個欄位。
+   */
+  buttonReverse?: Partial<Record<ButtonFn, boolean>>;
 }
 
 export interface PadSnapshot {
@@ -75,8 +84,8 @@ interface Notice {
 
 export const CALIB_LS_KEY = 'creafly_gamepad_calib';
 const VERSION_LS_KEY = 'creafly_app_version';
-/** 1.6.0：相對基線精靈。舊的 1.5.x 設定檔欄位仍可沿用，不再整包刪除。 */
-export const CALIB_VERSION = '1.6.0';
+/** 1.7.0：通道對應表。舊的 1.5 / 1.6 設定檔欄位仍可沿用，不再整包刪除。 */
+export const CALIB_VERSION = '1.7.0';
 
 export class GamepadConfigStore {
   static fresh(): GamepadConfig {
@@ -135,6 +144,7 @@ export class GamepadConfigStore {
       center: center ?? base.center.slice(),
       range: range ?? base.range.slice(),
       arm: GamepadConfigStore.readArm(o.arm),
+      buttonReverse: GamepadConfigStore.readButtonReverse(o.buttonReverse),
     };
   }
 
@@ -186,8 +196,22 @@ export class GamepadConfigStore {
     const o = v as Record<string, unknown>;
     const index = GamepadConfigStore.readIndex(o.index);
     if (index === null) return undefined;
-    if (o.kind === 'axis' || o.kind === 'button') return { kind: o.kind, index };
-    return undefined;
+    if (o.kind !== 'axis' && o.kind !== 'button') return undefined;
+    const arm: AxisArm = { kind: o.kind, index };
+    if (o.invert === true) arm.invert = true;
+    if (o.invert === false) arm.invert = false;
+    return arm;
+  }
+
+  private static readButtonReverse(v: unknown): GamepadConfig['buttonReverse'] {
+    if (!v || typeof v !== 'object') return undefined;
+    const o = v as Record<string, unknown>;
+    const out: NonNullable<GamepadConfig['buttonReverse']> = {};
+    for (const key of ['takeoff', 'land', 'reset'] as const) {
+      if (o[key] === true) out[key] = true;
+      if (o[key] === false) out[key] = false;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
   }
 }
 
@@ -210,6 +234,8 @@ function writeConfig(next: GamepadConfig): void {
   gamepadConfig.range = next.range.slice();
   if (next.arm === undefined) delete gamepadConfig.arm;
   else gamepadConfig.arm = next.arm ? { ...next.arm } : null;
+  if (!next.buttonReverse) delete gamepadConfig.buttonReverse;
+  else gamepadConfig.buttonReverse = { ...next.buttonReverse };
 }
 
 /** 重置為預設並清除 localStorage 校正資料 */
@@ -1132,7 +1158,7 @@ export class CalibrationWizard {
 // 與畫面、localStorage 的接線（狀態機本身不碰 DOM）
 // =============================================================================
 
-let wizard: CalibrationWizard | null = null;
+let panel: ChannelPanel | null = null;
 let readPad: () => PadSnapshot = () => ({ connected: false, axes: [], buttons: [] });
 let calibTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -1142,19 +1168,18 @@ export const calibration = {
 };
 
 function syncFlag(): void {
-  calibration.active = !!wizard?.isActive;
-  calibration.stepIdx = wizard?.stepIndex ?? 0;
+  calibration.active = !!panel?.isActive;
 }
 
 function publish(): void {
-  if (!wizard) return;
+  if (!panel) return;
   syncFlag();
-  bus.emit('calib-view', wizard.view(gamepadConfig));
+  bus.emit('calib-map', panel.view(YawExpoPreference.get()));
 }
 
 function pump(): void {
-  if (!wizard?.isActive) return;
-  wizard.sample(readPad(), Date.now());
+  if (!panel?.isActive) return;
+  panel.sample(readPad());
   publish();
 }
 
@@ -1169,8 +1194,9 @@ export function startCalibration(): void {
     toast('請先插上搖桿', 'error');
     return;
   }
-  wizard = new CalibrationWizard();
-  wizard.start(Date.now());
+  panel = new ChannelPanel();
+  panel.load(gamepadConfig);
+  panel.start();
   syncFlag();
   bus.emit('calib-show', { show: true });
   pump();
@@ -1179,9 +1205,9 @@ export function startCalibration(): void {
 }
 
 export function endCalibration(save: boolean): void {
-  const was = !!wizard?.isActive;
-  if (save && wizard) {
-    writeConfig(wizard.toConfig(gamepadConfig));
+  const was = !!panel?.isActive;
+  if (save && panel) {
+    writeConfig(panel.toConfig(gamepadConfig));
     saveGamepadConfig();
     toast('✓ 校正完成 — 軸與按鍵已套用', 'success');
     console.log('[校正結果]', {
@@ -1194,7 +1220,7 @@ export function endCalibration(save: boolean): void {
   } else if (was) {
     toast('校正取消');
   }
-  wizard?.stop();
+  panel?.stop();
   if (calibTimer) {
     clearInterval(calibTimer);
     calibTimer = null;
@@ -1204,40 +1230,50 @@ export function endCalibration(save: boolean): void {
   bus.emit('calib-show', { show: false });
 }
 
-function mutate(fn: (w: CalibrationWizard, now: number) => void): void {
-  if (!wizard?.isActive) return;
-  fn(wizard, Date.now());
+function mutate(fn: (map: ChannelPanel) => void): void {
+  if (!panel?.isActive) return;
+  fn(panel);
   publish();
 }
 
 export function skipCalibStep(): void {
-  mutate((w, now) => w.skip(now));
+  mutate((map) => map.skipCurrent());
 }
 
-export function confirmCalibration(): void {
-  mutate((w, now) => {
-    w.confirm(now);
-  });
+export function setMapDetail(detail: ChannelDetail): void {
+  mutate((map) => map.setDetail(detail));
 }
 
-export function acceptCalibPartial(): void {
-  mutate((w, now) => w.acceptPartial(now));
+export function listenMapRow(row: ChannelRowId): void {
+  mutate((map) => map.listen(row));
 }
 
-export function confirmCalibHandsOff(): void {
-  mutate((w, now) => w.confirmHandsOff(now));
+export function toggleMapReverse(row: ChannelRowId): void {
+  mutate((map) => map.toggleReverse(row));
 }
 
-export function pickCalibAxis(index: number): void {
-  mutate((w, now) => w.pickAxis(index, now));
+export function applyMapMode2(): void {
+  mutate((map) => map.applyMode2());
 }
 
-export function pickCalibButton(index: number): void {
-  mutate((w, now) => w.pickButton(index, now));
+export function startMapGuide(): void {
+  mutate((map) => map.startGuide());
 }
 
-export function listenAllCalib(): void {
-  mutate((w, now) => w.listenAll(now));
+export function clearMapArm(): void {
+  mutate((map) => map.clearArm());
+}
+
+export function setMapDeadzone(value: number): void {
+  mutate((map) => map.setDeadzone(value));
+}
+
+export function beginMapEndpoints(row: ChannelRowId): void {
+  mutate((map) => map.beginEndpoints(row));
+}
+
+export function finishMapEndpoints(): void {
+  mutate((map) => map.finishEndpoints());
 }
 
 /** 每個物理 tick 由 input/index.ts 呼叫 */

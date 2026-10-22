@@ -315,9 +315,13 @@ describe('GamepadConfigStore', () => {
     expect(migrated.config.axes).toEqual(fresh().axes);
   });
 
-  it('版本已是現版就不重寫；壞掉的 JSON 退回預設', () => {
+  it('版本已是現版就不重寫；1.6.0 沿用軸；壞掉的 JSON 退回預設', () => {
     const current = JSON.stringify(fresh());
-    const same = GamepadConfigStore.migrate(current, '1.6.0');
+    const from16 = GamepadConfigStore.migrate(current, '1.6.0');
+    expect(from16.rewrite).toBe(true);
+    expect(from16.config.axes).toEqual(fresh().axes);
+    expect(from16.config.deadzone).toBe(0.1);
+    const same = GamepadConfigStore.migrate(current, '1.7.0');
     expect(same.rewrite).toBe(false);
     expect(same.persistConfig).toBe(false);
     expect(same.config.axes).toEqual(fresh().axes);
@@ -341,7 +345,9 @@ describe('飛行契約', () => {
       'utf8',
     );
     expect(index).not.toContain('gamepadConfig.arm');
+    expect(index).not.toContain('buttonReverse');
     expect(gamepad).not.toContain('gamepadConfig.arm');
+    expect(gamepad).not.toContain('buttonReverse');
     expect(recording).not.toContain('arm');
   });
 });
