@@ -31,7 +31,22 @@
 - 變更說明：未修改音樂內容；僅在本模擬器中作為可開關的循環背景音樂播放（預設關閉、預設音量 0.15）。
 - 檔案自 propwash 的 `assets/music/fsm-team-escp-magenta-metropolis.mp3` 取得，僅更名為 `magenta-metropolis.mp3`。
 
+## 程式碼（MIT）
+
+### 偏航曲線與搖桿死區
+
+| 項目 | 檔案 | 作者 | 授權 | 來源 |
+|---|---|---|---|---|
+| BETAFLIGHT `rawRate`、subtract-then-rescale 死區 | `apps/simulator/src/input/stickCurve.ts` | Andrii Shramko | **MIT** | [ShramkoGSFPV](https://github.com/AndriiShramko/ShramkoGSFPV) |
+
+- 來源檔：`packages/sim-core/src/rates.ts`（`rawRate` 的 BETAFLIGHT 分支）、`packages/input/src/calib.ts`（`applyDeadband`）。
+- 公式由 ShramkoGSFPV 自 Betaflight 4.5.1（`src/main/fc/rc.c`，GPL-3.0）重寫。本專案沿用該 MIT 重寫，**未複製 Betaflight GPL 原始碼**。
+- 變更說明：改寫成靜態方法；只保留 BETAFLIGHT 曲線（偏航指數，預設 0 = 線性）與死區縮放。未引入其他 rates type、油門曲線或校正精靈。
+- 檔頭保留 MIT 宣告：Copyright (c) 2026 Andrii Shramko。
+
 ## 授權連結
 
 - CC0 1.0：https://creativecommons.org/publicdomain/zero/1.0/
 - CC BY 4.0：https://creativecommons.org/licenses/by/4.0/
+- MIT：https://opensource.org/license/mit
+- ShramkoGSFPV：https://github.com/AndriiShramko/ShramkoGSFPV

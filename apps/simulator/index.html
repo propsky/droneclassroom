@@ -498,6 +498,14 @@
                 <button type="button" id="pad-inv-throttle" class="pad-toggle">升降反轉：關</button>
             </div>
         </div>
+        <div id="pad-settings-yaw" class="pad-tuning">
+            <div class="pad-tuning-row">
+                <span class="pad-tuning-label pad-tuning-label-wide">偏航曲線</span>
+                <input id="pad-yaw-expo" class="pad-slider" type="range" min="0" max="100" step="1" value="0" aria-label="偏航曲線">
+                <span id="pad-yaw-expo-val" class="pad-tuning-val pad-tuning-val-wide mono">線性</span>
+            </div>
+            <p class="pad-note">預設線性，手感與關卡難度維持原樣。調高後小幅偏航較柔，推到底的轉速與原本相同。</p>
+        </div>
         <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。飛行：A=起飛、B=降落、X=重置。選單：A=確認、B=返回、Y / Back=關卡、START=暫停。</p>
         <div id="pad-settings-gamepad-only" class="pad-section">
             <button type="button" id="pad-start-calib" class="pad-btn-primary">開始校正精靈</button>
