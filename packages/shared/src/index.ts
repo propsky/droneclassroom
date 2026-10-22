@@ -11,6 +11,7 @@ export * from './goalAnnounce';
 export * from './entitlement';
 export * from './math';
 export * from './completionJudge';
+export * from './ringGuide';
 export * from './rest';
 export * from './detmath';
 export * from './rng';
