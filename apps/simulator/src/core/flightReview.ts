@@ -17,9 +17,13 @@ export interface FlightReviewSample {
 export interface FlightReviewStats {
   /** 空中經過的固定 tick 數（落地後那個 tick 不算） */
   airTicks: number;
-  /** 路徑長（公尺）。含起飛與落地那一段，不含地面滑行。 */
+  /** 路徑長（公尺）。含起飛與落地那一段，不含地面滑行。三維，含升降。 */
   distanceM: number;
-  /** 最高速度（公尺／秒）= 該 tick 結束時 |velocity| × 60 */
+  /**
+   * 最高速度（公尺／秒）。
+   * 這一 tick 真正走的距離 × 60，與速度向量 × 60 取較大。
+   * 程式模式直接改位置、速度向量維持 0；手動模式積分後速度已乘阻力，會低估剛剛的位移。
+   */
   topSpeedMps: number;
   /** 最高高度（公尺，position.y；僅空中樣本） */
   maxAltitudeM: number;
@@ -41,6 +45,7 @@ export class FlightReview {
   static #distanceM = 0;
   static #topSpeedMps = 0;
   static #maxAltitudeM = 0;
+  static #instantSpeedMps = 0;
   static #hasPrev = false;
   static #prevFlying = false;
   static #px = 0;
@@ -52,9 +57,36 @@ export class FlightReview {
     this.#distanceM = 0;
     this.#topSpeedMps = 0;
     this.#maxAltitudeM = 0;
+    this.#instantSpeedMps = 0;
     this.#hasPrev = false;
     this.#prevFlying = false;
     this.#px = this.#py = this.#pz = 0;
+  }
+
+  /**
+   * 這一 tick 的實際速率（公尺／秒）。
+   * 有上一點時用位置差（程式與手動都算得到），並與速度向量取較大，避免任一種運動被記成 0。
+   */
+  static speedMps(
+    prev: { x: number; y: number; z: number } | null,
+    sample: FlightReviewSample,
+  ): number {
+    const fromVel = detHypot3(sample.velocity.x, sample.velocity.y, sample.velocity.z) * TICK_HZ;
+    if (!prev) return fromVel;
+    const fromPos =
+      detHypot3(sample.position.x - prev.x, sample.position.y - prev.y, sample.position.z - prev.z) * TICK_HZ;
+    return Math.max(fromVel, fromPos);
+  }
+
+  /** 即時速度。空中為上一筆關卡 tick 的實際速率；落地後歸零。足球不走這裡，呼叫端再與速度向量取大。 */
+  static instantSpeedMps(): number {
+    return this.#instantSpeedMps;
+  }
+
+  /** HUD「速度」：關卡用實際位移，足球／大亂鬥仍用速度向量（那些模式不累計回顧）。 */
+  static displaySpeedMps(velocityMps: number): number {
+    const fromVel = Number.isFinite(velocityMps) && velocityMps > 0 ? velocityMps : 0;
+    return Math.max(fromVel, this.#instantSpeedMps);
   }
 
   /** 吃 tick 結束後的狀態。位置會複本，不握住 droneState 的參照。 */
@@ -63,12 +95,14 @@ export class FlightReview {
     const y = sample.position.y;
     const z = sample.position.z;
     const flying = sample.isFlying;
+    const prev = this.#hasPrev ? { x: this.#px, y: this.#py, z: this.#pz } : null;
+    const speed = FlightReview.speedMps(prev, sample);
+    this.#instantSpeedMps = flying ? speed : 0;
     if (this.#hasPrev && (this.#prevFlying || flying)) {
       this.#distanceM += detHypot3(x - this.#px, y - this.#py, z - this.#pz);
     }
     if (flying) {
       this.#airTicks += 1;
-      const speed = detHypot3(sample.velocity.x, sample.velocity.y, sample.velocity.z) * TICK_HZ;
       if (speed > this.#topSpeedMps) this.#topSpeedMps = speed;
       if (y > this.#maxAltitudeM) this.#maxAltitudeM = y;
     }

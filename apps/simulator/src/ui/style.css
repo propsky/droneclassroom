@@ -238,6 +238,13 @@ body.mode-program #app {
     justify-content: center;
     padding: 0;
   }
+  #scene-env-btn > span:not(.btn-ic) {
+    display: inline;
+  }
+  #scene-env-btn {
+    width: auto;
+    padding: 0 var(--sp-3);
+  }
 }
 body.header-compact .header-btn > span:not(.btn-ic) {
   display: none;
@@ -252,6 +259,14 @@ body.header-compact #touch-joystick-btn > span:not(.btn-ic) {
   display: inline;
 }
 body.header-compact #touch-joystick-btn {
+  width: auto;
+  padding: 0 var(--sp-3);
+}
+/* 背景切換要看得出目前是教室還是展場，不能只剩一顆太陽 */
+body.header-compact #scene-env-btn > span:not(.btn-ic) {
+  display: inline;
+}
+body.header-compact #scene-env-btn {
   width: auto;
   padding: 0 var(--sp-3);
 }
@@ -1540,6 +1555,8 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   position: fixed;
   inset: 0;
   z-index: 150; /* modal(100) 之上、toast(200) 之下 */
+  /* 遮罩只負責變暗。點擊穿透，關卡說明的「開始」才不會被整頁擋住。 */
+  pointer-events: none;
 }
 .guide-spot {
   position: fixed;
@@ -1551,6 +1568,7 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
 }
 .guide-card {
   position: fixed;
+  pointer-events: auto;
   background: var(--bg-1);
   color: var(--text-1);
   border: 1px solid var(--line);
@@ -1908,10 +1926,16 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   max-width: 260px;
 }
 #soccer-feel.soccer-feel {
-  top: auto;
-  bottom: 168px;
-  min-width: 220px;
-  z-index: 4;
+  /* 先放在標題下方置中。進場後 SoccerFeelLayout 依搖桿與活動鈕改到空位。 */
+  top: calc(56px + var(--sp-3));
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  min-width: 0;
+  max-width: min(300px, calc(100vw - 32px));
+  z-index: var(--z-hud);
 }
 .soccer-feel-row {
   display: flex;
@@ -3202,12 +3226,14 @@ body:has(#pad-ui-hint.show) #toast.show {
     border-color: var(--brand);
   }
 
-  /* 飛行手感改到左下、操控帶之上，不跟右下活動鈕搶搖桿 */
+  /* 直式預設先讓到左下。SoccerFeelLayout 進場後會改成真正的空位。 */
   #soccer-feel.soccer-feel {
     top: auto;
     right: auto;
     left: max(var(--sp-3), env(safe-area-inset-left, 0px));
     bottom: var(--portrait-control-band);
+    transform: none;
+    width: max-content;
     max-width: min(220px, 46vw);
     z-index: var(--z-hud);
   }

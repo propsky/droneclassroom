@@ -60,6 +60,7 @@
                 <button id="mute-btn" class="header-btn" title="開關音效"><span class="btn-ic" data-icon="volume"></span><span>音效</span></button>
                 <button id="music-btn" class="header-btn" title="開關背景音樂"><span class="btn-ic" data-icon="music"></span><span>音樂：關</span></button>
                 <button id="view-btn" class="header-btn" title="切換視角：第三人稱 / 考證視角 / 第一人稱（鍵盤 C）"><span class="btn-ic" data-icon="eye"></span><span>視角：第三人稱</span></button>
+                <button id="scene-env-btn" class="header-btn" type="button" title="切換背景：教室 / 展場"><span class="btn-ic" data-icon="sun"></span><span>背景：教室</span></button>
             </div>
             <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 3：搖桿 / 校正 / 全螢幕 -->
@@ -148,7 +149,7 @@
                 </div>
                 <div id="flight-review-live" class="flight-review-live" aria-label="本趟飛行">
                     <div class="row"><span class="label">空中</span><span class="value mono" id="hud-air">0.0 秒</span></div>
-                    <div class="row"><span class="label">距離</span><span class="value mono" id="hud-dist">0.0 m</span></div>
+                    <div class="row"><span class="label" title="飛行路徑長（含升降）。與降落卡、過關卡的「飛行距離」是同一個數">距離</span><span class="value mono" id="hud-dist" title="飛行路徑長（公尺）">0.0 m</span></div>
                     <div class="row"><span class="label" title="最高速度（公尺／秒）">極速</span><span class="value mono" id="hud-top" title="公尺／秒">0.0</span></div>
                     <div class="row"><span class="label">最高</span><span class="value mono" id="hud-ceil">0.0 m</span></div>
                 </div>

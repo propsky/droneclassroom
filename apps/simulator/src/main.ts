@@ -18,7 +18,7 @@ import {
   stopProgram,
   setMode,
 } from './core/program';
-import { meetsMinimumPlayRequirements, probeBrowserCapabilities, parseSceneEnv } from '@creafly/shared';
+import { meetsMinimumPlayRequirements, probeBrowserCapabilities } from '@creafly/shared';
 import { bus, toast } from './core/events';
 import { initInputs, tickInputDevices, collectControlFrame, touchJoysticksShouldShow } from './input';
 import { registerJoystickLayout } from './input/joystick';
@@ -33,6 +33,8 @@ import { GameSession } from './core/session';
 import { getStudentToken } from './net/studentAuth';
 import { API_BASE } from './net/backend';
 import { createSceneWorld, applySceneEnv, applyLevelFloor } from './render/scene';
+import { SceneEnvChoice } from './ui/sceneEnvChoice';
+import { initSceneEnvControl } from './ui/sceneEnvControl';
 import { DroneVisual } from './render/drone';
 import { LevelVisuals } from './render/levelMeshes';
 import { InkVisual } from './render/ink';
@@ -148,9 +150,26 @@ initSoccerHud(
 initEndCountdown(); // 賽局結束倒數 chip（§5.3；arena / soccer 共用 endTime）
 initBroadcastBanner(); // 老師廣播大字橫幅（獨立於 toast）
 initRecordingSession(() => levelState.current, () => !!getStudentToken());
+function chosenSceneEnv() {
+  let stored: string | null = null;
+  try {
+    stored = sessionStorage.getItem(SceneEnvChoice.STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+  return SceneEnvChoice.read(location.search, stored);
+}
+
+function showSceneEnv(env: ReturnType<typeof chosenSceneEnv>): void {
+  applySceneEnv(world.scene, env);
+  document.body.dataset.sceneEnv = env;
+}
+
+bus.on('scene-env-selected', ({ env }) => {
+  showSceneEnv(levelState.current?.sceneEnv ?? env);
+});
 bus.on('level-loaded', ({ level }) => {
-  const urlEnv = parseSceneEnv(new URLSearchParams(location.search).get('scene'));
-  applySceneEnv(world.scene, level.sceneEnv ?? urlEnv ?? 'default');
+  showSceneEnv(level.sceneEnv ?? chosenSceneEnv());
   const floor = level.floorImage;
   const floorUrl =
     floor && floor.startsWith('/api/levels/') ? `${API_BASE}${floor}` : null;
@@ -159,11 +178,11 @@ bus.on('level-loaded', ({ level }) => {
 // 離開關卡（進大亂鬥／足球／換關）：收起上一關地板與展場霧，避免貼圖晚到又把舊地板打開
 bus.on('level-cleared', () => {
   applyLevelFloor(world.scene, null);
-  const urlEnv = parseSceneEnv(new URLSearchParams(location.search).get('scene'));
-  applySceneEnv(world.scene, urlEnv ?? 'default');
+  showSceneEnv(chosenSceneEnv());
 });
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
+initSceneEnvControl();
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進；預覽模式在 initPlayer 內略過 WS
 
 // 關卡授權 gate（enforce / demo 模式；open 或無 entitlement 時恆放行）

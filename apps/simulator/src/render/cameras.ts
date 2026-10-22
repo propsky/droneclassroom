@@ -16,6 +16,7 @@ import { arenaState } from '../multiplayer/arena';
 import { activeSoccerField } from '../soccer/field';
 import { SOCCER_CAM_MIN_Y } from '../soccer/enclosureView';
 import type { SightSolid } from './cameraSight';
+import { FixedCamLift } from './fixedCamLift';
 import { PilotView, type CameraPose, type CameraViewMode } from './pilotView';
 
 // ---- 俯視（topdown）取景常數 ----
@@ -36,8 +37,7 @@ const TOPDOWN_TILT_RATIO = 0.3;
 const FIXEDCAM_HEADROOM_TOPDOWN = 8;
 /** 環繞鏡位：機身可高出 orbit center 多少（m）仍在框內 */
 const FIXEDCAM_HEADROOM_ORBIT = 3;
-/** 抬升量的平滑係數（每幀逼近，避免機身上下時鏡頭跳動） */
-const FIXEDCAM_LIFT_SMOOTH = 0.08;
+// 抬升平滑改在 FixedCamLift：小誤差仍是 0.08，落後多才加快。
 
 // ---- 環繞（orbit3d）常數（legacy L3493–3496 的 fallback 與速度）----
 /** 慢速繞行角速度（rad/ms）— legacy performance.now() * 0.00025 */
@@ -223,8 +223,7 @@ export class CameraRig {
 
   /** 固定鏡位出框保護：機身高出 baseY + headroom 的部分 → 平滑轉成鏡位抬升量 */
   private smoothLift(pos: Vector3, baseY: number, headroom: number): number {
-    const want = Math.max(0, pos.y - (baseY + headroom));
-    this.fixedCamLift += (want - this.fixedCamLift) * FIXEDCAM_LIFT_SMOOTH;
+    this.fixedCamLift = FixedCamLift.step(this.fixedCamLift, pos.y, baseY, headroom);
     return this.fixedCamLift;
   }
 
