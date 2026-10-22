@@ -1,6 +1,7 @@
 // 模擬單 tick — 主迴圈（main.ts）、伺服器重播（replayRunner）與測試共用同一份邏輯，
 // 線上與重播不會各自演化而分歧。
 import { droneState, isManualLocked, TICK_MS } from './droneState';
+import { FlightReview } from './flightReview';
 import {
   applyManualControls,
   integrate,
@@ -40,6 +41,12 @@ export interface LevelSimTickOpts {
 /** 一般關卡路徑的固定 tick（不含大亂鬥 / 足球 / 練習） */
 export function tickLevelSimulation(opts: LevelSimTickOpts): void {
   tickFlightPhysics(opts.controlFrame);
+  // 回顧只吃本 tick 結束後的狀態。足球 / 大亂鬥不走這裡，也不寫進 hash。
+  FlightReview.tick({
+    position: droneState.position,
+    velocity: droneState.velocity,
+    isFlying: droneState.isFlying,
+  });
   // 關卡判定（圈 / zone / 氣球 / faceYaw / duration）
   tickLevel(opts.nowMs);
   // 畫畫教室：墨水取樣（程式 tween 與手動飛行共用同一條路徑）

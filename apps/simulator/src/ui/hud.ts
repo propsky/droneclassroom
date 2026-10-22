@@ -1,12 +1,15 @@
-// HUD：狀態列（高度/速度/機頭/狀態/模式）、任務進度、passZone 進度條、
-// 氣球計數、returnHome 步驟、機頭方向引導、toast、關卡計時。
+// HUD：狀態列（高度/速度/機頭/狀態/模式）、本趟飛行回顧、任務進度、
+// passZone 進度條、氣球計數、returnHome 步驟、機頭方向引導、toast、關卡計時。
 // 60fps 更新的數字用直接 textContent 寫入（updateFrame 由主迴圈每幀呼叫）。
+// 回顧數字來自固定 tick 累加器，這裡只負責顯示。
 import { headingLabel, normalizeDeg, RAD2DEG } from '@creafly/shared';
 import { bus } from '../core/events';
 import { droneState, lenVec3, TICK_HZ } from '../core/droneState';
+import { FlightReview, type FlightReviewStats } from '../core/flightReview';
 import { levelState, levelElapsedMs, getFaceGuidance } from '../core/level';
 import { inkSetColor } from '../core/pen';
 import { matchClockOwned } from './soccerHud';
+import { PortraitChrome } from './portraitChrome';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -14,6 +17,61 @@ const $ = (id: string): HTMLElement | null => document.getElementById(id);
 const LS_HELP_COLLAPSED = 'creafly_help_collapsed';
 
 let toastTimeout: number | null = null;
+/** 過關結算卡會顯示同一組數字時，不再疊一張降落卡 */
+let blockPostFlight = false;
+let wasFlying = false;
+
+const REVIEW_OFF = 'flight-review-off';
+
+export function fillFlightReviewGrid(root: HTMLElement, stats: FlightReviewStats): void {
+  root.replaceChildren();
+  for (const line of FlightReview.lines(stats)) {
+    const cell = document.createElement('div');
+    cell.className = 'flight-review-cell';
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = line.label;
+    const value = document.createElement('span');
+    value.className = 'value mono';
+    value.textContent = line.value;
+    cell.append(label, value);
+    root.append(cell);
+  }
+}
+
+function portraitPhone(): boolean {
+  return !!window.matchMedia?.(PortraitChrome.QUERY).matches;
+}
+
+/** 直式與矮橫式沒有第二張卡的空位，結算改標在本趟數字上（不增加高度）。 */
+function compactReview(): boolean {
+  if (portraitPhone()) return true;
+  return !!window.matchMedia?.('(orientation: landscape) and (max-height: 520px)').matches;
+}
+
+function markLiveSettled(on: boolean): void {
+  $('flight-review-live')?.classList.toggle('is-settled', on);
+}
+
+function hideFlightReviewCard(): void {
+  const card = $('flight-review');
+  if (card) card.hidden = true;
+  markLiveSettled(false);
+}
+
+function showFlightReviewCard(stats: FlightReviewStats): void {
+  if (blockPostFlight || document.body.classList.contains(REVIEW_OFF)) return;
+  if (stats.airTicks <= 0) return;
+  if (compactReview()) {
+    markLiveSettled(true);
+    return;
+  }
+  const card = $('flight-review');
+  const grid = $('flight-review-grid');
+  if (!card || !grid) return;
+  fillFlightReviewGrid(grid, stats);
+  card.hidden = false;
+}
 
 export function showToast(msg: string, kind = ''): void {
   const el = $('toast');
@@ -45,6 +103,7 @@ function initHelpCollapse(): void {
 
 export function initHud(): void {
   initHelpCollapse();
+  $('flight-review-close')?.addEventListener('click', () => hideFlightReviewCard());
   bus.on('toast', ({ text, kind }) => showToast(text, kind));
   bus.on('state-hud', ({ text }) => {
     const el = $('hud-state');
@@ -57,6 +116,10 @@ export function initHud(): void {
   });
 
   bus.on('level-loaded', ({ level }) => {
+    document.body.classList.remove(REVIEW_OFF);
+    blockPostFlight = false;
+    wasFlying = false;
+    hideFlightReviewCard();
     // 任務圈 HUD
     const missionHud = $('mission-hud');
     if (missionHud) missionHud.style.display = level.rings?.length ? 'block' : 'none';
@@ -97,6 +160,8 @@ export function initHud(): void {
 
   // 關卡清除（進大亂鬥）：關卡相關 HUD 全部收起
   bus.on('level-cleared', () => {
+    document.body.classList.add(REVIEW_OFF);
+    hideFlightReviewCard();
     ['mission-hud', 'progress-bar', 'balloon-hud', 'returnhome-step', 'heading-hud', 'pen-bar'].forEach(
       (id) => {
         const e = $(id);
@@ -107,6 +172,9 @@ export function initHud(): void {
 
   bus.on('ring-passed', ({ collected, total }) => updateRingCount(collected, total));
   bus.on('rings-reset', () => {
+    blockPostFlight = false;
+    wasFlying = droneState.isFlying;
+    hideFlightReviewCard();
     updateRingCount(0, levelState.rings.length);
     if (levelState.current?.returnHome) setReturnHomeStep('pending');
   });
@@ -123,6 +191,13 @@ export function initHud(): void {
     const stop = $('btn-stop') as HTMLButtonElement | null;
     if (run) run.disabled = running;
     if (stop) stop.disabled = !running;
+    if (!running) showFlightReviewCard(FlightReview.snapshot());
+  });
+
+  // 過關卡自己會秀回顧；這裡把降落小卡收掉，避免兩張疊在一起
+  bus.on('level-complete', () => {
+    blockPostFlight = true;
+    hideFlightReviewCard();
   });
 }
 
@@ -219,7 +294,7 @@ function setReturnHomeStep(phase: 'pending' | 'return' | 'land' | 'done'): void 
 }
 
 // ---- 每幀更新（直接 textContent，避免任何框架開銷）----
-const cache = { alt: '', spd: '', head: '', timer: '' };
+const cache = { alt: '', spd: '', head: '', timer: '', air: '', dist: '', top: '', ceil: '' };
 
 export function updateHudFrame(): void {
   const altEl = $('hud-alt');
@@ -250,6 +325,42 @@ export function updateHudFrame(): void {
       cache.timer = t;
     }
   }
+
+  const review = FlightReview.lines(FlightReview.snapshot());
+  const tight = (value: string | undefined): string => (value ?? '').replaceAll(' ', '');
+  const air = tight(review[0]?.value);
+  const dist = tight(review[1]?.value);
+  // 即時列空間小，極速只留數字；單位在完整回顧卡上。
+  const top = (review[2]?.value ?? '').replace(' m/s', '').trim();
+  const ceil = tight(review[3]?.value);
+  const airEl = $('hud-air');
+  const distEl = $('hud-dist');
+  const topEl = $('hud-top');
+  const ceilEl = $('hud-ceil');
+  if (airEl && air !== cache.air) {
+    airEl.textContent = air;
+    cache.air = air;
+  }
+  if (distEl && dist !== cache.dist) {
+    distEl.textContent = dist;
+    cache.dist = dist;
+  }
+  if (topEl && top !== cache.top) {
+    topEl.textContent = top;
+    cache.top = top;
+  }
+  if (ceilEl && ceil !== cache.ceil) {
+    ceilEl.textContent = ceil;
+    cache.ceil = ceil;
+  }
+
+  const flying = droneState.isFlying;
+  if (!wasFlying && flying) {
+    blockPostFlight = false;
+    markLiveSettled(false);
+  }
+  if (wasFlying && !flying && !blockPostFlight) showFlightReviewCard(FlightReview.snapshot());
+  wasFlying = flying;
 
   updateHeadingGuide();
 }
