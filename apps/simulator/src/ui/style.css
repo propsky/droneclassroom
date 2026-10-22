@@ -2525,6 +2525,204 @@ body,
 #calib-overlay #calib-partial {
   margin: var(--sp-2) 0;
 }
+#calib-overlay .map-card {
+  width: min(760px, 96vw);
+  max-height: min(92vh, 720px);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#calib-overlay #map-body {
+  min-height: 0;
+  overflow: auto;
+}
+#calib-overlay .map-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+#calib-overlay .map-head h2 {
+  margin: 0;
+}
+#calib-overlay .map-mode {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+#calib-overlay .map-mode button {
+  height: 36px;
+  min-width: 64px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+#calib-overlay .map-mode button.on {
+  background: var(--brand);
+  color: #fff;
+}
+#calib-overlay .map-status {
+  margin: var(--sp-3) 0 var(--sp-2);
+  min-height: 36px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+}
+#calib-overlay .map-quick {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+#calib-overlay .map-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+#calib-overlay .map-caption {
+  margin-top: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+#calib-overlay .map-row {
+  display: grid;
+  grid-template-columns: 52px minmax(120px, 1.4fr) minmax(72px, 1fr) auto auto auto;
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 40px;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+}
+#calib-overlay .map-row.is-listening {
+  border-color: var(--warn);
+}
+#calib-overlay .map-name {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+#calib-overlay .map-source {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+}
+#calib-overlay .map-source b {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-1);
+}
+#calib-overlay .map-radio {
+  color: var(--text-3);
+  font-weight: 500;
+}
+#calib-overlay .map-bar {
+  display: block;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--text-1) 12%, transparent);
+  overflow: hidden;
+}
+#calib-overlay .map-fill {
+  display: block;
+  height: 100%;
+  width: 50%;
+  background: var(--brand);
+}
+#calib-overlay .map-raw,
+#calib-overlay .map-ends-text,
+#calib-overlay .map-ends,
+#calib-overlay .map-pro {
+  display: none;
+}
+#calib-overlay .is-pro .map-raw,
+#calib-overlay .is-pro .map-ends-text,
+#calib-overlay .is-pro .map-ends,
+#calib-overlay .is-pro .map-pro {
+  display: block;
+}
+#calib-overlay .is-pro .map-row {
+  grid-template-columns: 52px minmax(108px, 1.2fr) minmax(64px, 0.8fr) 52px minmax(88px, 1fr) auto auto auto auto;
+}
+#calib-overlay .map-raw,
+#calib-overlay .map-ends-text {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--brand);
+}
+#calib-overlay .map-row button {
+  height: 36px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+#calib-overlay .map-assign {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+#calib-overlay .map-rev.on {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #1b1408;
+}
+#calib-overlay .map-sliders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+#calib-overlay .map-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 220px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+#calib-overlay .map-slider input {
+  flex: 1;
+}
+#calib-overlay .map-raw-title {
+  margin-top: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+#calib-overlay .map-raw {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--brand);
+  line-height: 1.5;
+}
+@media (max-width: 1366px) {
+  #calib-overlay .map-card {
+    padding: var(--sp-3);
+  }
+  #calib-overlay .map-status {
+    min-height: 32px;
+    margin: var(--sp-2) 0;
+  }
+}
+@media (max-height: 800px) {
+  #calib-overlay .map-card {
+    max-height: 92vh;
+  }
+  #calib-overlay .map-row {
+    min-height: 36px;
+  }
+}
 
 /* =============================================================================
  * 搖桿設定面板 + 連線提示

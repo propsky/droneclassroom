@@ -508,8 +508,8 @@
         </div>
         <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。飛行：A=起飛、B=降落、X=重置。選單：A=確認、B=返回、Y / Back=關卡、START=暫停。</p>
         <div id="pad-settings-gamepad-only" class="pad-section">
-            <button type="button" id="pad-start-calib" class="pad-btn-primary">開始校正精靈</button>
-            <p class="pad-note">依你的動作辨認軸與按鈕。沒有搖桿時，鍵盤和畫面搖桿仍用開始鍵起飛。解鎖開關可以跳過。</p>
+            <button type="button" id="pad-start-calib" class="pad-btn-primary">通道對應</button>
+            <p class="pad-note">一列一個功能。點「指定」後動一下就寫入。解鎖可以略過，鍵盤和畫面搖桿仍用開始鍵起飛。</p>
         </div>
         <button type="button" id="pad-reset-all" class="pad-btn-ghost">重置所有搖桿設定</button>
         <div class="pad-settings-actions">
@@ -525,52 +525,44 @@
     <button type="button" id="pad-hint-dismiss" class="pad-hint-dismiss">知道了</button>
 </div>
 
-<!-- 搖桿校正精靈（狀態機在 src/input/calibration.ts、渲染在 src/ui/calibrationOverlay.ts） -->
+<!-- 通道對應（狀態機在 src/input/channelMap.ts、渲染在 src/ui/calibrationOverlay.ts） -->
 <div id="calib-overlay">
-    <div class="calib-card" role="dialog" aria-modal="true" aria-labelledby="calib-title">
-        <h2 id="calib-title"><span class="btn-ic" data-icon="gamepad" data-icon-size="20"></span>搖桿校正精靈</h2>
-        <p class="calib-subtitle" id="calib-mode-note"></p>
-        <div class="calib-diagram" id="calib-diagram"></div>
-        <div class="calib-step" id="calib-step-label">準備中…</div>
-        <p class="calib-hint" id="calib-hint"></p>
-        <div class="calib-progress" id="calib-progress"></div>
-        <div class="calib-letgo" id="calib-letgo" hidden>
-            <div class="calib-timer-text" id="calib-timer-text"></div>
-            <div class="calib-timer-bar"><div class="calib-timer-fill" id="calib-timer-fill"></div></div>
-            <button type="button" id="calib-hands-off" class="btn-save">手放開了</button>
-        </div>
-        <div class="calib-seen" id="calib-seen" hidden>
-            <p id="calib-seen-text"></p>
-            <p id="calib-also-seen" hidden></p>
-            <div class="calib-seen-actions">
-                <button type="button" id="calib-confirm" class="btn-save">就用這個</button>
-                <button type="button" id="calib-skip-inline" class="btn-skip">跳過</button>
+    <div class="calib-card map-card" role="dialog" aria-modal="true" aria-labelledby="calib-title">
+        <header class="map-head">
+            <h2 id="calib-title"><span class="btn-ic" data-icon="gamepad" data-icon-size="20"></span>通道對應</h2>
+            <div class="map-mode" role="group" aria-label="精簡或專業">
+                <button type="button" id="map-simple" class="on">精簡</button>
+                <button type="button" id="map-pro">專業</button>
             </div>
+        </header>
+        <p id="map-status" class="map-status"></p>
+        <div class="map-quick">
+            <button type="button" id="map-mode2" class="btn-skip">Mode 2 套用</button>
+            <button type="button" id="map-guide" class="btn-skip">逐步指定</button>
         </div>
-        <p class="calib-callout" id="calib-idle" hidden></p>
-        <p class="calib-callout warn" id="calib-occupied" hidden></p>
-        <p class="calib-callout" id="calib-motion" hidden></p>
-        <p class="calib-callout" id="calib-extra" hidden></p>
-        <p class="calib-callout warn" id="calib-mismatch" hidden></p>
-        <button type="button" id="calib-partial" class="btn-save" hidden>就用目前看到的</button>
-        <div class="calib-live" id="calib-live">
-            <div class="calib-live-title">即時輸入（從第一步就開著）</div>
-            <div class="calib-axes" id="calib-axes"></div>
-            <div class="calib-btns" id="calib-btns"></div>
-            <p class="calib-note" id="calib-missing" hidden></p>
-            <p class="calib-note" id="calib-hat"></p>
+        <div id="map-body">
+        <div id="map-table" class="map-table"></div>
+        <p class="calib-note" id="map-missing" hidden></p>
+        <div id="map-pro-extra" class="map-pro">
+            <div class="map-sliders">
+                <label class="map-slider">死區
+                    <input id="map-dz" type="range" min="0.02" max="0.30" step="0.01" value="0.10" aria-label="死區">
+                    <span id="map-dz-val" class="mono">0.10</span>
+                </label>
+                <label class="map-slider">偏航曲線
+                    <input id="map-expo" type="range" min="0" max="100" step="1" value="0" aria-label="偏航曲線">
+                    <span id="map-expo-val" class="mono">線性</span>
+                </label>
+            </div>
+            <p class="calib-note">死區與偏航曲線沿用現有公式。預設死區 0.10、曲線線性，不改手感。</p>
+            <div class="map-raw-title">原始通道（裝置軸與 CH 分開）</div>
+            <div id="map-raw" class="map-raw"></div>
+            <p class="calib-note" id="map-hat"></p>
         </div>
-        <div class="calib-picks" id="calib-picks">
-            <div class="calib-live-title">手動點選（隨時可用）</div>
-            <div class="calib-pick-row" id="calib-pick-axes"></div>
-            <div class="calib-pick-row" id="calib-pick-buttons"></div>
-            <button type="button" id="calib-listen-all" class="btn-skip">全部再聽</button>
         </div>
-        <div class="calib-result" id="calib-result" hidden></div>
         <div class="calib-actions">
-            <button type="button" class="btn-skip" id="calib-skip">跳過</button>
             <button type="button" class="btn-cancel" id="calib-cancel">取消</button>
-            <button type="button" class="btn-save" id="calib-save" hidden>儲存並套用</button>
+            <button type="button" class="btn-save" id="calib-save">套用</button>
         </div>
     </div>
 </div>
