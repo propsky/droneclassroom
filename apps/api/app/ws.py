@@ -761,7 +761,12 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                     if SoccerStartMode.playable(valid.mode) is None:
                         logger.info("[Soccer] 推球模式已移除，拒絕開賽")
                         continue
-                    await soccer.start(valid.durationSec, valid.mode, tie_break=valid.tieBreak)
+                    await soccer.start(
+                        valid.durationSec,
+                        valid.mode,
+                        tie_break=valid.tieBreak,
+                        ruleset=valid.ruleset,
+                    )
                     await _notify_not_in_game(
                         room,
                         set(soccer.players),
@@ -778,7 +783,12 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
                 case SoccerResetMsg():
                     await soccer.reset(valid.clearTeams)
                 case SoccerWarnMsg():
-                    await soccer.warn(valid.studentId, valid.reason)
+                    await soccer.warn(
+                        valid.studentId,
+                        valid.reason,
+                        team=valid.team,
+                        deduct=valid.deduct,
+                    )
             rooms.notify()  # 賽局狀態 / 設定可能變了 → 房間列表（沒變不推）
     except WebSocketDisconnect:
         pass

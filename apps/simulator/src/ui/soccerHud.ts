@@ -88,6 +88,10 @@ export interface SoccerHudInput {
   card?: 'yellow' | 'red' | null;
   disabled?: boolean;
   feelLabel?: string;
+  /** 沒帶當 F9A，既有文案不變 */
+  ruleset?: 'f9a' | 'taipei';
+  phase?: string;
+  deductions?: { blue: number; red: number };
 }
 
 function fmtClock(endTime: number, now: number): string {
@@ -117,6 +121,22 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   const feel = s.feelLabel ? `｜手感${s.feelLabel}` : '';
 
   const sets = `局數 ${s.sets.blue}:${s.sets.red}`;
+  if (s.ruleset === 'taipei') {
+    const d = s.deductions ?? { blue: 0, red: 0 };
+    const net = `淨分 ${s.scores.blue - d.blue}:${s.scores.red - d.red}`;
+    const ded = `扣分 ${d.blue}:${d.red}`;
+    if (s.status === 'countdown') return `臺北賽制｜起槳｜3-2-1…｜${who}${feel}`;
+    if (s.phase === 'landing') {
+      const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
+      return `降落倒數｜${t}｜${ded}｜${who}`;
+    }
+    if (s.status === 'done') return `結束｜${net}｜${ded}｜${who}`;
+    if (s.status === 'running') {
+      const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
+      return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜${t}｜${who}${back}${card}${feel}`;
+    }
+    return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜等待開始｜${who}${feel}`;
+  }
   if (s.status === 'countdown') return `三局兩勝｜第${s.period || 1}局｜起槳｜3-2-1…｜${who}${feel}`;
   if (s.status === 'done') return `結束｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${who}`;
   if (s.status === 'break') {

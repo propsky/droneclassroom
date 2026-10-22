@@ -338,6 +338,8 @@ class SoccerStartMsg(_RoomScopedModel):
     durationSec: FiniteFloat
     mode: Literal["ball", "striker"] = "striker"
     tieBreak: Literal["pk_then_golden", "golden_then_pk"] | None = None
+    # 不帶 = 用房間目前的賽制（沒釘選就是 F9A）。舊客戶端不送。
+    ruleset: Literal["f9a", "taipei"] | None = None
 
 
 class SoccerStateReqMsg(_RoomScopedModel):
@@ -368,11 +370,17 @@ class SoccerSetTeamMsg(_RoomScopedModel):
 
 
 class SoccerWarnMsg(_RoomScopedModel):
-    """老師記一次警告。同理由兩次升黃牌。"""
+    """老師記一次警告。F9A：同理由兩次升黃牌。
+
+    臺北賽制且 deduct：該隊扣 1 分，不升牌。studentId 空字串時改看 team（整隊扣分）。
+    舊客戶端只送 studentId，行為與以前相同。
+    """
 
     type: Literal["soccer_warn"]
-    studentId: str
+    studentId: str = ""
+    team: Literal["blue", "red"] | None = None
     reason: str = "conduct"
+    deduct: bool = False
 
 
 class SoccerResetMsg(_RoomScopedModel):
@@ -399,6 +407,8 @@ class RoomSettingsIn(_StrictModel):
     locked: bool | None = None
     # 不帶 = 不動。server = 取消釘選，改跟 SOCCER_CLASS。舊客戶端不送這個欄位。
     soccerClass: Literal["F9A-A", "F9A-B", "server"] | None = None
+    # 不帶 = 不動。f9a／taipei 釘選這間房的賽制。舊客戶端不送。
+    soccerRuleset: Literal["f9a", "taipei"] | None = None
 
 
 class RoomCreateMsg(_StrictModel):
@@ -623,6 +633,8 @@ class RoomInfo(BaseModel):
     soccerClass: Literal["F9A-A", "F9A-B"] = "F9A-A"
     # False = 沒釘選，跟著伺服器 SOCCER_CLASS（沒設環境變數時就是上面的 F9A-A）
     soccerClassPinned: bool = False
+    # 實際賽制。沒釘選就是 f9a。
+    soccerRuleset: Literal["f9a", "taipei"] = "f9a"
 
 
 class TeamInfo(BaseModel):

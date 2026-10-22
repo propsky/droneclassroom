@@ -50,6 +50,7 @@ from .entitlement import build_welcome_entitlement
 from .games import ArenaGame, SoccerGame
 from .games.soccer import SoccerField
 from .games.soccer_presets import RoomSoccerClass
+from .games.taipei_rules import RoomSoccerRuleset
 from .protocol import (
     WS_CLOSE_KICKED,
     RejectReason,
@@ -88,6 +89,8 @@ class RoomSettings:
     locked: bool = False
     # None = 跟伺服器 SOCCER_CLASS（沒設環境變數時 F9A-A）。釘選後重啟仍用這一組。
     soccer_class: str | None = None
+    # None = F9A。臺北賽制釘成 taipei。跟場地分開，互不強迫。
+    soccer_ruleset: str | None = None
 
     @property
     def has_password(self) -> bool:
@@ -117,6 +120,8 @@ class RoomSettings:
             self.soccer_class = RoomSoccerClass.parse(
                 None if patch.soccerClass == "server" else patch.soccerClass
             )
+        if patch.soccerRuleset is not None:
+            self.soccer_ruleset = RoomSoccerRuleset.parse(patch.soccerRuleset)
 
 
 @dataclass
@@ -194,6 +199,7 @@ class Room:
             isMain=self.is_main,
             soccerClass=self.soccer.field.code,
             soccerClassPinned=self.settings.soccer_class is not None,
+            soccerRuleset=RoomSoccerRuleset.effective(self.soccer.ruleset_default),
         )
 
 
@@ -292,6 +298,7 @@ class RoomManager:
                 ),
                 air_contact_cards=self._cfg.soccer_air_contact_cards,
                 tie_break=self._cfg.soccer_tiebreak,
+                ruleset=RoomSoccerRuleset.effective(settings.soccer_ruleset),
             ),
             created_at=self.now_ms() if created_at is None else created_at,
             team_id=team_id,
@@ -346,11 +353,16 @@ class RoomManager:
         """改設定（改名 / 密碼 / 上限 / 鎖房）；已在房內的學生不受影響。班級房同步寫 teams。"""
         before = _settings_snapshot(room.settings)
         before_class = room.settings.soccer_class
+        before_rules = room.settings.soccer_ruleset
         room.settings.apply(patch, hashed=room.team_id is not None)
         if room.settings.soccer_class != before_class:
             spec = RoomSoccerClass.resolve(room.settings.soccer_class, self._cfg.soccer_class)
             if not await room.soccer.set_class(spec):
                 room.settings.soccer_class = before_class
+        if room.settings.soccer_ruleset != before_rules:
+            chosen = RoomSoccerRuleset.effective(room.settings.soccer_ruleset)
+            if not await room.soccer.set_ruleset(chosen):
+                room.settings.soccer_ruleset = before_rules
         logger.info(
             "[Room] %s 設定更新：%s",
             room.code,
@@ -442,6 +454,7 @@ class RoomManager:
             name=name.strip() or f"分組 {len(subs) + 1}",
             password_hash=main.settings.password_hash,
             soccer_class=main.settings.soccer_class,
+            soccer_ruleset=main.settings.soccer_ruleset,
         )
         sub = self._new_room(
             self.generate_code(),
@@ -510,6 +523,8 @@ class RoomManager:
             item: dict[str, str] = {"code": r.code, "name": r.settings.name}
             if r.settings.soccer_class:
                 item["soccerClass"] = r.settings.soccer_class
+            if r.settings.soccer_ruleset:
+                item["soccerRuleset"] = r.settings.soccer_ruleset
             subs.append(item)
         assigns = {str(sid): code for sid, code in self._assignments.get(team_id, {}).items()}
         try:
@@ -556,6 +571,7 @@ class RoomManager:
                     name=str(sub.get("name") or code),
                     password_hash=team.join_password_hash,
                     soccer_class=RoomSoccerClass.parse(sub.get("soccerClass")),
+                    soccer_ruleset=RoomSoccerRuleset.parse(sub.get("soccerRuleset")),
                 ),
                 team_id=team.id,
                 owner_teacher_id=team.owner_teacher_id,
@@ -615,7 +631,10 @@ class RoomManager:
                 join_password_hash=settings.password_hash,
                 max_students=settings.max_students,
                 locked=settings.locked,
-                settings=RoomSoccerClass.write({}, settings.soccer_class),
+                settings=RoomSoccerRuleset.write(
+                    RoomSoccerClass.write({}, settings.soccer_class),
+                    settings.soccer_ruleset,
+                ),
             )
             session.add(team)
             try:
@@ -638,6 +657,7 @@ class RoomManager:
                 password_hash=team.join_password_hash,
                 locked=team.locked,
                 soccer_class=RoomSoccerClass.read(team.settings),
+                soccer_ruleset=RoomSoccerRuleset.read(team.settings),
             )
         return self._new_room(
             team.team_code,
@@ -733,8 +753,9 @@ class RoomManager:
                 team.locked = room.settings.locked
                 # 根上的 soccerClass 是主房的釘選。分房寫在 settings.rooms.subs，避免蓋掉主房。
                 if room.is_main:
-                    team.settings = RoomSoccerClass.write(
-                        team.settings, room.settings.soccer_class
+                    team.settings = RoomSoccerRuleset.write(
+                        RoomSoccerClass.write(team.settings, room.settings.soccer_class),
+                        room.settings.soccer_ruleset,
                     )
                 events: list[tuple[str, dict[str, object]]] = [
                     ("team.updated", {"before": before, "after": after})
@@ -876,6 +897,7 @@ class RoomManager:
                 r.settings.locked,
                 r.soccer.field.code,
                 r.settings.soccer_class,
+                r.soccer.ruleset_default,
                 r.student_count,
                 r.arena.status,
                 r.soccer.status,
@@ -935,6 +957,7 @@ def _settings_snapshot(settings: RoomSettings) -> dict[str, object]:
         "max_students": settings.max_students,
         "locked": settings.locked,
         "soccer_class": settings.soccer_class,
+        "soccer_ruleset": settings.soccer_ruleset,
     }
 
 
