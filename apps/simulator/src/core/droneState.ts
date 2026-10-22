@@ -2,6 +2,7 @@
 // 座標系：右手系、機頭朝 -Z、yaw 正向 = 左轉（與 legacy Three.js 版一致）。
 // G-04：模擬路徑上的 sin/cos/hypot 一律走 detmath（跨引擎 bit 一致）。
 import { detSin, detCos, detHypot2, detHypot3 } from '@creafly/shared';
+import { FlightReview } from './flightReview';
 
 export interface Vec3 {
   x: number;
@@ -110,6 +111,8 @@ export function resetDroneState(): void {
   droneState.attitudePitch = null;
   droneState.attitudeRoll = null;
   droneState.hardLanding = false;
+  // 本趟回顧跟這次飛行一起清掉。數字不在 droneState 上，也不進重播 hash。
+  FlightReview.reset();
 }
 
 // ---- 共享旗標（core 各模組共用，避免循環 import） ----

@@ -110,6 +110,7 @@ export async function replayRecording(rec: InputRecordingV2): Promise<ReplayResu
       } finally {
         setInFixedTick(false);
       }
+      // hash 只含無人機姿態。FlightReview 在 tickLevelSimulation 裡另計，不混入 h。
       h = hashDroneTick(h);
     }
     // 程式模式的過關判定在指令鏈結束的微任務裡
