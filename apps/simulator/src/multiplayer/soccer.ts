@@ -95,7 +95,7 @@ export const soccerState = {
   pkRound: 0,
   pkShooterId: null as string | null,
   pkDefenderId: null as string | null,
-  ruleset: 'f9a' as 'f9a' | 'taipei',
+  ruleset: 'taipei' as 'f9a' | 'taipei',
   phase: 'idle',
   deductions: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
   firstGoal: null as SoccerTeam | null,
@@ -438,7 +438,7 @@ function applyMatch(match: SoccerMatchMeta | undefined): void {
   soccerState.pkRound = match.pkRound || 0;
   soccerState.pkShooterId = match.pkShooterId ?? null;
   soccerState.pkDefenderId = match.pkDefenderId ?? null;
-  soccerState.ruleset = match.ruleset === 'taipei' ? 'taipei' : 'f9a';
+  soccerState.ruleset = match.ruleset === 'f9a' ? 'f9a' : 'taipei';
   soccerState.phase = match.phase || 'idle';
   if (match.deductions) soccerState.deductions = match.deductions;
   soccerState.firstGoal = match.firstGoal === 'blue' || match.firstGoal === 'red' ? match.firstGoal : null;
@@ -554,7 +554,7 @@ function showMatchResult(msg: SoccerEndMsg): void {
   }
   stateHud('🏁 足球結束！');
   showSoccerResults({
-    ruleset: msg.match?.ruleset === 'taipei' ? 'taipei' : 'f9a',
+    ruleset: msg.match?.ruleset === 'f9a' ? 'f9a' : 'taipei',
     winner: msg.winner,
     goals: s,
     deductions: msg.match?.deductions,

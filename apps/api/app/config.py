@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # apps/api/app/config.py → parents[1] = apps/api、parents[2] = apps
@@ -14,6 +14,22 @@ _APPS_DIR = _API_DIR.parent
 # 不從 TEACHER_REGISTER_CODE、.env 或正式機 /opt/creafly/creafly.env 讀取；
 # 那些地方就算還留著同名變數，也不會覆寫這個常數。
 TEACHER_REGISTER_CODE = "CREAFLY"
+
+
+class SoccerClassEnv:
+    """環境變數 SOCCER_CLASS。正式機目前寫著 F9A-A。
+
+    比賽固定臺北賽制與 F9A-B，這個字不採用。任何舊值都收下，避免啟動失敗。
+    要從伺服器 env 拿掉時由人改，程式不碰那份檔。
+    """
+
+    @staticmethod
+    def keep(raw: object) -> str:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text:
+                return text
+        return "F9A-A"
 
 
 class Settings(BaseSettings):
@@ -32,9 +48,8 @@ class Settings(BaseSettings):
     - max_students：學生人數上限（顯示用，/api/info 帶出）
     - game_tick_interval：賽局主迴圈週期秒（legacy setInterval 80ms）；
       設 0 不啟動 asyncio tick task（測試注入假時鐘、手動呼叫 tick()）
-    - soccer_class：進階 F9A、且房間沒釘選場地時的子類，F9A-A（預設）或 F9A-B。
-      臺北賽制（沒寫賽制時的預設）不看這個，固定 F9A-B。
-      環境變數 SOCCER_CLASS 只切換進階 F9A 的這份預設。正式部署腳本沒有設它，所以是 F9A-A。
+    - soccer_class：環境變數 SOCCER_CLASS。正式機目前是 F9A-A。比賽已固定臺北賽制與 F9A-B，
+      讀到 F9A-A、F9A-B 或任何舊字都不採用、也不讓啟動失敗。日後要從伺服器 env 拿掉由人改。
     - soccer_air_contact_cards：空中機對機「接近速度」黃／紅牌的教學選項。
       2026 F9A.9 沒有這條，預設關閉（SOCCER_AIR_CONTACT_CARDS=1 才開）。
       墜機紅牌不受這個開關影響。
@@ -85,9 +100,14 @@ class Settings(BaseSettings):
     )
     max_students: int = 12
     game_tick_interval: float = 0.08
-    # 進階 F9A、且房間沒釘選場地時用的子類。臺北賽制（預設）不看這個，固定 F9A-B。
-    # 正式部署沒設 SOCCER_CLASS，所以進階 F9A 沒釘選時仍是 F9A-A。
-    soccer_class: Literal["F9A-A", "F9A-B"] = "F9A-A"
+    # 環境變數 SOCCER_CLASS 仍可設成 F9A-A 或任何舊字。比賽不讀它，固定臺北賽制 + F9A-B。
+    # 正式機目前是 F9A-A。合併後不用改那份 env。日後要從伺服器 env 拿掉，由人改。
+    soccer_class: str = "F9A-A"
+
+    @field_validator("soccer_class", mode="before")
+    @classmethod
+    def _keep_soccer_class(cls, value: object) -> str:
+        return SoccerClassEnv.keep(value)
     # 空中接近速度罰牌（教學用）。預設關。打開後走警告，不是直接發牌。
     soccer_air_contact_cards: bool = False
     # 局數打平之後的順序。預設照 WDSC：先各罰 3 球 PK，仍平手再黃金進球。

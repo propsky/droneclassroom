@@ -14,7 +14,7 @@
 import math
 from typing import Literal
 
-from .soccer_presets import F9A_B, RoomSoccerClass, SoccerClassSpec
+from .soccer_presets import F9A_B, SoccerClassSpec
 from .soccer_rules import shield_passes_ring
 
 SoccerRuleset = Literal["f9a", "taipei"]
@@ -106,8 +106,8 @@ class RoomSoccerRuleset:
 
     @staticmethod
     def effective(raw: object) -> SoccerRuleset:
-        """沒釘選、或寫了不認得的值，都用臺北賽制。進階 F9A 必須明確寫 f9a。"""
-        return RoomSoccerRuleset.parse(raw) or "taipei"
+        """比賽只打臺北賽制。JSON 裡的 f9a、空值、打錯的字都當臺北，不改已存的字。"""
+        return "taipei"
 
     @staticmethod
     def read(settings: object) -> SoccerRuleset | None:
@@ -129,9 +129,9 @@ class RoomSoccerRuleset:
 class SoccerPairing:
     """這一房實際用的賽制與場地。
 
-    臺北賽制（含 JSON 裡沒寫、因此落到預設的房間）一律 F9A-B。
-    進階 F9A 才看釘選的 soccerClass；沒釘選再用環境變數 SOCCER_CLASS。
-    不改已經存進 teams.settings 的字，只在讀的時候決定。
+    只打臺北賽制，場地固定 F9A-B。
+    teams.settings 裡的 soccerRuleset=f9a、釘選的 F9A-A、環境變數 SOCCER_CLASS 都忽略。
+    不改已經存進 JSON 的字，只在讀的時候決定。
     """
 
     TAIPEI_FIELD = F9A_B.code
@@ -142,14 +142,16 @@ class SoccerPairing:
 
     @staticmethod
     def field_spec(ruleset: object, stored_class: object, env_class: str) -> SoccerClassSpec:
-        if SoccerPairing.ruleset(ruleset) == "taipei":
-            return F9A_B
-        return RoomSoccerClass.resolve(
-            stored_class if isinstance(stored_class, str) else None,
-            env_class,
-        )
+        del ruleset, stored_class, env_class
+        return F9A_B
 
     @staticmethod
     def allows_big_field(ruleset: object) -> bool:
-        """大場只給進階 F9A。臺北賽制不行。"""
-        return SoccerPairing.ruleset(ruleset) == "f9a"
+        """大場已不能開賽。舊的 f9a 釘選也不行。"""
+        del ruleset
+        return False
+
+    @staticmethod
+    def legacy_ruleset_token(stored: object) -> str | None:
+        """JSON 裡原本寫的賽制。f9a 留著給舊資料讀取，比賽不採用。"""
+        return RoomSoccerRuleset.parse(stored)

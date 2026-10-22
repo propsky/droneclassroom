@@ -63,7 +63,7 @@ export function showSoccerMatchHud(on: boolean): void {
   matchClock = on;
   $('soccer-mp-btn')?.classList.toggle('active', on);
   matchTimerCache = '';
-  setSoccerMatchTimer(on ? '三局兩勝｜等待開始' : '--');
+  setSoccerMatchTimer(on ? '臺北賽制｜等待開始' : '--');
   if (on) document.querySelectorAll('.level-btn').forEach((b) => b.classList.remove('active'));
 }
 
@@ -88,7 +88,7 @@ export interface SoccerHudInput {
   card?: 'yellow' | 'red' | null;
   disabled?: boolean;
   feelLabel?: string;
-  /** 沒帶當 F9A，既有文案不變 */
+  /** 沒帶 ruleset 的舊畫面當臺北。明確寫 f9a 的舊紀錄仍走下面的句子，避免讀取時崩潰。 */
   ruleset?: 'f9a' | 'taipei';
   phase?: string;
   deductions?: { blue: number; red: number };
@@ -121,7 +121,7 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
   const feel = s.feelLabel ? `｜手感${s.feelLabel}` : '';
 
   const sets = `局數 ${s.sets.blue}:${s.sets.red}`;
-  if (s.ruleset === 'taipei') {
+  if (s.ruleset !== 'f9a') {
     const d = s.deductions ?? { blue: 0, red: 0 };
     const net = `淨分 ${s.scores.blue - d.blue}:${s.scores.red - d.red}`;
     const ded = `扣分 ${d.blue}:${d.red}`;

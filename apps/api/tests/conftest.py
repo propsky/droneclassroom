@@ -58,15 +58,8 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 @pytest.fixture
 def f9a_room(client: TestClient):
-    """既有大場測試：明確選進階 F9A + F9A-A。新的預設是臺北賽制 + F9A-B。"""
-    from app.games.soccer_presets import F9A_A
-
-    room = client.app.state.rooms.default
-    room.settings.soccer_ruleset = "f9a"
-    room.settings.soccer_class = "F9A-A"
-    client.portal.call(room.soccer.set_ruleset, "f9a")
-    client.portal.call(room.soccer.set_class, F9A_A)
-    return room
+    """舊名稱。比賽已不能切回大場，這個 fixture 不再改場地。"""
+    return client.app.state.rooms.default
 
 
 @pytest.fixture

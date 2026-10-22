@@ -59,47 +59,20 @@ describe('房間足球場地', () => {
     expect(sent).toEqual([{ type: 'room_create', settings: { name: '三年二班' } }]);
   });
 
-  it('臺北預設鎖小場不釘選；改進階 F9A 後選 F9A-B 才釘選', () => {
+  it('新增班級沒有賽制與場地選單，也不送這兩個欄位', () => {
     mount();
     document.querySelector<HTMLButtonElement>('#btn-room-new')!.click();
     const form = document.querySelector<HTMLFormElement>('#room-form')!;
-    const field = form.querySelector('#rf-field') as HTMLSelectElement;
-    expect(field.disabled).toBe(true);
-    expect(field.value).toBe('F9A-B');
-    field.value = 'F9A-B';
+    expect(form.querySelector('#rf-rules')).toBeNull();
+    expect(form.querySelector('#rf-field')).toBeNull();
+    expect(form.textContent).toContain('F9A-B');
+    expect(form.textContent).toContain('不能改成大場');
     form.requestSubmit();
     expect(sent[0]).toEqual({ type: 'room_create', settings: {} });
-
-    sent.length = 0;
-    document.querySelector<HTMLButtonElement>('#btn-room-new')!.click();
-    const again = document.querySelector<HTMLFormElement>('#room-form')!;
-    (again.querySelector('#rf-rules') as HTMLSelectElement).value = 'f9a';
-    again.querySelector('#rf-rules')!.dispatchEvent(new Event('change'));
-    const unlocked = again.querySelector('#rf-field') as HTMLSelectElement;
-    expect(unlocked.disabled).toBe(false);
-    unlocked.value = 'F9A-B';
-    again.requestSubmit();
-    expect(sent[0]).toEqual({
-      type: 'room_create',
-      settings: { soccerRuleset: 'f9a', soccerClass: 'F9A-B' },
-    });
   });
 
-  it('臺北賽制鎖住小場；進階 F9A 才能改大場', () => {
+  it('舊房間寫著 f9a 與大場釘選，畫面仍是小場且不能改', () => {
     const dash = mount();
-    dash.setRooms(
-      [room({ code: 'MAIN', createdAt: 1, soccerClass: 'F9A-A', soccerClassPinned: true })],
-      'MAIN',
-    );
-    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('F9A-B');
-    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('不能改成大場');
-    document.querySelector<HTMLButtonElement>('#btn-room-settings')!.click();
-    const locked = document.querySelector<HTMLSelectElement>('#rs-field')!;
-    expect(locked.value).toBe('F9A-B');
-    expect(locked.disabled).toBe(true);
-    document.querySelector<HTMLButtonElement>('#rs-save')!.click();
-    expect(sent).toEqual([]);
-
     dash.setRooms(
       [
         room({
@@ -112,14 +85,14 @@ describe('房間足球場地', () => {
       ],
       'MAIN',
     );
+    expect(document.querySelector('#soccer-rules')).toBeNull();
+    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('F9A-B');
+    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('不能改成大場');
+    expect(document.querySelector('#soccer-rules-hint')!.textContent).toContain('先進第 1 球');
     document.querySelector<HTMLButtonElement>('#btn-room-settings')!.click();
-    const select = document.querySelector<HTMLSelectElement>('#rs-field')!;
-    expect(select.disabled).toBe(false);
-    expect(select.value).toBe('F9A-A');
-    select.value = 'F9A-B';
+    expect(document.querySelector('#rs-field')).toBeNull();
+    expect(document.querySelector('#rs-field-note')!.textContent).toContain('不能改成大場');
     document.querySelector<HTMLButtonElement>('#rs-save')!.click();
-    expect(sent).toEqual([
-      { type: 'room_update', roomCode: 'MAIN', settings: { soccerClass: 'F9A-B' } },
-    ]);
+    expect(sent).toEqual([]);
   });
 });

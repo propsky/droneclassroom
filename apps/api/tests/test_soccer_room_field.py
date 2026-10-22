@@ -1,8 +1,7 @@
-"""每間房自己的足球場地（F9A-A／F9A-B）。
+"""每間房的足球場地固定 F9A-B。
 
-沒寫賽制的房是臺北賽制，場地固定 F9A-B，不看 SOCCER_CLASS。
-進階 F9A 才用釘選；沒釘選才落到 SOCCER_CLASS（程式預設仍是 F9A-A）。
-舊客戶端不送 soccerClass 也開得了房。
+舊的 soccerRuleset=f9a、釘選的 F9A-A、環境變數 SOCCER_CLASS 都留在 JSON 或設定裡，
+比賽讀到一律臺北賽制 + 小場。不回填。
 """
 
 from fastapi.testclient import TestClient
@@ -64,9 +63,10 @@ def test_預設房是臺北賽制小場且舊客戶端不送場地也一樣(
         assert created.info().soccerClassPinned is False
 
 
-def test_釘選F9A_B後學生收到新場地且超過人數會卸隊(
+def test_舊的f9a與大場釘選仍讀得了但打小場(
     client: TestClient, teacher_ticket: str
 ) -> None:
+    """送來 f9a + F9A-A：JSON 留著，實際賽制與場地不變。每隊上限仍是 3。"""
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
@@ -78,8 +78,16 @@ def test_釘選F9A_B後學生收到新場地且超過人數會卸隊(
             }
         )
         settle(client)
-        assert soccer.field.code == "F9A-A"
-        sockets = [client.websocket_connect("/") for _ in range(5)]
+        room = client.app.state.rooms.default
+        assert room.settings.soccer_ruleset == "f9a"
+        assert room.settings.soccer_class == "F9A-A"
+        assert soccer.ruleset == "taipei"
+        assert soccer.field.code == "F9A-B"
+        assert soccer.field.max_players == 3
+        assert room.info().soccerRuleset == "taipei"
+        assert room.info().soccerClass == "F9A-B"
+        assert room.info().soccerClassPinned is True
+        sockets = [client.websocket_connect("/") for _ in range(4)]
         entered = [s.__enter__() for s in sockets]
         try:
             for i, ws in enumerate(entered):
@@ -89,42 +97,11 @@ def test_釘選F9A_B後學生收到新場地且超過人數會卸隊(
                 recv_until(t, "student_list")
                 ws.send_json({"type": "soccer_join"})
                 recv_until(ws, "soccer_state")
-            # 自動分隊是 3 藍 2 紅。把紅隊也調來藍隊，藍隊滿 5 人（A 的上限）。
             for sid in ("s2", "s4"):
                 t.send_json({"type": "soccer_set_team", "studentId": sid, "team": "blue"})
                 settle(client)
-            assert sum(1 for p in soccer.players.values() if p.team == "blue") == 5
-            striker_ids = {
-                p.record.id
-                for p in soccer.players.values()
-                if p.striker and p.team == "blue"
-            }
-
-            t.send_json(
-                {"type": "room_update", "roomCode": "MAIN", "settings": {"soccerClass": "F9A-B"}}
-            )
-            # set_team 也會先送 soccer_state，要讀到場地已經換成 B 的那一則。
-            field = None
-            for _ in range(8):
-                snap = recv_until(entered[0], "soccer_state")
-                if snap["field"]["halfZ"] == F9A_B.half_z:
-                    field = snap["field"]
-                    break
-            assert field is not None
-            assert field["halfX"] == F9A_B.half_x
-            assert field["halfZ"] == F9A_B.half_z
-            assert field["ceil"] == F9A_B.ceil
-            assert field["goalR"] == F9A_B.goal_r
-            assert field["shieldR"] == F9A_B.shield_r
-            assert field["startDepth"] == F9A_B.start_depth
-            assert soccer.field.code == "F9A-B"
-            assert soccer.field.max_players == 3
             blue = [p for p in soccer.players.values() if p.team == "blue"]
             assert len(blue) == 3
-            assert striker_ids <= {p.record.id for p in blue}
-            room = client.app.state.rooms.default
-            assert room.settings.soccer_class == "F9A-B"
-            assert room.info().soccerClassPinned is True
         finally:
             for s in sockets:
                 s.__exit__(None, None, None)
@@ -146,12 +123,12 @@ def test_比賽中拒絕改成大場或換成進階F9A(client: TestClient, teach
         assert soccer.ruleset == "taipei"
         assert soccer.field.code == "F9A-B"
         room = client.app.state.rooms.default
-        assert room.settings.soccer_ruleset is None
-        assert room.settings.soccer_class is None
+        assert room.settings.soccer_ruleset == "f9a"
+        assert room.settings.soccer_class == "F9A-A"
 
 
-def test_取消釘選回到環境變數(tmp_path) -> None:
-    """伺服器預設改成 F9A-B 時，沒釘選的房跟它走；釘了 A 就維持 A。"""
+def test_環境變數A或怪值都不改小場(tmp_path) -> None:
+    """釘了 F9A-A 也只是把字留在設定。實際場地是 F9A-B。取消釘選也不放大場。"""
     static_dir = tmp_path / "dist"
     static_dir.mkdir()
     settings = Settings(
@@ -161,7 +138,7 @@ def test_取消釘選回到環境變數(tmp_path) -> None:
         teacher_password="test123",
         game_tick_interval=0,
         database_url=None,
-        soccer_class="F9A-B",
+        soccer_class="not-a-class",
     )
     app = create_app(settings)
     with TestClient(app) as client:
@@ -183,9 +160,15 @@ def test_取消釘選回到環境變數(tmp_path) -> None:
             )
             listed = recv_until(ws, "room_list")
             created = next(room for room in listed["rooms"] if room["name"] == "釘A")
-            assert created["soccerClass"] == "F9A-A"
+            assert created["soccerClass"] == "F9A-B"
+            assert created["soccerRuleset"] == "taipei"
             assert created["soccerClassPinned"] is True
             code = created["code"]
+            live = client.app.state.rooms.get(code)
+            assert live is not None
+            assert live.settings.soccer_ruleset == "f9a"
+            assert live.settings.soccer_class == "F9A-A"
+            assert live.soccer.field.code == "F9A-B"
             ws.send_json(
                 {
                     "type": "room_update",

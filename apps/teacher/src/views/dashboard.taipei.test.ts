@@ -50,22 +50,15 @@ describe('臺北賽制老師操作', () => {
     return view;
   }
 
-  it('改成臺北賽制會記住，3 分鐘改成 2 分鐘', () => {
+  it('沒有賽制切換，時間預設 2 分鐘，開賽不送 ruleset', () => {
     const dash = mount();
     dash.setRooms([room({ code: 'MAIN', createdAt: 1, soccerRuleset: 'f9a' })], 'MAIN');
-    const sel = document.querySelector<HTMLSelectElement>('#soccer-rules')!;
+    expect(document.querySelector('#soccer-rules')).toBeNull();
     const dur = document.querySelector<HTMLSelectElement>('#soccer-dur')!;
-    expect(sel.value).toBe('f9a');
-    expect(dur.value).toBe('180');
-    sel.value = 'taipei';
-    sel.dispatchEvent(new Event('change'));
     expect(dur.value).toBe('120');
     expect(document.querySelector('#soccer-rules-hint')!.textContent).toContain('先進第 1 球');
-    expect(sent[0]).toEqual({
-      type: 'room_update',
-      roomCode: 'MAIN',
-      settings: { soccerRuleset: 'taipei' },
-    });
+    document.querySelector<HTMLButtonElement>('#btn-soccer-start')!.click();
+    expect(sent[0]).toEqual({ type: 'soccer_start', durationSec: 120, mode: 'striker' });
   });
 
   it('警告／扣分按鈕送 soccer_warn，結算寫出扣分與先進球', () => {
