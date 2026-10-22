@@ -71,9 +71,9 @@
       "hud": "依序穿 3 圈 → 飛回起飛墊 1.5m 內降落",
       "returnHome": true,
       "rings": [
-        {"x": 0,  "y": 3, "z": -5,  "color": "red", "label": "1"},
-        {"x": 0,  "y": 3, "z": -10, "color": "red", "label": "2"},
-        {"x": 0,  "y": 3, "z": -15, "color": "red", "label": "3"}
+        {"x": 0,  "y": 3, "z": -5,  "color": "red", "label": "1", "spin": 0},
+        {"x": 0,  "y": 3, "z": -10, "color": "red", "label": "2", "spin": 0},
+        {"x": 0,  "y": 3, "z": -15, "color": "red", "label": "3", "spin": 0}
       ],
       "obstacles": []
     },
@@ -84,9 +84,9 @@
       "hud": "起飛 → 依序對準穿 3 圈 → 回墊降落",
       "returnHome": true,
       "rings": [
-        {"x": 5,  "y": 3, "z": 0,   "color": "red", "label": "1", "faceYaw": 270, "faceTol": 40},
-        {"x": 5,  "y": 3, "z": -5,  "color": "red", "label": "2", "faceYaw": 0,   "faceTol": 40},
-        {"x": 0,  "y": 3, "z": -5,  "color": "red", "label": "3", "faceYaw": 90,  "faceTol": 40}
+        {"x": 5,  "y": 3, "z": 0,   "color": "red", "label": "1", "faceYaw": 270, "faceTol": 40, "spin": 0},
+        {"x": 5,  "y": 3, "z": -5,  "color": "red", "label": "2", "faceYaw": 0,   "faceTol": 40, "spin": 0},
+        {"x": 0,  "y": 3, "z": -5,  "color": "red", "label": "3", "faceYaw": 90,  "faceTol": 40, "spin": 0}
       ],
       "obstacles": []
     },

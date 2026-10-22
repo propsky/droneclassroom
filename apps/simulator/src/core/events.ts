@@ -32,7 +32,7 @@ export interface CoreEventMap {
   'countdown': { n: number };
   /** 穿過一個圈 */
   'ring-passed': { index: number; collected: number; total: number };
-  /** 重置：所有圈恢復可見 */
+  /** 重置：圈的通過狀態清掉，外觀回到第一圈 */
   'rings-reset': Record<string, never>;
   /** faceYaw 圈的對準狀態改變（render 變綠用） */
   'ring-face': { index: number; aligned: boolean };

@@ -20,6 +20,7 @@ describe('levelObjectDefaults', () => {
 
   it('ringSpin / ringBobAmp 預設值', () => {
     expect(ringSpin({})).toBe(0.015);
+    expect(ringSpin({ spin: 0 })).toBe(0);
     expect(ringBobAmp({ bobAmp: 0 })).toBe(0);
     expect(ringBobAmp({})).toBe(0.2);
   });
