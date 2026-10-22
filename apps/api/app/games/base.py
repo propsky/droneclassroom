@@ -11,7 +11,7 @@ import logging
 import math
 import random
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -86,6 +86,12 @@ class BaseGame:
         self.status = "idle"
         self._countdown_n = 0
         self._countdown_next_ms = 0.0
+        # 賽局結束（時間到／老師停止／切關）後通知房間。教師派送用來把學生送回原關卡。
+        self.on_match_end: Callable[[str], Awaitable[None]] | None = None
+
+    async def _notify_match_end(self, reason: str) -> None:
+        if self.on_match_end is not None:
+            await self.on_match_end(reason)
 
     # ---------- 扇出 ----------
 

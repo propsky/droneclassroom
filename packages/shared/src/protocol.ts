@@ -226,15 +226,59 @@ export interface RoomMoveStudentMsg { type: 'room_move_student'; studentId: stri
 /** 帶 roomCode 的老師訊息：缺省 = 目前選定房間 */
 export interface RoomScoped { roomCode?: string }
 
+/** 教師派送的活動。足球對戰與大亂鬥各一條等待名單。對外型別在 teacherDispatch.ts。 */
+type DispatchActivity = 'soccer' | 'arena';
+
+/** 把學生放上等待名單。已在名單上的不重複；超過上限的不會加入。 */
+export interface DispatchAddMsg {
+  type: 'dispatch_add';
+  activity: DispatchActivity;
+  studentIds: string[];
+}
+/** 從等待名單拿掉。studentIds 空著 = 取消這條名單上還在等的全部。 */
+export interface DispatchCancelMsg {
+  type: 'dispatch_cancel';
+  activity: DispatchActivity;
+  studentIds?: string[];
+}
+
 export type TeacherToServer =
   | (TeacherBroadcastMsg & RoomScoped)
   | (ArenaStartMsg & RoomScoped) | (ArenaStateReqMsg & RoomScoped) | (ArenaStopMsg & RoomScoped)
   | (SoccerStartMsg & RoomScoped) | (SoccerStateReqMsg & RoomScoped) | (SoccerStopMsg & RoomScoped)
   | (SoccerSetStrikerMsg & RoomScoped) | (SoccerSetTeamMsg & RoomScoped) | (SoccerResetMsg & RoomScoped)
   | (SoccerWarnMsg & RoomScoped)
+  | (DispatchAddMsg & RoomScoped) | (DispatchCancelMsg & RoomScoped)
   | RoomCreateMsg | RoomCloseMsg | RoomUpdateMsg | RoomKickMsg | RoomSelectMsg | RoomListReqMsg
   | RoomOpenTeamMsg | RoomArchiveTeamMsg
   | RoomCreateSubMsg | (RoomMoveStudentMsg & RoomScoped);
+
+/** 老師端看到的等待名單。notice 有字才是這次派送的提示（重連補送不帶）。 */
+export interface DispatchStateMsg {
+  type: 'dispatch_state';
+  activity: DispatchActivity;
+  phase: 'idle' | 'waiting' | 'live';
+  cap: number;
+  waiting: { id: string; name: string; emoji: string }[];
+  notice?: string;
+}
+/** 學生留在目前關卡，看板擋飛行。不需學生按確認。 */
+export interface DispatchHoldMsg {
+  type: 'dispatch_hold';
+  activity: DispatchActivity;
+  title: string;
+}
+/** 離開等待看板，恢復飛行。 */
+export interface DispatchReleaseMsg { type: 'dispatch_release' }
+/** 老師按開始：這時才切進足球或大亂鬥。 */
+export interface DispatchGoMsg {
+  type: 'dispatch_go';
+  activity: DispatchActivity;
+  arenaMode?: 'balloon' | 'tag';
+  arenaField?: 'grid' | 'playground';
+}
+/** 有等待名單或比賽中：關掉右下活動鈕，學生不能自己進場。 */
+export interface DispatchGateMsg { type: 'dispatch_gate'; locked: boolean }
 
 // ---------- Server → Client ----------
 
@@ -577,7 +621,8 @@ export type ServerToClient =
   | SoccerStateMsg | SoccerCountdownMsg | SoccerArmMsg | SoccerGoMsg | SoccerPlayersMsg
   | SoccerGoalOkMsg | SoccerScoresMsg
   | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
-  | SoccerResumeMsg;
+  | SoccerResumeMsg
+  | DispatchStateMsg | DispatchHoldMsg | DispatchReleaseMsg | DispatchGoMsg | DispatchGateMsg;
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */
 export const WS_CLOSE_REPLACED = 4000;

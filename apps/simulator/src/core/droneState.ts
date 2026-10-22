@@ -131,9 +131,11 @@ export const flags = {
    * 由 multiplayer/arena.ts 每 tick 更新 — core 不 import multiplayer，避免反向依賴。
    */
   multiplayerLock: false,
+  /** 老師已派送、還在原關卡等待。不能飛，直到進場或取消。 */
+  dispatchHold: false,
 };
 
-/** 手動輸入是否被鎖定（程式模式 / 程式執行中 / 倒數中 / 暫停中 / 回家中 / 多人鎖定） */
+/** 手動輸入是否被鎖定（程式模式 / 程式執行中 / 倒數中 / 暫停中 / 回家中 / 多人鎖定 / 派送等待） */
 export function isManualLocked(): boolean {
   return (
     flags.programRunning ||
@@ -141,6 +143,7 @@ export function isManualLocked(): boolean {
     flags.countdownActive ||
     flags.paused ||
     flags.multiplayerLock ||
+    flags.dispatchHold ||
     droneState.returning
   );
 }

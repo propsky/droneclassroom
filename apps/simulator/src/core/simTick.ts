@@ -1,6 +1,6 @@
 // 模擬單 tick — 主迴圈（main.ts）、伺服器重播（replayRunner）與測試共用同一份邏輯，
 // 線上與重播不會各自演化而分歧。
-import { droneState, isManualLocked, TICK_MS } from './droneState';
+import { droneState, flags, isManualLocked, TICK_MS } from './droneState';
 import { FlightReview } from './flightReview';
 import {
   applyManualControls,
@@ -17,6 +17,13 @@ import { beginRecordedTick, endRecordedTick } from './recordingSession';
 
 /** 飛行物理（程式 motion plan / 自動駕駛 / 手動推力 + 積分）+ 靜態障礙碰撞 — 所有模式共用 */
 export function tickFlightPhysics(controlFrame: ControlFrame, thrustScale = 1): void {
+  if (flags.dispatchHold) {
+    // 等待進場：速度歸零、程式也不推進，人停在目前關卡。
+    droneState.velocity.x = 0;
+    droneState.velocity.y = 0;
+    droneState.velocity.z = 0;
+    return;
+  }
   if (programState.running) {
     // 程式模式：位置由 motion plan 推進，只做地板保護
     tickProgram(TICK_MS);

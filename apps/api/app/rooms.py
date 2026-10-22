@@ -63,6 +63,7 @@ from .protocol import (
     WelcomeMsg,
 )
 from .roster import Roster, StudentRecord, send_safe
+from .teacher_dispatch import TeacherDispatch
 
 logger = logging.getLogger("creafly.api.rooms")
 
@@ -311,6 +312,7 @@ class RoomManager:
             owner_teacher_id=owner_teacher_id,
             is_main=is_main,
         )
+        TeacherDispatch.attach(room)
         self._rooms[code] = room
         return room
 
@@ -386,6 +388,7 @@ class RoomManager:
 
     async def kick(self, room: Room, record: StudentRecord) -> None:
         """踢人：移出賽局與名冊（整筆，不留離線列），通知後以 WS_CLOSE_KICKED 關閉。可重進。"""
+        await TeacherDispatch.drop(room, record)
         await room.arena.drop(record)
         await room.soccer.drop(record)
         await room.roster.detach(record)
@@ -852,14 +855,17 @@ class RoomManager:
         await self.send_room_list(ws, selected=self.default)
         self._teachers[ws] = self.default
         await self.default.roster.add_teacher(ws)
+        await TeacherDispatch.sync_teacher(self.default, ws, force=False)
 
-    def remove_teacher(self, ws: WebSocket) -> None:
+    async def remove_teacher(self, ws: WebSocket) -> None:
         teacher_id = self._teacher_ids.pop(ws, None)
         if teacher_id is not None and teacher_id not in self._teacher_ids.values():
             self._teams_cache.pop(teacher_id, None)  # 該老師最後一條連線走了 → 丟快取
         room = self._teachers.pop(ws, None)
         if room is not None:
             room.roster.remove_teacher(ws)
+            if room.roster.teacher_count == 0:
+                await TeacherDispatch.on_teachers_left(room)
 
     def teacher_id(self, ws: WebSocket) -> int | None:
         """老師 socket 對應的帳號 id（無 DB / 未登記為 None）。"""
@@ -874,8 +880,12 @@ class RoomManager:
         old = self._teachers.get(ws)
         if old is not None:
             old.roster.remove_teacher(ws)
+            # 切到別間才算離開。同一間重選不能把等待名單清掉。
+            if old is not room and old.roster.teacher_count == 0:
+                await TeacherDispatch.on_teachers_left(old)
         self._teachers[ws] = room
         await room.roster.add_teacher(ws)
+        await TeacherDispatch.sync_teacher(room, ws, force=True)
         await room.arena.send_snapshot_to(ws)
         await room.soccer.send_snapshot_to(ws)
         await self.send_room_list(ws, selected=room)
@@ -935,7 +945,7 @@ class RoomManager:
         self._last_signature = self._signature()
         for ws, selected in list(self._teachers.items()):
             if not await send_safe(ws, self._room_list(ws, selected).model_dump_json()):
-                self.remove_teacher(ws)
+                await self.remove_teacher(ws)
 
     # ---------- tick ----------
 
