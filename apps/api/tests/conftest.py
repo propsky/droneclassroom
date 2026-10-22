@@ -57,6 +57,19 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 
 @pytest.fixture
+def f9a_room(client: TestClient):
+    """既有大場測試：明確選進階 F9A + F9A-A。新的預設是臺北賽制 + F9A-B。"""
+    from app.games.soccer_presets import F9A_A
+
+    room = client.app.state.rooms.default
+    room.settings.soccer_ruleset = "f9a"
+    room.settings.soccer_class = "F9A-A"
+    client.portal.call(room.soccer.set_ruleset, "f9a")
+    client.portal.call(room.soccer.set_class, F9A_A)
+    return room
+
+
+@pytest.fixture
 def teacher_ticket(client: TestClient) -> str:
     """登入拿一張有效的老師 ticket（連 /teacher WS 用）。"""
     r = client.post("/auth/teacher", json={"password": TEACHER_PASSWORD})

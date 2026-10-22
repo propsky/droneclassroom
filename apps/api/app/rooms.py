@@ -50,7 +50,7 @@ from .entitlement import build_welcome_entitlement
 from .games import ArenaGame, SoccerGame
 from .games.soccer import SoccerField
 from .games.soccer_presets import RoomSoccerClass
-from .games.taipei_rules import RoomSoccerRuleset
+from .games.taipei_rules import RoomSoccerRuleset, SoccerPairing
 from .protocol import (
     WS_CLOSE_KICKED,
     RejectReason,
@@ -270,6 +270,14 @@ class RoomManager:
         rooms.sort(key=lambda r: (not r.is_main, r.created_at))
         return rooms
 
+    def _paired_field(self, settings: RoomSettings):
+        """臺北賽制（含沒釘選的預設）固定 F9A-B。進階 F9A 才看釘選或 SOCCER_CLASS。"""
+        return SoccerPairing.field_spec(
+            settings.soccer_ruleset,
+            settings.soccer_class,
+            self._cfg.soccer_class,
+        )
+
     def _default_settings(self) -> RoomSettings:
         return RoomSettings(
             max_students=self._cfg.room_default_max_students or self._cfg.max_students
@@ -293,9 +301,7 @@ class RoomManager:
             arena=ArenaGame(roster),
             soccer=SoccerGame(
                 roster,
-                field=SoccerField.from_spec(
-                    RoomSoccerClass.resolve(settings.soccer_class, self._cfg.soccer_class)
-                ),
+                field=SoccerField.from_spec(self._paired_field(settings)),
                 air_contact_cards=self._cfg.soccer_air_contact_cards,
                 tie_break=self._cfg.soccer_tiebreak,
                 ruleset=RoomSoccerRuleset.effective(settings.soccer_ruleset),
@@ -355,14 +361,18 @@ class RoomManager:
         before_class = room.settings.soccer_class
         before_rules = room.settings.soccer_ruleset
         room.settings.apply(patch, hashed=room.team_id is not None)
-        if room.settings.soccer_class != before_class:
-            spec = RoomSoccerClass.resolve(room.settings.soccer_class, self._cfg.soccer_class)
-            if not await room.soccer.set_class(spec):
-                room.settings.soccer_class = before_class
-        if room.settings.soccer_ruleset != before_rules:
-            chosen = RoomSoccerRuleset.effective(room.settings.soccer_ruleset)
-            if not await room.soccer.set_ruleset(chosen):
-                room.settings.soccer_ruleset = before_rules
+        rules = RoomSoccerRuleset.effective(room.settings.soccer_ruleset)
+        spec = self._paired_field(room.settings)
+        rules_changed = rules != room.soccer.ruleset or room.soccer.ruleset_default != rules
+        if rules_changed and not await room.soccer.set_ruleset(rules):
+            room.settings.soccer_ruleset = before_rules
+            room.settings.soccer_class = before_class
+            spec = self._paired_field(room.settings)
+        # 臺北賽制就算 JSON 裡釘了 F9A-A，場地也必須是 F9A-B。
+        if room.soccer.field.code != spec.code and not await room.soccer.set_class(spec):
+            room.settings.soccer_class = before_class
+            room.settings.soccer_ruleset = before_rules
+            await room.soccer.set_ruleset(RoomSoccerRuleset.effective(room.settings.soccer_ruleset))
         logger.info(
             "[Room] %s 設定更新：%s",
             room.code,

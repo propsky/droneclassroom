@@ -59,52 +59,67 @@ describe('房間足球場地', () => {
     expect(sent).toEqual([{ type: 'room_create', settings: { name: '三年二班' } }]);
   });
 
-  it('新增班級選 F9A-B 會釘選', () => {
+  it('臺北預設鎖小場不釘選；改進階 F9A 後選 F9A-B 才釘選', () => {
     mount();
     document.querySelector<HTMLButtonElement>('#btn-room-new')!.click();
     const form = document.querySelector<HTMLFormElement>('#room-form')!;
-    (form.querySelector('#rf-field') as HTMLSelectElement).value = 'F9A-B';
+    const field = form.querySelector('#rf-field') as HTMLSelectElement;
+    expect(field.disabled).toBe(true);
+    expect(field.value).toBe('F9A-B');
+    field.value = 'F9A-B';
     form.requestSubmit();
-    expect(sent[0]).toEqual({ type: 'room_create', settings: { soccerClass: 'F9A-B' } });
-  });
-
-  it('設定改成 F9A-B，比賽中則不能改', () => {
-    const dash = mount();
-    dash.setRooms(
-      [room({ code: 'MAIN', createdAt: 1, soccerClass: 'F9A-A', soccerClassPinned: false })],
-      'MAIN',
-    );
-    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('F9A-A');
-    document.querySelector<HTMLButtonElement>('#btn-room-settings')!.click();
-    const select = document.querySelector<HTMLSelectElement>('#rs-field')!;
-    expect(select.value).toBe('');
-    expect(select.disabled).toBe(false);
-    select.value = 'F9A-B';
-    document.querySelector<HTMLButtonElement>('#rs-save')!.click();
-    expect(sent).toEqual([
-      { type: 'room_update', roomCode: 'MAIN', settings: { soccerClass: 'F9A-B' } },
-    ]);
+    expect(sent[0]).toEqual({ type: 'room_create', settings: {} });
 
     sent.length = 0;
+    document.querySelector<HTMLButtonElement>('#btn-room-new')!.click();
+    const again = document.querySelector<HTMLFormElement>('#room-form')!;
+    (again.querySelector('#rf-rules') as HTMLSelectElement).value = 'f9a';
+    again.querySelector('#rf-rules')!.dispatchEvent(new Event('change'));
+    const unlocked = again.querySelector('#rf-field') as HTMLSelectElement;
+    expect(unlocked.disabled).toBe(false);
+    unlocked.value = 'F9A-B';
+    again.requestSubmit();
+    expect(sent[0]).toEqual({
+      type: 'room_create',
+      settings: { soccerRuleset: 'f9a', soccerClass: 'F9A-B' },
+    });
+  });
+
+  it('臺北賽制鎖住小場；進階 F9A 才能改大場', () => {
+    const dash = mount();
+    dash.setRooms(
+      [room({ code: 'MAIN', createdAt: 1, soccerClass: 'F9A-A', soccerClassPinned: true })],
+      'MAIN',
+    );
+    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('F9A-B');
+    expect(document.querySelector('#soccer-field-hint')!.textContent).toContain('不能改成大場');
+    document.querySelector<HTMLButtonElement>('#btn-room-settings')!.click();
+    const locked = document.querySelector<HTMLSelectElement>('#rs-field')!;
+    expect(locked.value).toBe('F9A-B');
+    expect(locked.disabled).toBe(true);
+    document.querySelector<HTMLButtonElement>('#rs-save')!.click();
+    expect(sent).toEqual([]);
+
     dash.setRooms(
       [
         room({
           code: 'MAIN',
           createdAt: 1,
-          soccerClass: 'F9A-B',
+          soccerRuleset: 'f9a',
+          soccerClass: 'F9A-A',
           soccerClassPinned: true,
-          soccerStatus: 'running',
         }),
       ],
       'MAIN',
     );
-    expect(document.querySelector('#room-flags')!.textContent).toContain('F9A-B');
     document.querySelector<HTMLButtonElement>('#btn-room-settings')!.click();
-    const locked = document.querySelector<HTMLSelectElement>('#rs-field')!;
-    expect(locked.value).toBe('F9A-B');
-    expect(locked.disabled).toBe(true);
-    expect(document.querySelector('#rs-field-note')!.textContent).toContain('比賽進行中');
+    const select = document.querySelector<HTMLSelectElement>('#rs-field')!;
+    expect(select.disabled).toBe(false);
+    expect(select.value).toBe('F9A-A');
+    select.value = 'F9A-B';
     document.querySelector<HTMLButtonElement>('#rs-save')!.click();
-    expect(sent).toEqual([]);
+    expect(sent).toEqual([
+      { type: 'room_update', roomCode: 'MAIN', settings: { soccerClass: 'F9A-B' } },
+    ]);
   });
 });

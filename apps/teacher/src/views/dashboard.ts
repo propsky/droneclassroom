@@ -181,12 +181,20 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               <input id="rf-max" type="number" min="1" max="200" placeholder="預設 ${esc(maxStudents)}">
             </div>
             <div class="field">
+              <label class="field-label" for="rf-rules">足球賽制</label>
+              <select id="rf-rules">
+                <option value="taipei">臺北賽制（預設，F9A-B 小場）</option>
+                <option value="f9a">F9A 進階（三局兩勝）</option>
+              </select>
+            </div>
+            <div class="field">
               <label class="field-label" for="rf-field">足球場地</label>
-              <select id="rf-field">
+              <select id="rf-field" disabled>
                 <option value="">沿用伺服器預設</option>
                 <option value="F9A-A">F9A-A（14×7×5 m，每隊 5 人）</option>
-                <option value="F9A-B">F9A-B（6×3×3 m，每隊 3 人）</option>
+                <option value="F9A-B" selected>F9A-B（6×3×3 m，每隊 3 人）</option>
               </select>
+              <p class="hint" id="rf-field-note">臺北賽制固定使用 F9A-B 小場，不能改成大場。</p>
             </div>
           </div>
           <div class="room-form-actions">
@@ -242,7 +250,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                   <option value="F9A-A">F9A-A（14×7×5 m，每隊 5 人）</option>
                   <option value="F9A-B">F9A-B（6×3×3 m，每隊 3 人）</option>
                 </select>
-                <p class="hint" id="rs-field-note">沒有釘選時用伺服器的 SOCCER_CLASS。正式環境未設定，所以是 F9A-A。</p>
+                <p class="hint" id="rs-field-note">臺北賽制固定使用 F9A-B 小場，不能改成大場。</p>
               </div>
               <div class="room-pop-actions">
                 <button type="button" class="btn btn-ghost btn-sm" id="rs-cancel">取消</button>
@@ -416,14 +424,14 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-body">
-              <p class="hint" id="soccer-rules-hint">前鋒穿門：只有攻擊手穿對方圓環得分，得分後該隊還能飛的人要回己方半場。三局兩勝、局間休息；平手先 PK，再黃金進球。打進自己的門不算分。</p>
-              <p class="hint" id="soccer-field-hint">本房場地：F9A-A（14×7×5 m，每隊最多 5 人）。到左側「設定」可換成 F9A-B。</p>
+              <p class="hint" id="soccer-rules-hint">臺北市115（預設）：單場決勝負，固定 F9A-B 小場。淨分相同則先進第 1 球的隊伍勝。</p>
+              <p class="hint" id="soccer-field-hint">本房場地：F9A-B（6×3×3 m，每隊最多 3 人）。臺北賽制不能改成大場。</p>
               <div class="ctl-grid">
                 <div class="field">
                   <label class="field-label" for="soccer-rules">賽制</label>
                   <select id="soccer-rules">
-                    <option value="f9a">F9A（三局兩勝）</option>
-                    <option value="taipei">臺北賽制（單場）</option>
+                    <option value="taipei" selected>臺北賽制（預設）</option>
+                    <option value="f9a">F9A 進階（三局兩勝）</option>
                   </select>
                 </div>
                 <div class="field">
@@ -855,6 +863,19 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const nextDur = SoccerRulesetForm.durationOnChange(soccerDurSel.value, ruleset);
     if (nextDur !== soccerDurSel.value) soccerDurSel.value = nextDur;
     paintRulesHint();
+    const rsFieldLive = root.querySelector<HTMLSelectElement>('#rs-field');
+    const rsNoteLive = root.querySelector<HTMLElement>('#rs-field-note');
+    if (rsFieldLive && rsNoteLive && SoccerRulesetForm.locksField(ruleset)) {
+      rsFieldLive.value = 'F9A-B';
+      rsFieldLive.disabled = true;
+      rsNoteLive.textContent = SoccerRulesetForm.fieldNote(ruleset);
+    } else if (rsFieldLive && !SoccerRulesetForm.locksField(ruleset)) {
+      const live = ['countdown', 'running', 'break', 'golden', 'pk'].includes(
+        currentRoom()?.soccerStatus ?? '',
+      );
+      rsFieldLive.disabled = live;
+      if (rsNoteLive) rsNoteLive.textContent = SoccerRulesetForm.fieldNote(ruleset);
+    }
     const r = currentRoom();
     if (!r || soccerRulesSel.disabled) return;
     sendGame(
@@ -1077,6 +1098,18 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const roomHintEl = root.querySelector<HTMLElement>('#room-hint')!;
   const roomForm = root.querySelector<HTMLFormElement>('#room-form')!;
   const rfName = root.querySelector<HTMLInputElement>('#rf-name')!;
+  const rfRules = root.querySelector<HTMLSelectElement>('#rf-rules')!;
+  const rfField = root.querySelector<HTMLSelectElement>('#rf-field')!;
+  const rfFieldNote = root.querySelector<HTMLElement>('#rf-field-note')!;
+  const syncCreateField = (): void => {
+    const ruleset = SoccerRulesetForm.parse(rfRules.value);
+    const lock = SoccerRulesetForm.locksField(ruleset);
+    rfField.disabled = lock;
+    rfFieldNote.textContent = SoccerRulesetForm.fieldNote(ruleset);
+    if (lock) rfField.value = 'F9A-B';
+  };
+  rfRules.addEventListener('change', syncCreateField);
+  syncCreateField();
   const rfPass = root.querySelector<HTMLInputElement>('#rf-pass')!;
   const rfMax = root.querySelector<HTMLInputElement>('#rf-max')!;
   const roomCodeBtn = root.querySelector<HTMLButtonElement>('#room-code')!;
@@ -1175,10 +1208,15 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     roomNameEl.textContent =
       r.name && r.name !== r.code ? r.name : guest ? '訪客房' : isDefault ? '預設房間' : team ? '未命名班級' : '未命名房間';
     roomMaxEl.textContent = ` / ${r.maxStudents} 人`;
-    const fieldCode = SoccerFieldChoice.effective(r.soccerClass);
-    const fieldTitle = r.soccerClassPinned
-      ? `本房釘選 ${SoccerFieldChoice.label(fieldCode)}`
-      : `本房跟著伺服器預設，目前是 ${SoccerFieldChoice.label(fieldCode)}`;
+    const rulesetNow = SoccerRulesetForm.parse(r.soccerRuleset);
+    const fieldCode = SoccerRulesetForm.locksField(rulesetNow)
+      ? 'F9A-B'
+      : SoccerFieldChoice.effective(r.soccerClass);
+    const fieldTitle = SoccerRulesetForm.locksField(rulesetNow)
+      ? SoccerRulesetForm.fieldNote(rulesetNow)
+      : r.soccerClassPinned
+        ? `本房釘選 ${SoccerFieldChoice.label(fieldCode)}`
+        : `本房跟著伺服器預設，目前是 ${SoccerFieldChoice.label(fieldCode)}`;
     roomFlagsEl.innerHTML =
       (r.hasPassword ? `<span title="需密碼">${ICONS.key}</span>` : '') +
       (r.locked ? `<span class="flag-locked" title="已鎖房：新學生無法加入">${ICONS.lock}</span>` : '') +
@@ -1187,10 +1225,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         : '');
     const fieldHint = root.querySelector<HTMLElement>('#soccer-field-hint');
     if (fieldHint) {
-      fieldHint.textContent = `本房場地：${SoccerFieldChoice.label(fieldCode)}。到左側「設定」可更換；比賽進行中不能改。`;
+      fieldHint.textContent = SoccerRulesetForm.locksField(rulesetNow)
+        ? `本房場地：${SoccerFieldChoice.label('F9A-B')}。${SoccerRulesetForm.fieldNote(rulesetNow)}`
+        : `本房場地：${SoccerFieldChoice.label(fieldCode)}。到左側「設定」可更換；比賽進行中不能改。`;
     }
     if (document.activeElement !== soccerRulesSel) {
-      soccerRulesSel.value = r.soccerRuleset === 'taipei' ? 'taipei' : 'f9a';
+      soccerRulesSel.value = SoccerRulesetForm.parse(r.soccerRuleset);
       paintRulesHint();
     }
     const rulesLive = ['countdown', 'running', 'break', 'golden', 'pk'].includes(r.soccerStatus);
@@ -1302,8 +1342,10 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   // 新增班級：內嵌表單（名稱 / 密碼 / 上限）→ room_create（有 DB 時伺服器建持久化班級並開房；無 DB 為一般房間）；伺服器回 room_list（新房已 selected）
   const showRoomForm = (show: boolean): void => {
     roomForm.hidden = !show;
-    if (show) rfName.focus();
-    else roomForm.reset();
+    if (show) {
+      syncCreateField();
+      rfName.focus();
+    } else roomForm.reset();
   };
   on('btn-room-new', () => showRoomForm(roomForm.hidden));
   // 管理名單旁與警告列的捷徑：同一張新增班級表單，不另做流程
@@ -1320,7 +1362,13 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     if (password) settings.password = password;
     if (Number.isFinite(max) && max > 0) settings.maxStudents = max;
     const fieldPick = root.querySelector<HTMLSelectElement>('#rf-field')!;
-    Object.assign(settings, SoccerFieldChoice.forCreate(fieldPick.value));
+    const rulesPick = SoccerRulesetForm.parse(
+      root.querySelector<HTMLSelectElement>('#rf-rules')!.value,
+    );
+    if (rulesPick === 'f9a') {
+      settings.soccerRuleset = 'f9a';
+      Object.assign(settings, SoccerFieldChoice.forCreate(fieldPick.value));
+    }
     if (!sendGame({ type: 'room_create', settings })) return;
     pendingCreate = true;
     showRoomForm(false);
@@ -1375,14 +1423,22 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const rsField = root.querySelector<HTMLSelectElement>('#rs-field')!;
     const rsFieldNote = root.querySelector<HTMLElement>('#rs-field-note')!;
     const fieldLive = ['countdown', 'running', 'break', 'golden', 'pk'].includes(r.soccerStatus);
-    rsField.value = SoccerFieldChoice.selectValue(r.soccerClassPinned, r.soccerClass);
-    rsField.disabled = fieldLive;
+    const rulesetNow = SoccerRulesetForm.parse(
+      document.querySelector<HTMLSelectElement>('#soccer-rules')?.value ?? r.soccerRuleset,
+    );
+    const lockedTaipei = SoccerRulesetForm.locksField(rulesetNow);
+    rsField.value = lockedTaipei
+      ? 'F9A-B'
+      : SoccerFieldChoice.selectValue(r.soccerClassPinned, r.soccerClass);
+    rsField.disabled = fieldLive || lockedTaipei;
     const pinnedLabel = SoccerFieldChoice.label(SoccerFieldChoice.effective(r.soccerClass));
-    rsFieldNote.textContent = fieldLive
-      ? '比賽進行中不能換場地。結束或重設後再改。'
-      : r.soccerClassPinned
-        ? `目前釘選 ${pinnedLabel}。選「沿用伺服器預設」會改跟 SOCCER_CLASS。`
-        : '沒有釘選時用伺服器的 SOCCER_CLASS。正式環境未設定，所以是 F9A-A。';
+    rsFieldNote.textContent = lockedTaipei
+      ? SoccerRulesetForm.fieldNote(rulesetNow)
+      : fieldLive
+        ? '比賽進行中不能換場地。結束或重設後再改。'
+        : r.soccerClassPinned
+          ? `目前釘選 ${pinnedLabel}。選「沿用伺服器預設」會改跟 SOCCER_CLASS。`
+          : SoccerRulesetForm.fieldNote(rulesetNow);
     roomPop.hidden = false;
     rsName.focus();
   };

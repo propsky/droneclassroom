@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { HOME_POSITION } from '../core/droneState';
-import { SOCCER_FIELD } from './constants';
+import { SOCCER_FIELD, SOCCER_START_DEPTH } from './constants';
 import { advanceRingPassage, createRingPassage, type RingCross } from './crossing';
-import { formatPracticeScore, notePracticeGoals } from './practice';
+import { formatPracticeScore, PracticeScoring } from './practice';
 
 const y = SOCCER_FIELD.goalY;
 
@@ -38,45 +38,41 @@ function line(z0: number, z1: number, step = 0.04): Array<{ x: number; y: number
   return points;
 }
 
-describe('自由練習計分', () => {
-  it('兩端從場內向外穿門都加分，可以一直累加', () => {
+describe('自由練習跟對戰同一套進球', () => {
+  it('只有從場內正面穿對方門才加分，之後要回自己半場', () => {
     const farOut = -SOCCER_FIELD.goalZ - SOCCER_FIELD.shieldR - 0.35;
     const farIn = -SOCCER_FIELD.goalZ + 0.8;
-    const nearOut = SOCCER_FIELD.goalZ + SOCCER_FIELD.shieldR + 0.35;
-    const nearIn = SOCCER_FIELD.goalZ - 0.8;
-    expect(passed(line(farIn, farOut), -1)).toBe(true);
-    expect(passed(line(nearIn, nearOut), 1)).toBe(true);
+    expect(passed(line(farIn, farOut), PracticeScoring.attackSign)).toBe(true);
 
-    let count = 0;
-    count = notePracticeGoals(count, true, false).count;
-    count = notePracticeGoals(count, false, true).count;
-    count = notePracticeGoals(count, true, true).count;
-    expect(count).toBe(4);
-    expect(formatPracticeScore(count)).toBe('分數：4');
-    expect(formatPracticeScore(count)).not.toMatch(/完成|任務|P-[1-7]|回半場/);
+    const first = PracticeScoring.apply(0, false, true, false, -1);
+    expect(first).toEqual({ count: 1, needReturn: true, scored: true });
+    const again = PracticeScoring.apply(first.count, true, true, false, -1);
+    expect(again.scored).toBe(false);
+    expect(again.count).toBe(1);
+    const home = PracticeScoring.apply(first.count, true, false, false, 0.4);
+    expect(home.needReturn).toBe(false);
+    const second = PracticeScoring.apply(home.count, false, true, false, -1);
+    expect(second.count).toBe(2);
+    expect(formatPracticeScore(second.count)).toBe('分數：2');
+    expect(formatPracticeScore(second.count)).not.toMatch(/完成|任務|P-[1-7]/);
   });
 
-  it('從球門後方穿回場內不加分', () => {
-    const farBehind = -SOCCER_FIELD.halfZ + SOCCER_FIELD.shieldR + 0.15;
+  it('自己的門與從球門後方穿回都不加分', () => {
+    const own = PracticeScoring.apply(2, false, false, true, 1);
+    expect(own.scored).toBe(false);
+    expect(own.count).toBe(2);
+
+    const farBehind = -SOCCER_FIELD.halfZ + SOCCER_FIELD.shieldR + 0.05;
     const farInside = -SOCCER_FIELD.goalZ + 0.9;
-    const nearBehind = SOCCER_FIELD.halfZ - SOCCER_FIELD.shieldR - 0.15;
-    const nearInside = SOCCER_FIELD.goalZ - 0.9;
     expect(farBehind).toBeLessThan(-SOCCER_FIELD.goalZ - SOCCER_FIELD.goalTube);
-    expect(nearBehind).toBeGreaterThan(SOCCER_FIELD.goalZ + SOCCER_FIELD.goalTube);
-
-    expect(passed(line(farBehind, farInside), -1)).toBe(false);
-    expect(passed(line(nearBehind, nearInside), 1)).toBe(false);
-    const stayed = notePracticeGoals(2, false, false);
-    expect(stayed.scored).toBe(false);
-    expect(stayed.count).toBe(2);
-    expect(formatPracticeScore(stayed.count)).toBe('分數：2');
+    expect(passed(line(farBehind, farInside), PracticeScoring.attackSign)).toBe(false);
   });
 
-  it('出生點在起飛區地面，不在圓環裡，也不會貼到端牆', () => {
+  it('出生點在起飛區地面，不在圓環裡', () => {
     const z = SOCCER_FIELD.startZ;
     const y0 = HOME_POSITION.y;
     const r = SOCCER_FIELD.shieldR;
-    expect(z).toBeCloseTo(SOCCER_FIELD.halfZ - 1.5 / 2);
+    expect(z).toBeCloseTo(SOCCER_FIELD.halfZ - SOCCER_START_DEPTH / 2);
     expect(Math.abs(z) + r).toBeLessThan(SOCCER_FIELD.halfZ);
     expect(z).toBeGreaterThan(SOCCER_FIELD.goalZ + SOCCER_FIELD.goalTube);
     expect(y0 + r).toBeLessThan(SOCCER_FIELD.goalY - SOCCER_FIELD.goalR);

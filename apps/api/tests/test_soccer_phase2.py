@@ -8,6 +8,8 @@ from app.games.soccer_rules import shield_passes_ring
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 from tests.test_soccer import _countdown_to_go, _gkey, _join_soccer, _register, f9a_cross
 
+pytestmark = pytest.mark.usefixtures("f9a_room")
+
 
 def test_護罩穿過開口才算_打到框與只到球心都不算() -> None:
     y, gz, z0, z1 = f9a_cross()

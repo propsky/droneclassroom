@@ -35,7 +35,7 @@ from ..config import Settings
 from ..protocol import SoccerPosMsg, SoccerStartMode
 from ..roster import Roster, StudentRecord, send_safe
 from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
-from .soccer_presets import F9A_A, SoccerClassCode, SoccerClassSpec, preset_for
+from .soccer_presets import F9A_A, F9A_B, SoccerClassCode, SoccerClassSpec, preset_for
 from .soccer_rules import (
     CROSS_GRANT_MS,
     PENALTY_SEC,
@@ -305,8 +305,16 @@ class SoccerGame(BaseGame):
         self.ruleset_default = chosen
         if self.status in ("idle", "done"):
             self.ruleset = chosen
+            await self._force_taipei_field()
             await self.broadcast_state()
         return True
+
+    async def _force_taipei_field(self) -> None:
+        """臺北賽制不能留在大場。呼叫端要在開賽或改賽制、且賽局還能換場地時用。"""
+        if self.ruleset != "taipei" or self.field.code == F9A_B.code:
+            return
+        self._bind_field(SoccerField.from_spec(F9A_B))
+        self._fit_roster_to_cap()
 
     # ---------- 內部狀態 ----------
 
@@ -715,6 +723,7 @@ class SoccerGame(BaseGame):
             self.ruleset = ruleset
         else:
             self.ruleset = self.ruleset_default
+        await self._force_taipei_field()
         self.duration_sec = max(5, duration_sec or SOCCER_DURATION_DEFAULT)
         self.scores = {"blue": 0, "red": 0}
         self._reset_taipei_book()

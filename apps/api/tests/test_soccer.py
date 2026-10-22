@@ -12,6 +12,8 @@ from app.games.soccer_presets import F9A_A, F9A_B
 from app.games.soccer_rules import PENALTY_SEC
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
+pytestmark = pytest.mark.usefixtures("f9a_room")
+
 
 def f9a_cross() -> tuple[float, float, float, float]:
     """F9A-A 穿環用：(圓心高, 門面 z, 門前, 穿過後)。門前的後緣還沒過門面。"""
