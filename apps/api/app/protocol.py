@@ -390,6 +390,22 @@ class SoccerResetMsg(_RoomScopedModel):
     clearTeams: bool = False
 
 
+class DispatchAddMsg(_RoomScopedModel):
+    """把學生放上足球或大亂鬥的等待名單。超過上限的不會加入，並回提示。"""
+
+    type: Literal["dispatch_add"]
+    activity: Literal["soccer", "arena"]
+    studentIds: list[str] = Field(min_length=1, max_length=64)
+
+
+class DispatchCancelMsg(_RoomScopedModel):
+    """從等待名單拿掉。studentIds 空 = 取消這條名單上還在等的全部。"""
+
+    type: Literal["dispatch_cancel"]
+    activity: Literal["soccer", "arena"]
+    studentIds: list[str] = Field(default_factory=list, max_length=64)
+
+
 # ---------- 老師 → 伺服器：房間（Room）管理 ----------
 # 一位老師一條 WS 管多間房：開房 / 關房 / 改設定 / 踢人 / 切換作用房 / 要列表；
 # 有資料庫時另有班級（teams 表）操作：開班級的房 / 封存班級。
@@ -499,6 +515,8 @@ TeacherMessage = Annotated[
     | SoccerSetTeamMsg
     | SoccerResetMsg
     | SoccerWarnMsg
+    | DispatchAddMsg
+    | DispatchCancelMsg
     | RoomCreateMsg
     | RoomCloseMsg
     | RoomUpdateMsg
@@ -523,6 +541,8 @@ TEACHER_MESSAGE_ADAPTER: TypeAdapter[
     | SoccerSetTeamMsg
     | SoccerResetMsg
     | SoccerWarnMsg
+    | DispatchAddMsg
+    | DispatchCancelMsg
     | RoomCreateMsg
     | RoomCloseMsg
     | RoomUpdateMsg

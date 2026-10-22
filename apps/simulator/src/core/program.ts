@@ -280,6 +280,10 @@ export const CREAFLY_API = {
 // 程式執行（new Function + 顯式 API 注入；不用 eval）
 // =============================================================================
 export function runProgram(code: string): void {
+  if (flags.dispatchHold) {
+    toast('老師已派送，請在這一關等待', 'warning');
+    return;
+  }
   if (programState.running) return;
   const gen = ++programGen;
 

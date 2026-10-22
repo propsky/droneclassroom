@@ -63,6 +63,7 @@ import { initAudio } from './ui/audio';
 import { initEndCountdown } from './ui/endCountdown';
 import { initBroadcastBanner } from './ui/broadcastBanner';
 import { ClassLevelCommand } from './net/classLevelCommand';
+import { StudentDispatch } from './net/studentDispatch';
 import { initWs, rejoin } from './net/ws';
 import { isPreviewMode } from './preview';
 import { canLoadLevel, firstAllowedLevelId, loadEntitlement } from './net/entitlement';
@@ -127,6 +128,12 @@ ClassLevelCommand.bind({
   enterSoccerMatch,
   enterArena: (mode, field) => enterArena({ mode, field }),
   chapterTitle: (levelId) => levelState.levels.find((l) => l.id === levelId)?.name ?? null,
+});
+
+// 教師派送：老師按開始才切進足球／大亂鬥。先綁好再連線。
+StudentDispatch.bind((activity, opts) => {
+  if (activity === 'soccer') enterSoccerMatch();
+  else enterArena({ mode: opts.arenaMode, field: opts.arenaField });
 });
 
 // ---- UI / 輸入 / 音效 / 網路 ----

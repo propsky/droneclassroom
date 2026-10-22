@@ -14,6 +14,7 @@ import { getStudentToken } from './studentAuth';
 import { armLevelStart, levelState, resetMission } from '../core/level';
 import { GameSession } from '../core/session';
 import { ClassLevelCommand } from './classLevelCommand';
+import { StudentDispatch } from './studentDispatch';
 import { loadLevel } from './levelLoad';
 import { setMode } from '../core/program';
 import { player } from '../ui/overlays';
@@ -188,6 +189,7 @@ export function connectToTeacher(): void {
     wsState.connected = false;
     stopHeartbeat();
     console.log('[WS] 連線關閉', ev.code);
+    StudentDispatch.reset();
     if (ev.code === WS_CLOSE_REPLACED) {
       // 同名在其他裝置登入 → 不搶連線
       wsState.stopped = true;
@@ -337,6 +339,8 @@ function handleMessage(msg: ServerToClient): void {
       handleLevelLoadResponse(msg.levelId, false);
       break;
     case 'load_level': {
+      // 切關（含賽後回原關）時看板要收起，避免人已經離開等待還鎖著。
+      StudentDispatch.release();
       // 活動（足球／大亂鬥）不依賴 chapter JSON，人在場內也要立刻切過去。
       // 一般關卡若清單還沒到（剛連上就收到補送）先暫存；清單有了但仍沒有這筆
       // （自訂關卡）也要退出多人模式，再由 loadLevel 跟伺服器要定義。
@@ -374,6 +378,23 @@ function handleMessage(msg: ServerToClient): void {
       // 修掉舊寫法只跑 runCountdown 導致 startTime 沒設定、成績為 0 還被標可疑的 bug）
       armLevelStart();
       toast('🏁 比賽開始！', 'success');
+      break;
+    case 'dispatch_hold':
+      StudentDispatch.hold(msg.activity);
+      break;
+    case 'dispatch_release':
+      StudentDispatch.release();
+      break;
+    case 'dispatch_go':
+      StudentDispatch.go(msg.activity, {
+        arenaMode: msg.arenaMode,
+        arenaField: msg.arenaField,
+      });
+      break;
+    case 'dispatch_gate':
+      StudentDispatch.gate(msg.locked);
+      break;
+    case 'dispatch_state':
       break;
     case 'show_message':
       // 老師廣播走專屬大字橫幅（ui/broadcastBanner.ts），不走 toast —
