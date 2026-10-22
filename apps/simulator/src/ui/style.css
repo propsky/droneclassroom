@@ -2505,6 +2505,12 @@ body,
   font-size: var(--fs-sm);
   color: var(--text-2);
 }
+.pad-tuning-label-wide {
+  flex-basis: 4.5rem;
+}
+.pad-tuning-val-wide {
+  flex-basis: 3rem;
+}
 .pad-slider {
   flex: 1;
   min-width: 120px;

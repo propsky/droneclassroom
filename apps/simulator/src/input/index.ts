@@ -20,6 +20,8 @@ import { gamepadConfig, initCalibration, tickCalibration, calibration } from './
 import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
 import { registerBleConnectedChecker } from '../core/execution/mode';
 import { resolveStickSource, type StickAxes } from './padMath';
+import { StickCurve } from './stickCurve';
+import { YawExpoPreference } from './yawExpoPref';
 
 export { isTouchDevice, touchJoysticksShouldShow };
 
@@ -37,6 +39,7 @@ export function registerPadUi(hooks: PadUiHooks): void {
 }
 
 export function initInputs(opts: { toggleView: () => void }): void {
+  YawExpoPreference.hydrate(YawExpoPreference.browserStore());
   initKeyboard(opts);
   initVirtualJoystick();
   initGamepad();
@@ -146,7 +149,10 @@ export function collectControlFrame(): ControlFrame {
   }
   if (stick.pitch !== 0) frame.forward += -stick.pitch;
   if (stick.roll !== 0) frame.right += stick.roll;
-  if (stick.yaw !== 0) frame.yawDelta += -stick.yaw * YAW_STICK_RATE;
+  // 偏航曲線在寫進 ControlFrame 之前套用。預設 expo 0 時 shapeYawStick 原樣返回，
+  // 所以 yawDelta 與改動前的 -stick.yaw * YAW_STICK_RATE 相同。錄製存的是這個結果。
+  const yawStick = StickCurve.shapeYawStick(stick.yaw, YawExpoPreference.get());
+  if (yawStick !== 0) frame.yawDelta += -yawStick * YAW_STICK_RATE;
 
   frame.anyInput =
     !!(

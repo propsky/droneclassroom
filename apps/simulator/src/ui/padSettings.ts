@@ -10,6 +10,7 @@ import {
 import { gamepadState, supportsGamepadApi } from '../input/gamepad';
 import { bleState, isBleSupported } from '../input/ble';
 import { isTouchDevice } from '../input/joystick';
+import { YawExpoPreference } from '../input/yawExpoPref';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -52,6 +53,12 @@ function syncTuningUi(): void {
     invBtn.classList.toggle('on', gamepadConfig.invertThrottle);
   }
 
+  const expo = YawExpoPreference.get();
+  const expoSlider = $('pad-yaw-expo') as HTMLInputElement | null;
+  const expoVal = $('pad-yaw-expo-val');
+  if (expoSlider) expoSlider.value = String(expo);
+  if (expoVal) expoVal.textContent = YawExpoPreference.label(expo);
+
   const gp = gamepadState.connected;
   const ble = bleState.connected;
   if (gamepadOnly) gamepadOnly.style.display = gp ? 'block' : 'none';
@@ -71,6 +78,8 @@ function closeSettings(): void {
 }
 
 export function initPadSettings(): void {
+  YawExpoPreference.hydrate(YawExpoPreference.browserStore());
+
   $('pad-settings-close')?.addEventListener('click', closeSettings);
   $('pad-settings-overlay')?.addEventListener('click', (e) => {
     if (e.target === $('pad-settings-overlay')) closeSettings();
@@ -82,6 +91,14 @@ export function initPadSettings(): void {
     saveGamepadConfig();
     const dzVal = $('pad-dz-val');
     if (dzVal) dzVal.textContent = v.toFixed(2);
+  });
+
+  $('pad-yaw-expo')?.addEventListener('input', (e) => {
+    const v = parseFloat((e.target as HTMLInputElement).value);
+    YawExpoPreference.apply(v);
+    YawExpoPreference.persist(YawExpoPreference.browserStore());
+    const expoVal = $('pad-yaw-expo-val');
+    if (expoVal) expoVal.textContent = YawExpoPreference.label(YawExpoPreference.get());
   });
 
   $('pad-inv-throttle')?.addEventListener('click', () => {
@@ -103,6 +120,8 @@ export function initPadSettings(): void {
 
   $('pad-reset-all')?.addEventListener('click', () => {
     resetGamepadConfig();
+    YawExpoPreference.apply(0);
+    YawExpoPreference.persist(YawExpoPreference.browserStore());
     syncTuningUi();
     toast('已重置搖桿設定', 'success');
   });
