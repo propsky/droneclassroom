@@ -9,8 +9,9 @@
 - 位置級防作弊（base.py）：座標 clamp、速度上限
 - 賽終狀態線上值沿用 legacy 的 'done'（shared/protocol.ts 註記 'ended' 與 legacy 實際不符，
   以 legacy 為準）
-- 場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
-  完整 SoccerFieldDef（含護罩半徑），client 據此渲染。SOCCER_CLASS 選子類
+-     場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
+  完整 SoccerFieldDef（含護罩半徑），client 據此渲染。每間房自己選子類；
+  沒選的房用 SOCCER_CLASS（沒設環境變數時是 F9A-A）。
 - 玩法只有前鋒穿門（SoccerStartMsg.mode='striker'）：只有攻擊手穿對方圓環得分；
     得分後該隊全員先回己方半場才能再攻（F9A.8.4）。沒回完就再穿，這一球不算，不罰球。
     穿環看整顆護罩與行進方向，伺服器不單信 soccer_goal。
@@ -34,7 +35,7 @@ from ..config import Settings
 from ..protocol import SoccerPosMsg, SoccerStartMode
 from ..roster import Roster, StudentRecord, send_safe
 from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
-from .soccer_presets import F9A_A, SoccerClassSpec, preset_for
+from .soccer_presets import F9A_A, SoccerClassCode, SoccerClassSpec, preset_for
 from .soccer_rules import (
     CROSS_GRANT_MS,
     PENALTY_SEC,
@@ -83,6 +84,8 @@ class SoccerField:
     shield_r: float
     start_depth: float
     max_players: int
+    # 子類代碼（F9A-A／F9A-B）。房間列表與換場地都看這個。
+    code: SoccerClassCode = "F9A-A"
 
     @property
     def goal_z(self) -> float:
@@ -104,6 +107,7 @@ class SoccerField:
             shield_r=chosen.shield_r,
             start_depth=chosen.start_depth,
             max_players=chosen.max_players,
+            code=chosen.code,
         )
 
     @classmethod
@@ -181,7 +185,9 @@ class SoccerGame(BaseGame):
         tie_break: str = "pk_then_golden",
     ) -> None:
         super().__init__(roster)
+        self.players: dict[str, SoccerPlayer] = {}
         self.field = field or SoccerField.from_spec(F9A_A)
+        self._bind_field(self.field)
         # 空中機對機接近速度罰牌。預設關（2026 F9A.9 沒有這條）；教學可打開。
         # 打開時走警告 → 黃牌 → 紅牌，不是直接發牌。
         self.air_contact_cards = air_contact_cards
@@ -197,7 +203,6 @@ class SoccerGame(BaseGame):
         self.scores: dict[str, int] = {"blue": 0, "red": 0}
         self.armed: dict[str, bool] = {"blue": True, "red": True}  # 得分隊全員回半場前為 False
         self.winner: str | None = None
-        self.players: dict[str, SoccerPlayer] = {}
         # 三局兩勝。phase：idle / period / break / golden / pk
         self.phase = "idle"
         self.period = 0
@@ -216,28 +221,68 @@ class SoccerGame(BaseGame):
         # 前鋒失能後的暫停換人，每局一次（F9A.8.5）
         self.timeout_used: dict[str, bool] = {"blue": False, "red": False}
         self._contact_latch: set[tuple[str, str]] = set()
-        # 防作弊：位置 clamp 邊界（隨場地設定換算，不留舊尺寸殘值）
+
+    def _bind_field(self, field: SoccerField) -> None:
+        """換上這一組尺寸：邊界、兩隊攻守門。比賽進行中不要呼叫。"""
+        self.field = field
         self._clamp = FieldBounds(
-            max_x=self.field.half_x,
-            max_z=self.field.half_z,
+            max_x=field.half_x,
+            max_z=field.half_z,
             min_y=0.0,
-            max_y=self.field.ceil,
+            max_y=field.ceil,
         )
-        # 每隊站位端 / 攻門 / 守門（z 軸，隨場地換算）：
         # 藍隊站 -z 端、攻 +z 門；紅隊站 +z 端、攻 -z 門。
-        # 門在 goal_z（底線往場內 goal_inset、與 client 門環視覺同位置），不是 half_z 端牆。
-        self._teams: dict[str, dict[str, float]] = {
+        # 門在 goal_z（底線往場內 goal_inset），不是 half_z 端牆。
+        self._teams = {
             "blue": {
-                "stationZ": -self.field.half_z,
-                "attackGoalZ": self.field.goal_z,
-                "defendGoalZ": -self.field.goal_z,
+                "stationZ": -field.half_z,
+                "attackGoalZ": field.goal_z,
+                "defendGoalZ": -field.goal_z,
             },
             "red": {
-                "stationZ": self.field.half_z,
-                "attackGoalZ": -self.field.goal_z,
-                "defendGoalZ": self.field.goal_z,
+                "stationZ": field.half_z,
+                "attackGoalZ": -field.goal_z,
+                "defendGoalZ": field.goal_z,
             },
         }
+        for p in self.players.values():
+            p.x = min(max(p.x, -field.half_x), field.half_x)
+            p.z = min(max(p.z, -field.half_z), field.half_z)
+            p.y = min(max(p.y, 0.0), field.ceil)
+
+    def _fit_roster_to_cap(self) -> None:
+        """換到人數較少的子類時，多出來的人先卸隊。前鋒優先留下。"""
+        cap = self.field.max_players
+        for team in SOCCER_TEAM_NAMES:
+            members = [p for p in self.players.values() if p.team == team and p.active]
+            if len(members) <= cap:
+                self._ensure_striker(team)
+                continue
+            ranked = sorted(members, key=lambda p: (0 if p.striker else 1, p.record.id))
+            keep = {p.record.id for p in ranked[:cap]}
+            for p in members:
+                if p.record.id not in keep:
+                    p.team = None
+                    p.striker = False
+            self._ensure_striker(team)
+
+    async def set_class(self, spec: SoccerClassSpec) -> bool:
+        """換成另一組場地。進行中（含倒數、休息、黃金、PK）拒絕，避免半場改尺寸。
+
+        回 True 表示現在就是這一組（本來就是，或剛換上並廣播）。
+        """
+        if self.field.code == spec.code:
+            return True
+        if self.status not in ("idle", "done"):
+            logger.info("[Soccer] 比賽進行中，拒絕把場地改成 %s", spec.code)
+            return False
+        self._bind_field(SoccerField.from_spec(spec))
+        self._fit_roster_to_cap()
+        if self._active():
+            self._assign_spawns()
+        await self.broadcast_state()
+        logger.info("[Soccer] 場地改為 %s", spec.code)
+        return True
 
     # ---------- 內部狀態 ----------
 

@@ -390,6 +390,15 @@ body {
 .room-flags { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: var(--sp-1); }
 .room-flags .icon { width: 14px; height: 14px; }
 .room-flags .flag-locked { color: var(--warn); display: inline-flex; }
+.room-flags .flag-field {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-full);
+  background: var(--bg-3);
+  color: var(--text-2);
+}
 /* 工具列：寬度夠就同列靠右；380px 欄放不下時整組換到第二列（仍靠右）、列內也可換行（管理名單加入後五顆鈕） */
 .room-tools {
   margin-left: auto;
