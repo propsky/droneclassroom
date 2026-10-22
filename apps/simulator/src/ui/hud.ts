@@ -23,6 +23,22 @@ let wasFlying = false;
 
 const REVIEW_OFF = 'flight-review-off';
 
+function paintReviewGrid(
+  cardId: string | null,
+  gridId: string,
+  stats: FlightReviewStats,
+  sig: string,
+): void {
+  if (cardId) {
+    const card = $(cardId);
+    if (!card || card.hidden) return;
+  }
+  const grid = $(gridId);
+  if (!grid || grid.dataset['sig'] === sig) return;
+  fillFlightReviewGrid(grid, stats);
+  grid.dataset['sig'] = sig;
+}
+
 export function fillFlightReviewGrid(root: HTMLElement, stats: FlightReviewStats): void {
   root.replaceChildren();
   for (const line of FlightReview.lines(stats)) {
@@ -307,8 +323,8 @@ export function updateHudFrame(): void {
     altEl.textContent = alt;
     cache.alt = alt;
   }
-  // velocity 是每 tick 位移 → m/s = |v| * 60
-  const spd = (lenVec3(droneState.velocity) * TICK_HZ).toFixed(1);
+  // 關卡：位置差（程式模式速度向量是 0）。足球：回顧不累計，改看速度向量。
+  const spd = FlightReview.displaySpeedMps(lenVec3(droneState.velocity) * TICK_HZ).toFixed(1);
   if (spdEl && spd !== cache.spd) {
     spdEl.textContent = spd;
     cache.spd = spd;
@@ -326,13 +342,15 @@ export function updateHudFrame(): void {
     }
   }
 
-  const review = FlightReview.lines(FlightReview.snapshot());
-  const tight = (value: string | undefined): string => (value ?? '').replaceAll(' ', '');
-  const air = tight(review[0]?.value);
-  const dist = tight(review[1]?.value);
-  // 即時列空間小，極速只留數字；單位在完整回顧卡上。
-  const top = (review[2]?.value ?? '').replace(' m/s', '').trim();
-  const ceil = tight(review[3]?.value);
+  const stats = FlightReview.snapshot();
+  const review = FlightReview.lines(stats);
+  const line = (label: string): string => review.find((item) => item.label === label)?.value ?? '';
+  const tight = (value: string): string => value.replaceAll(' ', '');
+  const air = tight(line('空中時間'));
+  const dist = tight(line('飛行距離'));
+  // 即時列空間小，極速只留數字；單位在完整回顧卡上。兩邊都讀同一組 lines()。
+  const top = line('最高速度').replace(' m/s', '').trim();
+  const ceil = tight(line('最高高度'));
   const airEl = $('hud-air');
   const distEl = $('hud-dist');
   const topEl = $('hud-top');
@@ -352,6 +370,12 @@ export function updateHudFrame(): void {
   if (ceilEl && ceil !== cache.ceil) {
     ceilEl.textContent = ceil;
     cache.ceil = ceil;
+  }
+  // 降落小卡與過關結算跟即時列用同一份快照，避免一邊還在累加、另一邊停在舊數字。
+  const sig = review.map((item) => item.value).join('|');
+  paintReviewGrid('flight-review', 'flight-review-grid', stats, sig);
+  if ($('level-complete')?.classList.contains('show')) {
+    paintReviewGrid(null, 'level-complete-review', stats, sig);
   }
 
   const flying = droneState.isFlying;

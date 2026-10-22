@@ -14,8 +14,9 @@ const MOVE_ORDER = [
   'mute-btn',
   'view-btn',
   'calib-fab',
-  // 觸控搖桿是開關，盡量留在工具列上（排越後面越晚被收進「更多」）
+  // 觸控搖桿與背景切換盡量留在工具列上（排越後面越晚被收進「更多」）
   'touch-joystick-btn',
+  'scene-env-btn',
 ];
 
 interface HomeSlot {

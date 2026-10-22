@@ -1,6 +1,7 @@
 // 直式手機的選單抽屜與活動關卡抽屜。
 // 版面數字要與 style.css 直式媒體查詢一致（斷點、搖桿直徑、操控帶）。
 // 橫式與桌機不進這個斷點，header／活動入口維持原樣。
+import { SoccerFeelLayout } from './soccerFeelLayout';
 
 export interface Box {
   x: number;
@@ -140,6 +141,7 @@ export class PortraitChrome {
       entryBtn.setAttribute('aria-expanded', String(portrait && entryOpen));
       menuBtn.title = menuOpen ? '關閉選單' : '選單';
       entryBtn.title = entryOpen ? '收合活動關卡' : '活動關卡';
+      SoccerFeelLayout.apply(doc);
     };
 
     menuBtn.addEventListener('click', (event) => {

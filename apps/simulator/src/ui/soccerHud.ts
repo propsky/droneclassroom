@@ -7,6 +7,7 @@ import {
   SOCCER_FEELS,
   type SoccerFeelId,
 } from '../soccer/flightFeel';
+import { SoccerFeelLayout } from './soccerFeelLayout';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -168,6 +169,7 @@ export function showSoccerFeel(on: boolean): void {
   const bar = $('soccer-feel');
   if (!bar) return;
   bar.style.display = on ? 'block' : 'none';
+  if (on) SoccerFeelLayout.apply(document);
   if (!feelWired) {
     feelWired = true;
     bar.querySelectorAll<HTMLButtonElement>('[data-feel]').forEach((btn) => {

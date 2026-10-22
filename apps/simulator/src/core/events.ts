@@ -1,6 +1,6 @@
 // 型別化 event bus — 核心層對外發事件的唯一通道。
 // core 不碰 DOM、不碰 Babylon；render/ 與 ui/ 訂閱這裡的事件做視覺與介面更新。
-import type { ArenaServerMsg, SoccerServerMsg, LevelDef, RoomInfo, RoomRejectedMsg } from '@creafly/shared';
+import type { ArenaServerMsg, SoccerServerMsg, LevelDef, RoomInfo, RoomRejectedMsg, SceneEnv } from '@creafly/shared';
 
 export type ToastKind = '' | 'success' | 'error' | 'warning';
 export type SoundName = 'ring' | 'bump' | 'stop' | 'complete' | 'pop' | 'beep' | 'go';
@@ -16,6 +16,8 @@ export interface CoreEventMap {
   'levels-ready': { levels: LevelDef[] };
   /** 關卡載入完成（render 重建關卡物件、UI 重設 HUD） */
   'level-loaded': { level: LevelDef };
+  /** 學生切換教室／展場背景（關卡 JSON 有 sceneEnv 時那一關仍以關卡為準） */
+  'scene-env-selected': { env: SceneEnv };
   /** 顯示關卡說明 overlay */
   'level-intro': { level: LevelDef };
   /** 學生按「開始」→ 關閉 intro */

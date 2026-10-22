@@ -9,7 +9,7 @@ import { applyLoadLevel, levelState } from './level';
 import { FNV_OFFSET, hashDroneTick, hashToHex } from './simHash';
 import { tickFlightPhysics, tickRecordedLevel } from './simTick';
 import type { ControlFrame } from './physics';
-import { programState, setMode, stopProgram } from './program';
+import { programState, runProgram, setMode, stopProgram } from './program';
 import { bus } from './events';
 import {
   beginFrame,
@@ -68,9 +68,50 @@ describe('FlightReview 累加', () => {
     expect(FlightReview.snapshot()).toEqual({
       airTicks: 2,
       distanceM: 0.6 + 1 + 1.6,
-      topSpeedMps: 1.2,
+      // 位置一 tick 上升 1m → 60 m/s，大於速度向量的 1.2 m/s。實際速率取較大值。
+      topSpeedMps: 60,
       maxAltitudeM: 2,
     });
+  });
+
+  it('速度向量為 0 時仍用位置變化計速度（程式模式）', () => {
+    FlightReview.tick({
+      position: { x: 0, y: 1, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      isFlying: true,
+    });
+    FlightReview.tick({
+      position: { x: 0, y: 1, z: -0.1 },
+      velocity: { x: 0, y: 0, z: 0 },
+      isFlying: true,
+    });
+    expect(FlightReview.snapshot().topSpeedMps).toBeCloseTo(6, 8);
+    expect(FlightReview.instantSpeedMps()).toBeCloseTo(6, 8);
+    expect(FlightReview.displaySpeedMps(0)).toBeCloseTo(6, 8);
+  });
+
+  it('位置沒動時仍採用速度向量', () => {
+    FlightReview.tick({
+      position: { x: 0, y: 2, z: 0 },
+      velocity: { x: 0, y: 0, z: 0 },
+      isFlying: true,
+    });
+    FlightReview.tick({
+      position: { x: 0, y: 2, z: 0 },
+      velocity: { x: 0.02, y: 0, z: 0 },
+      isFlying: true,
+    });
+    expect(FlightReview.snapshot().topSpeedMps).toBeCloseTo(1.2, 8);
+    expect(FlightReview.instantSpeedMps()).toBeCloseTo(1.2, 8);
+  });
+
+  it('即時列與結算四列用同一組飛行距離', () => {
+    const stats = { airTicks: 90, distanceM: 8.6, topSpeedMps: 2.4, maxAltitudeM: 3 };
+    const lines = FlightReview.lines(stats);
+    const distance = lines.find((line) => line.label === '飛行距離')?.value;
+    expect(distance).toBe('8.6 m');
+    expect(lines.filter((line) => line.value.includes('8.6'))).toHaveLength(1);
+    expect(lines.find((line) => line.label === '最高速度')?.value).toBe('2.4 m/s');
   });
 
   it('重置後不會把傳送距離算進下一趟', () => {
@@ -236,5 +277,25 @@ describe('FlightReview 重播決定性', () => {
     expect(second.replayHash).toBe(rec!.replayHash);
     expect(afterFirst).toEqual(live);
     expect(afterSecond).toEqual(afterFirst);
+  });
+
+  it('程式起飛再前進：速度與航程跟位置走，兩處距離是同一個路徑長', async () => {
+    levelState.levels = levels;
+    simTime.tick = 2000;
+    applyLoadLevel('1-2');
+    levelState.armed = true;
+    levelState.startTime = Date.now();
+    bus.emit('level-timing-started', { levelId: levelState.current!.id });
+    setMode('program');
+    runProgram('await CREAFLY.takeoff(3);\nawait CREAFLY.forward(6);');
+    for (let i = 0; i < 500 && programState.running; i++) await renderFrame([idle]);
+
+    const live = FlightReview.snapshot();
+    // 自地面 0.4m 升到 3m（2.6m）再水平前進 6m。
+    expect(live.distanceM).toBeCloseTo(8.6, 1);
+    expect(live.topSpeedMps).toBeGreaterThan(0.5);
+    const distance = FlightReview.lines(live).find((line) => line.label === '飛行距離')?.value;
+    expect(distance).toBe(`${live.distanceM.toFixed(1)} m`);
+    expect(FlightReview.displaySpeedMps(0)).toBeGreaterThanOrEqual(0);
   });
 });

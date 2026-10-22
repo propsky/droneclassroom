@@ -1,6 +1,7 @@
 // 觸控筆電／橫式：虛擬搖桿不能被右下活動入口蓋住，也不能超出畫面。
 // 直式手機交給 PortraitChrome 與 style.css 的直式媒體查詢，這裡不改那組數字。
 import { PortraitChrome } from './portraitChrome';
+import { SoccerFeelLayout } from './soccerFeelLayout';
 
 export interface Box {
   x: number;
@@ -206,6 +207,7 @@ export class TouchJoystickLayout {
       && !doc.body.classList.contains('ble-connected');
     if (PortraitChrome.isPortraitPhone(width, height) || !visible) {
       clear();
+      SoccerFeelLayout.apply(doc);
       return;
     }
     const entryEl = doc.getElementById('entry-group');
@@ -231,5 +233,6 @@ export class TouchJoystickLayout {
     else root.style.removeProperty('--joystick-left');
     if (plan.sizePx !== TouchJoystickLayout.STICK_PX) root.style.setProperty('--joystick-size', `${plan.sizePx}px`);
     else root.style.removeProperty('--joystick-size');
+    SoccerFeelLayout.apply(doc);
   }
 }

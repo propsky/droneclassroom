@@ -5,6 +5,7 @@
 // （單元素 cutout，免 canvas / 免第三方庫）。
 import { bus } from '../core/events';
 import { isTouchDevice } from '../input';
+import { GuidePlacement, type GuideRect } from './guidePlacement';
 
 const LS_DONE = 'creafly_guide_done_v1';
 
@@ -136,23 +137,55 @@ function startTour(): void {
       card.style.maxWidth = `${cw}px`;
       const below = r.bottom + 12;
       const cardH = card.offsetHeight || 160;
+      const cardW = card.offsetWidth || cw;
       const top = below + cardH > window.innerHeight - 12 ? r.top - cardH - 12 : below;
       const left = Math.max(12, Math.min(r.left, window.innerWidth - cw - 12));
-      card.style.top = `${Math.max(12, top)}px`;
-      card.style.left = `${left}px`;
+      const parked = avoidStartButton(
+        { left, top: Math.max(12, top), width: cardW, height: cardH },
+      );
       card.style.transform = 'none';
+      card.style.top = `${parked.top}px`;
+      card.style.left = `${parked.left}px`;
     } else {
-      // 置中卡片（無高亮 → spot 縮成點置中，遮罩仍全覆蓋）
+      // 置中卡片改放上緣。遮罩不吃點擊，卡片再避開關卡說明的「開始」。
       spot.style.display = 'block';
       spot.style.left = '50vw';
       spot.style.top = '46vh';
       spot.style.width = '0px';
       spot.style.height = '0px';
-      card.style.top = '50%';
-      card.style.left = '50%';
-      card.style.transform = 'translate(-50%, -50%)';
+      card.style.transform = 'none';
       card.style.maxWidth = `${Math.min(360, window.innerWidth - 24)}px`;
+      const cardW = Math.min(360, window.innerWidth - 24);
+      const cardH = card.offsetHeight || 180;
+      const parked = GuidePlacement.centered(
+        { width: window.innerWidth, height: window.innerHeight },
+        { width: cardW, height: cardH },
+        startButtonRect(),
+      );
+      card.style.top = `${parked.top}px`;
+      card.style.left = `${parked.left}px`;
     }
+  };
+
+  const startButtonRect = (): GuideRect | null => {
+    const intro = document.getElementById('level-intro');
+    const start = document.getElementById('level-intro-start');
+    if (!intro?.classList.contains('show') || !start) return null;
+    const r = start.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) return null;
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  };
+
+  const avoidStartButton = (cardRect: GuideRect): { left: number; top: number } => {
+    const start = startButtonRect();
+    if (!start || !GuidePlacement.overlaps(cardRect, start)) {
+      return { left: cardRect.left, top: cardRect.top };
+    }
+    return GuidePlacement.avoid(
+      { width: window.innerWidth, height: window.innerHeight },
+      cardRect,
+      start,
+    );
   };
 
   const finish = (): void => {
