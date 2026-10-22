@@ -107,6 +107,25 @@ describe('F9A 階段一 HUD 賽制', () => {
     expect(formatSoccerMatchLine(hud())).toContain('我：藍隊・前鋒');
   });
 
+  it('臺北賽制寫扣分與降落，不寫三局兩勝', () => {
+    const line = formatSoccerMatchLine(
+      hud({
+        ruleset: 'taipei',
+        status: 'running',
+        scores: { blue: 1, red: 1 },
+        deductions: { blue: 0, red: 1 },
+        endTime: 120_000,
+        now: 0,
+      }),
+    );
+    expect(line).toContain('臺北賽制');
+    expect(line).toContain('扣分 0:1');
+    expect(line).not.toContain('三局兩勝');
+    expect(formatSoccerMatchLine(hud({ ruleset: 'taipei', phase: 'landing', endTime: 10_000 }))).toContain(
+      '降落倒數',
+    );
+  });
+
   it('進行中顯示局數、本節比分與回半場', () => {
     const line = formatSoccerMatchLine(
       hud({

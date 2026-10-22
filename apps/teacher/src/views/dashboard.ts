@@ -16,6 +16,7 @@ import type {
   SoccerMatchMeta,
   SoccerMode,
   SoccerPlayerState,
+  SoccerResultInput,
   SoccerTeam,
   StudentInfo,
   TeacherBroadcastPayload,
@@ -23,9 +24,11 @@ import type {
   TeacherToServer,
   TeamInfo,
 } from '@creafly/shared';
-import { ArenaRanking, ClassLevelSend } from '@creafly/shared';
+import { ArenaRanking, ClassLevelSend, SoccerPenaltyLabel } from '@creafly/shared';
 import { ArenaResultsPanel } from './arenaResultsPanel';
 import { SoccerFieldChoice } from './soccerFieldChoice';
+import { SoccerResultsPanel } from './soccerResultsPanel';
+import { SoccerRulesetForm } from './soccerRuleset';
 import type { TeacherArenaMsg, TeacherSoccerMsg } from '../ws';
 import { fetchTeamCurriculum } from '../api';
 import { clearEditorRoute, parseEditorRoute } from '../editorRoute';
@@ -413,9 +416,16 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
               </div>
             </div>
             <div class="card-body">
-              <p class="hint">前鋒穿門：只有攻擊手穿對方圓環得分，得分後該隊還能飛的人要回己方半場。三局兩勝、局間休息；平手先 PK，再黃金進球。打進自己的門不算分。</p>
+              <p class="hint" id="soccer-rules-hint">前鋒穿門：只有攻擊手穿對方圓環得分，得分後該隊還能飛的人要回己方半場。三局兩勝、局間休息；平手先 PK，再黃金進球。打進自己的門不算分。</p>
               <p class="hint" id="soccer-field-hint">本房場地：F9A-A（14×7×5 m，每隊最多 5 人）。到左側「設定」可換成 F9A-B。</p>
               <div class="ctl-grid">
+                <div class="field">
+                  <label class="field-label" for="soccer-rules">賽制</label>
+                  <select id="soccer-rules">
+                    <option value="f9a">F9A（三局兩勝）</option>
+                    <option value="taipei">臺北賽制（單場）</option>
+                  </select>
+                </div>
                 <div class="field">
                   <label class="field-label" for="soccer-dur">每局時長</label>
                   <select id="soccer-dur">
@@ -447,6 +457,17 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
         <div class="arena-results-actions">
           <button type="button" class="btn btn-ghost" id="arena-results-levels">${ICONS.map}前往關卡</button>
           <button type="button" class="btn btn-primary" id="arena-results-again">${ICONS.play}再來一輪</button>
+        </div>
+      </div>
+    </div>
+    <div id="soccer-results" class="arena-results" hidden>
+      <div class="arena-results-card" role="dialog" aria-modal="true" aria-labelledby="soccer-results-title">
+        <p id="soccer-results-kicker" class="arena-results-kicker"></p>
+        <h2 id="soccer-results-title"></h2>
+        <p id="soccer-results-detail"></p>
+        <ol id="soccer-results-list"></ol>
+        <div class="arena-results-actions">
+          <button type="button" class="btn btn-primary" id="soccer-results-close">知道了</button>
         </div>
       </div>
     </div>`;
@@ -793,6 +814,11 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   };
   const phasePrefix = (): string => {
     const m = soccer.match;
+    if (m.ruleset === 'taipei') {
+      if (m.phase === 'landing') return '降落倒數';
+      const d = m.deductions;
+      return d ? `臺北賽制 扣分 ${d.blue}:${d.red}` : '臺北賽制';
+    }
     const sets = `局數 ${m.sets.blue}:${m.sets.red}`;
     if (soccer.status === 'break') return `局間休息 ${sets}`;
     if (soccer.status === 'golden') return `黃金進球 ${sets}`;
@@ -806,11 +832,44 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     soccerPillClock.textContent = text; // 卡頭狀態膠囊同步 mono 倒數
   });
 
+  const soccerRulesSel = root.querySelector<HTMLSelectElement>('#soccer-rules')!;
+  const soccerRulesHint = root.querySelector<HTMLElement>('#soccer-rules-hint')!;
+  const soccerDurLabel = root.querySelector<HTMLElement>('label[for="soccer-dur"]')!;
+  let durationDirty = false;
+  soccerDurSel.addEventListener('change', () => {
+    durationDirty = true;
+  });
+  const paintRulesHint = (): void => {
+    const ruleset = SoccerRulesetForm.parse(soccerRulesSel.value);
+    soccerRulesHint.textContent = SoccerRulesetForm.hint(ruleset);
+    soccerDurLabel.textContent = ruleset === 'taipei' ? '比賽時間' : '每局時長';
+    if (!durationDirty && ruleset === 'taipei' && soccerDurSel.value === '180') {
+      soccerDurSel.value = '120';
+    }
+  };
+  root.querySelector<HTMLButtonElement>('#soccer-results-close')?.addEventListener('click', () => {
+    SoccerResultsPanel.hide(root);
+  });
+  soccerRulesSel.addEventListener('change', () => {
+    const ruleset = SoccerRulesetForm.parse(soccerRulesSel.value);
+    const nextDur = SoccerRulesetForm.durationOnChange(soccerDurSel.value, ruleset);
+    if (nextDur !== soccerDurSel.value) soccerDurSel.value = nextDur;
+    paintRulesHint();
+    const r = currentRoom();
+    if (!r || soccerRulesSel.disabled) return;
+    sendGame(
+      { type: 'room_update', roomCode: r.code, settings: { soccerRuleset: ruleset } },
+      ruleset === 'taipei' ? '本房改為臺北賽制' : '本房改為 F9A',
+    );
+  });
   on('btn-soccer-start', () => {
     const dur = Number.parseInt(soccerDurSel.value, 10) || 180;
+    const ruleset = SoccerRulesetForm.parse(soccerRulesSel.value);
     const ok = sendGame(
-      { type: 'soccer_start', durationSec: dur, mode: 'striker' },
-      `足球賽開始（前鋒穿門，每局 ${dur} 秒，三局兩勝）`,
+      { type: 'soccer_start', durationSec: dur, mode: 'striker', ruleset },
+      ruleset === 'taipei'
+        ? `足球賽開始（臺北賽制，${dur} 秒，單場）`
+        : `足球賽開始（前鋒穿門，每局 ${dur} 秒，三局兩勝）`,
     );
     if (ok) {
       soccer.mode = 'striker';
@@ -834,12 +893,19 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!el) return;
     const id = el.dataset['id'];
+    if (el.dataset['act'] === 'warn-team') {
+      const team: SoccerTeam = el.dataset['team'] === 'red' ? 'red' : 'blue';
+      sendGame({ type: 'soccer_warn', team, reason: 'manual', deduct: true });
+      return;
+    }
     if (!id) return;
     if (el.dataset['act'] === 'striker') {
       sendGame({ type: 'soccer_set_striker', studentId: id });
     } else if (el.dataset['act'] === 'team') {
       const team: SoccerTeam = el.dataset['team'] === 'red' ? 'red' : 'blue';
       sendGame({ type: 'soccer_set_team', studentId: id, team });
+    } else if (el.dataset['act'] === 'warn') {
+      sendGame({ type: 'soccer_warn', studentId: id, reason: 'manual', deduct: true });
     }
   });
 
@@ -848,8 +914,10 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     for (const team of ['blue', 'red'] as const) {
       const other: SoccerTeam = team === 'blue' ? 'red' : 'blue';
       const list = players.filter((p) => p.team === team);
+      const tools = `<div class="soccer-team-tools"><span class="pick" data-act="warn-team" data-team="${team}">全隊警告／扣分</span></div>`;
       rosterEls[team].innerHTML =
-        list.length > 0
+        tools +
+        (list.length > 0
           ? list
               .map(
                 (p) => `<div class="soccer-player${p.striker ? ' striker' : ''}">
@@ -857,10 +925,11 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                   <span class="soccer-name" data-act="striker" data-id="${esc(p.id)}">${esc(p.name || '?')}${p.striker ? `<span class="striker-badge">${ICONS.target}前鋒</span>` : ''}</span>
                   <span class="pick" data-act="striker" data-id="${esc(p.id)}">${p.striker ? '前鋒' : '設為前鋒'}</span>
                   <span class="pick" data-act="team" data-id="${esc(p.id)}" data-team="${other}">${ICONS.swap}換到${other === 'blue' ? '藍隊' : '紅隊'}</span>
+                  <span class="pick" data-act="warn" data-id="${esc(p.id)}">警告／扣分</span>
                 </div>`,
               )
               .join('')
-          : '<div class="empty">尚無人加入</div>';
+          : '<div class="empty">尚無人加入</div>');
     }
   };
 
@@ -878,9 +947,14 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     soccerStartBtn.disabled = live; // 開始鈕 disabled 不隱藏（版面不跳）
     soccerPill.hidden = !live && status !== 'done';
     soccerPill.classList.toggle('live', live);
+    const taipei = soccer.match.ruleset === 'taipei';
+    const fieldLive = ['countdown', 'running', 'break', 'golden', 'pk'].includes(status);
+    soccerRulesSel.disabled = fieldLive;
     soccerPillLabel.textContent =
       status === 'running'
-        ? '進行中'
+        ? soccer.match.phase === 'landing'
+          ? '降落倒數'
+          : '進行中'
         : status === 'countdown'
           ? '即將開始'
           : status === 'break'
@@ -897,8 +971,15 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     if (timed && endTime) {
       soccerClock.run(endTime);
     } else if (status === 'done') {
-      const sets = soccer.mode === 'striker' ? `局數 ${soccer.match.sets.blue}:${soccer.match.sets.red}` : '';
-      drawScore(sets ? `結束 ${sets}` : '結束');
+      if (taipei) {
+        const d = soccer.match.deductions ?? { blue: 0, red: 0 };
+        const netB = soccer.scores.blue - d.blue;
+        const netR = soccer.scores.red - d.red;
+        drawScore(`結束 淨分 ${netB}:${netR}`);
+      } else {
+        const sets = soccer.mode === 'striker' ? `局數 ${soccer.match.sets.blue}:${soccer.match.sets.red}` : '';
+        drawScore(sets ? `結束 ${sets}` : '結束');
+      }
     } else if (status === 'countdown') {
       drawScore('3-2-1…');
     } else {
@@ -907,11 +988,37 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     // armed：得分的那台攻擊手須回己方半場才能再得分
     const armedText = (ok: boolean): string =>
       ok ? '<span class="armed-ok">可得分</span>' : '<span class="armed-no">攻擊手須回半場</span>';
-    soccerArmedEl.innerHTML =
-      (status === 'running' || status === 'golden') && soccer.mode === 'striker'
-        ? `得分狀態：藍隊 ${armedText(armed.blue)} ｜ 紅隊 ${armedText(armed.red)}`
+    const ded = soccer.match.deductions;
+    const taipeiLine =
+      taipei && ded
+        ? `扣分：藍隊 ${ded.blue} ｜ 紅隊 ${ded.red}` +
+          (soccer.match.firstGoal === 'blue' || soccer.match.firstGoal === 'red'
+            ? ` ｜ 先進球 ${soccer.match.firstGoal === 'blue' ? '藍隊' : '紅隊'}`
+            : '')
         : '';
+    soccerArmedEl.innerHTML =
+      taipei && soccer.match.phase === 'landing'
+        ? '時間到：10 秒內降落到地面。還沒落地的人各扣 1 分。'
+        : (status === 'running' || status === 'golden') && soccer.mode === 'striker'
+          ? `得分狀態：藍隊 ${armedText(armed.blue)} ｜ 紅隊 ${armedText(armed.red)}${taipeiLine ? ` ｜ ${taipeiLine}` : ''}`
+          : taipeiLine;
   };
+
+  const soccerResultOf = (msg: {
+    winner: SoccerResultInput['winner'];
+    scores: SoccerResultInput['goals'];
+    reason: string;
+    match?: SoccerMatchMeta;
+  }): SoccerResultInput => ({
+    ruleset: msg.match?.ruleset === 'taipei' ? 'taipei' : 'f9a',
+    winner: msg.winner,
+    goals: msg.scores,
+    deductions: msg.match?.deductions,
+    firstGoal: msg.match?.firstGoal,
+    sets: msg.match?.sets,
+    pkScores: msg.match?.pkScores,
+    reason: msg.reason,
+  });
 
   // ---- 班級 / 房間管理：班級列（切房 / 開班級的房 / 新增班級）＋ 名冊卡頭（房碼 / 鎖房 / 設定 / 關閉 / 封存）＋ 名冊移出 ----
   // 狀態以伺服器 room_list 為準；roomCode 由 ws 層對賽局/廣播訊息統一補上，這裡只在 room_* 訊息帶目標房碼。
@@ -1082,6 +1189,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     if (fieldHint) {
       fieldHint.textContent = `本房場地：${SoccerFieldChoice.label(fieldCode)}。到左側「設定」可更換；比賽進行中不能改。`;
     }
+    if (document.activeElement !== soccerRulesSel) {
+      soccerRulesSel.value = r.soccerRuleset === 'taipei' ? 'taipei' : 'f9a';
+      paintRulesHint();
+    }
+    const rulesLive = ['countdown', 'running', 'break', 'golden', 'pk'].includes(r.soccerStatus);
+    soccerRulesSel.disabled = rulesLive;
     roomLockBtn.innerHTML = r.locked ? `${ICONS.lock}開放` : `${ICONS.lockOpen}鎖房`;
     roomLockBtn.classList.toggle('btn-warning', r.locked);
     roomLockBtn.title = r.locked ? '目前鎖房中（新學生無法加入）；點擊開放加入' : '鎖房後新學生無法加入，已在房內的不受影響';
@@ -1430,6 +1543,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           applySoccerMatch(msg.match);
           renderSoccerRoster(msg.players);
           renderSoccerScore();
+          if (msg.status !== 'done') SoccerResultsPanel.hide(root);
           break;
         case 'soccer_players':
           renderSoccerRoster(msg.players);
@@ -1449,7 +1563,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           );
           break;
         case 'soccer_warning':
-          toast(`警告：${msg.byName || '?'}（${msg.reason || '警告'} 第 ${msg.count} 次）`, 'error');
+          toast(
+            msg.deduction
+              ? `扣分：${msg.byName || '?'} ${SoccerPenaltyLabel.text(msg.reason)}（${msg.team === 'red' ? '紅隊' : '藍隊'} -${msg.deduction}）`
+              : `警告：${msg.byName || '?'}（${SoccerPenaltyLabel.text(msg.reason)} 第 ${msg.count} 次）`,
+            'error',
+          );
           break;
         case 'soccer_safety':
           toast(`安全事件：${msg.byName || '?'} 本局少一人`, 'error');
@@ -1474,16 +1593,15 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           soccer.status = 'done';
           applySoccerMatch(msg.match);
           renderSoccerScore();
-          // 結束原因：老師手動停止 / 切換關卡（智能停止）→ 提示原因；其餘照舊報勝負
+          // 結束原因：老師手動停止 / 切換關卡（智能停止）→ 提示原因；其餘打開結算
           if (msg.reason === 'teacher_stop') {
+            SoccerResultsPanel.hide(root);
             toast('已手動停止', 'info');
           } else if (msg.reason === 'level_switch') {
+            SoccerResultsPanel.hide(root);
             toast('已切換關卡，比賽結束', 'info');
           } else {
-            toast(
-              msg.winner === 'blue' ? '藍隊勝！' : msg.winner === 'red' ? '紅隊勝！' : '平手',
-              'success',
-            );
+            SoccerResultsPanel.show(root, soccerResultOf(msg));
           }
           break;
       }
