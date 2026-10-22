@@ -485,7 +485,7 @@
         <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。飛行：A=起飛、B=降落、X=重置。選單：A=確認、B=返回、Y / Back=關卡、START=暫停。</p>
         <div id="pad-settings-gamepad-only" class="pad-section">
             <button type="button" id="pad-start-calib" class="pad-btn-primary">開始校正精靈</button>
-            <p class="pad-note">約 30 秒：量測置中與行程、對映起飛／降落／重置按鍵。非標準手把建議跑一次。</p>
+            <p class="pad-note">依你的動作辨認軸與按鈕。沒有搖桿時，鍵盤和畫面搖桿仍用開始鍵起飛。解鎖開關可以跳過。</p>
         </div>
         <button type="button" id="pad-reset-all" class="pad-btn-ghost">重置所有搖桿設定</button>
         <div class="pad-settings-actions">
@@ -501,27 +501,52 @@
     <button type="button" id="pad-hint-dismiss" class="pad-hint-dismiss">知道了</button>
 </div>
 
-<!-- 搖桿校正精靈（8 步驟；狀態機在 src/input/calibration.ts、渲染在 src/ui/calibrationOverlay.ts） -->
+<!-- 搖桿校正精靈（狀態機在 src/input/calibration.ts、渲染在 src/ui/calibrationOverlay.ts） -->
 <div id="calib-overlay">
-    <div class="calib-card">
-        <h2><span class="btn-ic" data-icon="gamepad" data-icon-size="20"></span>搖桿校正精靈</h2>
-        <div class="calib-subtitle">花 30 秒告訴程式你的搖桿怎麼對應，之後永遠不用再調</div>
+    <div class="calib-card" role="dialog" aria-modal="true" aria-labelledby="calib-title">
+        <h2 id="calib-title"><span class="btn-ic" data-icon="gamepad" data-icon-size="20"></span>搖桿校正精靈</h2>
+        <p class="calib-subtitle" id="calib-mode-note"></p>
+        <div class="calib-diagram" id="calib-diagram"></div>
         <div class="calib-step" id="calib-step-label">準備中…</div>
-        <div class="calib-hint" id="calib-hint">請插上搖桿後開始</div>
+        <p class="calib-hint" id="calib-hint"></p>
         <div class="calib-progress" id="calib-progress"></div>
-        <div class="calib-timer-wrap" id="calib-timer-wrap" style="display:none;">
-            <div class="calib-timer-text" id="calib-timer-text">5s</div>
+        <div class="calib-letgo" id="calib-letgo" hidden>
+            <div class="calib-timer-text" id="calib-timer-text"></div>
             <div class="calib-timer-bar"><div class="calib-timer-fill" id="calib-timer-fill"></div></div>
+            <button type="button" id="calib-hands-off" class="btn-save">手放開了</button>
         </div>
-        <div class="calib-live">
-            <div class="calib-axes" id="calib-axes">axes: 0.00 | 0.00 | 0.00 | 0.00</div>
+        <div class="calib-seen" id="calib-seen" hidden>
+            <p id="calib-seen-text"></p>
+            <p id="calib-also-seen" hidden></p>
+            <div class="calib-seen-actions">
+                <button type="button" id="calib-confirm" class="btn-save">就用這個</button>
+                <button type="button" id="calib-skip-inline" class="btn-skip">跳過</button>
+            </div>
+        </div>
+        <p class="calib-callout" id="calib-idle" hidden></p>
+        <p class="calib-callout warn" id="calib-occupied" hidden></p>
+        <p class="calib-callout" id="calib-motion" hidden></p>
+        <p class="calib-callout" id="calib-extra" hidden></p>
+        <p class="calib-callout warn" id="calib-mismatch" hidden></p>
+        <button type="button" id="calib-partial" class="btn-save" hidden>就用目前看到的</button>
+        <div class="calib-live" id="calib-live">
+            <div class="calib-live-title">即時輸入（從第一步就開著）</div>
+            <div class="calib-axes" id="calib-axes"></div>
             <div class="calib-btns" id="calib-btns"></div>
+            <p class="calib-note" id="calib-missing" hidden></p>
+            <p class="calib-note" id="calib-hat"></p>
         </div>
-        <div class="calib-result" id="calib-result" style="display:none;"></div>
+        <div class="calib-picks" id="calib-picks">
+            <div class="calib-live-title">手動點選（隨時可用）</div>
+            <div class="calib-pick-row" id="calib-pick-axes"></div>
+            <div class="calib-pick-row" id="calib-pick-buttons"></div>
+            <button type="button" id="calib-listen-all" class="btn-skip">全部再聽</button>
+        </div>
+        <div class="calib-result" id="calib-result" hidden></div>
         <div class="calib-actions">
-            <button class="btn-skip" id="calib-skip">跳過此步</button>
-            <button class="btn-cancel" id="calib-cancel">取消</button>
-            <button class="btn-save" id="calib-save" style="display:none;">儲存並套用</button>
+            <button type="button" class="btn-skip" id="calib-skip">跳過</button>
+            <button type="button" class="btn-cancel" id="calib-cancel">取消</button>
+            <button type="button" class="btn-save" id="calib-save" hidden>儲存並套用</button>
         </div>
     </div>
 </div>

@@ -2108,12 +2108,17 @@ body,
 #calib-overlay.show {
   display: flex;
 }
+#calib-overlay [hidden] {
+  display: none !important;
+}
 #calib-overlay .calib-card {
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   padding: var(--sp-5);
-  width: min(540px, 92vw);
+  width: min(680px, 94vw);
+  max-height: min(92vh, 920px);
+  overflow: auto;
   box-shadow: var(--shadow-2);
 }
 #calib-overlay h2 {
@@ -2207,7 +2212,10 @@ body,
   justify-content: flex-end;
   margin-top: var(--sp-5);
 }
-#calib-overlay .calib-actions button {
+#calib-overlay .calib-actions button,
+#calib-overlay .calib-seen-actions button,
+#calib-overlay .calib-letgo button,
+#calib-overlay #calib-partial {
   height: 40px;
   padding: 0 var(--sp-5);
   border-radius: var(--r-sm);
@@ -2273,6 +2281,146 @@ body,
   height: 100%;
   width: 0%;
   transition: width 0.1s linear;
+}
+#calib-overlay .calib-diagram {
+  margin: var(--sp-3) 0;
+}
+#calib-overlay .calib-sticks {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: center;
+}
+#calib-overlay .calib-stick {
+  flex: 1;
+  max-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-2) var(--sp-3);
+  text-align: center;
+  opacity: 0.5;
+}
+#calib-overlay .calib-stick.on {
+  opacity: 1;
+  border-color: var(--warn);
+  box-shadow: 0 0 0 1px var(--warn);
+}
+#calib-overlay .calib-stick b {
+  display: block;
+  font-size: var(--fs-sm);
+}
+#calib-overlay .calib-stick i {
+  display: block;
+  width: 52px;
+  height: 52px;
+  margin: var(--sp-2) auto;
+  border-radius: var(--r-full);
+  border: 2px solid var(--text-2);
+  position: relative;
+}
+#calib-overlay .calib-stick i::before,
+#calib-overlay .calib-stick i::after {
+  content: '';
+  position: absolute;
+  background: var(--text-3);
+}
+#calib-overlay .calib-stick i::before {
+  left: 50%;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  margin-left: -1px;
+}
+#calib-overlay .calib-stick i::after {
+  top: 50%;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  margin-top: -1px;
+}
+#calib-overlay .calib-stick small {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+#calib-overlay .calib-letgo,
+#calib-overlay .calib-seen {
+  margin: var(--sp-3) 0;
+}
+#calib-overlay .calib-seen {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3);
+}
+#calib-overlay .calib-seen p,
+#calib-overlay .calib-callout,
+#calib-overlay .calib-note {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+#calib-overlay .calib-seen-actions,
+#calib-overlay .calib-letgo {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+#calib-overlay .calib-callout {
+  background: var(--bg-0);
+  border-left: 3px solid var(--brand);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+}
+#calib-overlay .calib-callout.warn {
+  border-left-color: var(--warn);
+}
+#calib-overlay .calib-live-title {
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+  margin-bottom: var(--sp-2);
+}
+#calib-overlay .calib-axis-row {
+  color: var(--brand);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+#calib-overlay .calib-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+}
+#calib-overlay .calib-pick {
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+#calib-overlay .calib-pick.on {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+#calib-overlay .calib-actions button,
+#calib-overlay .calib-seen-actions button,
+#calib-overlay .calib-letgo button,
+#calib-overlay #calib-partial,
+#calib-overlay #calib-listen-all {
+  cursor: pointer;
+}
+#calib-overlay .btn-skip.prominent {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #1b1408;
+}
+#calib-overlay #calib-partial {
+  margin: var(--sp-2) 0;
 }
 
 /* =============================================================================
