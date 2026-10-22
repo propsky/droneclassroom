@@ -13,9 +13,12 @@ function store(initial?: Record<string, string>): PrefStore & { bag: Map<string,
   };
 }
 
-function env(coarse: boolean) {
+function env(coarse: boolean, anyCoarse = coarse) {
   return {
-    matchMedia: (query: string) => ({ matches: query === '(pointer: coarse)' && coarse }),
+    matchMedia: (query: string) => ({
+      matches:
+        (query === '(pointer: coarse)' && coarse) || (query === '(any-pointer: coarse)' && anyCoarse),
+    }),
   };
 }
 
@@ -36,6 +39,26 @@ describe('TouchJoystickPreference', () => {
   it('沒存過走裝置預設：coarse 顯示、滑鼠桌機隱藏', () => {
     expect(TouchJoystickPreference.resolve(null, true)).toBe(true);
     expect(TouchJoystickPreference.resolve(null, false)).toBe(false);
+    expect(TouchJoystickPreference.deviceShowsJoysticks(env(true))).toBe(true);
+    expect(TouchJoystickPreference.deviceShowsJoysticks(env(false))).toBe(false);
+    expect(TouchJoystickPreference.deviceShowsJoysticks(null)).toBe(false);
+  });
+
+  it('觸控筆電（pointer fine + any-pointer coarse）預設顯示，純滑鼠不顯示', () => {
+    expect(TouchJoystickPreference.primaryPointerIsCoarse(env(false, true))).toBe(false);
+    expect(TouchJoystickPreference.anyPointerIsCoarse(env(false, true))).toBe(true);
+    expect(TouchJoystickPreference.deviceShowsJoysticks(env(false, true))).toBe(true);
+    expect(TouchJoystickPreference.resolve(null, TouchJoystickPreference.deviceShowsJoysticks(env(false, true)))).toBe(
+      true,
+    );
+    expect(TouchJoystickPreference.deviceShowsJoysticks(env(false, false))).toBe(false);
+    expect(
+      TouchJoystickPreference.anyPointerIsCoarse({
+        matchMedia: () => {
+          throw new Error('不支援');
+        },
+      }),
+    ).toBe(false);
   });
 
   it('?joystick=1 在沒有手動選擇時強制顯示', () => {

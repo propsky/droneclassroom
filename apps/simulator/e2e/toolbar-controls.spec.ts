@@ -41,9 +41,11 @@ test.describe('頂部工具列：模擬器／真機與觸控搖桿', () => {
   test('非觸控預設隱藏虛擬搖桿，手動選擇會記住並蓋過預設', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await guestLogin(page, '搖桿');
-    const coarse = await page.evaluate(() => window.matchMedia('(pointer: coarse)').matches);
+    const showByDevice = await page.evaluate(
+      () => window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(any-pointer: coarse)').matches,
+    );
     const stick = page.locator('#joystick-left');
-    if (coarse) await expect(stick).toBeVisible();
+    if (showByDevice) await expect(stick).toBeVisible();
     else await expect(stick).toBeHidden();
 
     await openToolsIfPortrait(page);
@@ -51,17 +53,17 @@ test.describe('頂部工具列：模擬器／真機與觸控搖桿', () => {
     await expect(toggle).toBeVisible();
     await toggle.click();
     const afterClick = await page.evaluate(() => document.body.classList.contains('touch-joysticks'));
-    expect(afterClick).toBe(!coarse);
+    expect(afterClick).toBe(!showByDevice);
     const saved = await page.evaluate(() => localStorage.getItem('creafly_touch_joysticks'));
-    expect(saved).toBe(coarse ? '0' : '1');
-    if (coarse) await expect(stick).toBeHidden();
+    expect(saved).toBe(showByDevice ? '0' : '1');
+    if (showByDevice) await expect(stick).toBeHidden();
     else await expect(stick).toBeVisible();
 
     await page.reload();
     await page.locator('#level-intro-start').click({ timeout: 15_000 }).catch(() => undefined);
     await openToolsIfPortrait(page);
-    if (coarse) await expect(stick).toBeHidden();
+    if (showByDevice) await expect(stick).toBeHidden();
     else await expect(stick).toBeVisible();
-    await expect(page.locator('#touch-joystick-btn')).toHaveAttribute('aria-pressed', coarse ? 'false' : 'true');
+    await expect(page.locator('#touch-joystick-btn')).toHaveAttribute('aria-pressed', showByDevice ? 'false' : 'true');
   });
 });

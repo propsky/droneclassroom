@@ -2,7 +2,7 @@
 // 左桿：上下 = 升降（throttle）、左右 = 旋轉（yaw）
 // 右桿：上下 = 前後（pitch）、左右 = 左右平移（roll）
 // 軸向對齊 W3C 慣例：推上 = 負值。
-// 要不要畫出來由 TouchJoystickPreference 決定（主要指標 coarse，或使用者手動打開）。
+// 要不要畫出來由 TouchJoystickPreference 決定（主要指標 coarse、有觸控螢幕，或使用者手動打開）。
 import nipplejs from 'nipplejs';
 import { isManualLocked } from '../core/droneState';
 import { TouchJoystickPreference } from './touchJoystickPref';
@@ -21,6 +21,7 @@ interface StickManager {
 }
 
 const managers: StickManager[] = [];
+let lastZoneWidth = 0;
 
 function browserStore(): Storage | null {
   try {
@@ -39,12 +40,19 @@ export function primaryPointerIsCoarse(): boolean {
 /** 給新手引導、連線提示用：這台裝置的主要指標是不是觸控。 */
 export const isTouchDevice: boolean = primaryPointerIsCoarse();
 
+/** 讓位（右下活動入口／安全區）。ui 在啟動時註冊，input 不直接依賴畫面元件。 */
+let syncLayout: () => void = () => undefined;
+
+export function registerJoystickLayout(fn: () => void): void {
+  syncLayout = fn;
+}
+
 /** 這一頁虛擬搖桿應不應該出現（含 localStorage 與 ?joystick=1）。 */
 export function touchJoysticksShouldShow(): boolean {
   const urlForced = typeof location !== 'undefined' && new URLSearchParams(location.search).has('joystick');
   return TouchJoystickPreference.resolve(
     TouchJoystickPreference.readOverride(browserStore()),
-    primaryPointerIsCoarse(),
+    TouchJoystickPreference.deviceShowsJoysticks(typeof window === 'undefined' ? null : window),
     urlForced,
   );
 }
@@ -75,6 +83,7 @@ function mountSticks(): void {
 
   // 圓盤跟區域一起縮（直式把區域收到 132，避免左右桿互壓）。橫式區域仍是 170 → 維持 130。
   const zoneWidth = Math.min(leftZone.clientWidth || 170, rightZone.clientWidth || 170);
+  lastZoneWidth = zoneWidth;
   const nippleSize = Math.min(130, Math.max(96, Math.round(zoneWidth - 8)));
   const commonOpts = {
     mode: 'static' as const,
@@ -120,12 +129,22 @@ function mountSticks(): void {
   managers.push(leftStick, rightStick);
 }
 
+function relayoutSticks(): void {
+  syncLayout();
+  if (!document.body.classList.contains('touch-joysticks')) return;
+  const zone = document.getElementById('joystick-left');
+  const width = zone?.clientWidth ?? 0;
+  if (managers.length === 0 || Math.abs(width - lastZoneWidth) > 1) mountSticks();
+}
+
 /** 依解析結果掛上或拆掉 body.touch-joysticks。隱藏時軸歸零，避免看不見的搖桿還在推飛機。 */
 export function applyTouchJoystickVisibility(visible = touchJoysticksShouldShow()): void {
   document.body.classList.toggle('touch-joysticks', visible);
   zeroStick();
+  syncLayout();
   if (!visible) {
     destroySticks();
+    lastZoneWidth = 0;
     return;
   }
   mountSticks();
@@ -133,6 +152,9 @@ export function applyTouchJoystickVisibility(visible = touchJoysticksShouldShow(
 
 export function initVirtualJoystick(): void {
   applyTouchJoystickVisibility();
+  const onResize = (): void => relayoutSticks();
+  window.addEventListener('resize', onResize);
+  window.visualViewport?.addEventListener('resize', onResize);
 }
 
 /** 工具列按下「觸控搖桿」：寫入選擇並立刻套用。 */
