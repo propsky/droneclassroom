@@ -459,7 +459,8 @@ body:not(.gamepad-connected):not(.ble-connected) .header-btn-calib {
   box-shadow: var(--shadow-2);
   padding: var(--sp-4);
   min-width: 300px;
-  max-height: 70vh;
+  /* 搖桿出現時 --joystick-band 把選單停在圓盤之上；沒設時仍是 70vh */
+  max-height: min(70vh, calc(100dvh - var(--header-h, 56px) - var(--joystick-band, 0px) - var(--sp-3)));
   overflow-y: auto;
 }
 .level-selector.open .level-menu-panel {
@@ -1136,7 +1137,9 @@ body.ble-connected #help-gamepad {
 }
 
 /* =============================================================================
- * 虛擬搖桿（body.touch-joysticks：主要指標 coarse，或工具列／?joystick=1 打開）
+ * 虛擬搖桿（body.touch-joysticks：主要指標 coarse、有觸控螢幕，或工具列／?joystick=1）
+ * 筆電寬度由 TouchJoystickLayout 寫入 --entry-lift / --joystick-right / --joystick-size，
+ * 讓右下活動入口不要蓋住右桿。直式媒體查詢在檔案底部覆寫這些變數。
  * ========================================================================== */
 #joystick-layer {
   position: absolute;
@@ -1151,18 +1154,18 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
 .joystick-zone {
   position: absolute;
   bottom: var(--sp-5);
-  width: 170px;
-  height: 170px;
+  width: var(--joystick-size, 170px);
+  height: var(--joystick-size, 170px);
   pointer-events: auto;
   border-radius: var(--r-full);
   background: color-mix(in srgb, var(--bg-0) 15%, transparent);
   border: 1px dashed color-mix(in srgb, var(--text-1) 40%, transparent);
 }
 #joystick-left {
-  left: var(--sp-6);
+  left: var(--joystick-left, var(--sp-6));
 }
 #joystick-right {
-  right: var(--sp-6);
+  right: var(--joystick-right, var(--sp-6));
 }
 .joystick-label {
   position: absolute;
@@ -1739,7 +1742,8 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
 #entry-group {
   position: fixed;
   right: var(--sp-4);
-  bottom: var(--sp-4);
+  /* 觸控搖桿出現且畫面夠高時，TouchJoystickLayout 把這欄抬到圓盤之上 */
+  bottom: var(--entry-lift, var(--sp-4));
   z-index: var(--z-overlay-btn);
   display: flex;
   flex-direction: column;
