@@ -630,11 +630,11 @@ class RoomInfo(BaseModel):
     # 主房（code = 班級碼）或分房（一班多房；獨立產碼）；非班級房恆為 True
     isMain: bool = True
     # 實際採用的場地。舊客戶端會忽略這兩個欄位。
-    soccerClass: Literal["F9A-A", "F9A-B"] = "F9A-A"
-    # False = 沒釘選，跟著伺服器 SOCCER_CLASS（沒設環境變數時就是上面的 F9A-A）
+    soccerClass: Literal["F9A-A", "F9A-B"] = "F9A-B"
+    # False = 沒釘選。臺北賽制時實際場地仍是 F9A-B，不看這面旗。
     soccerClassPinned: bool = False
-    # 實際賽制。沒釘選就是 f9a。
-    soccerRuleset: Literal["f9a", "taipei"] = "f9a"
+    # 實際賽制。沒釘選就是臺北賽制。
+    soccerRuleset: Literal["f9a", "taipei"] = "taipei"
 
 
 class TeamInfo(BaseModel):

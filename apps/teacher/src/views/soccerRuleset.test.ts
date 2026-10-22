@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { SoccerRulesetForm } from './soccerRuleset';
 
 describe('SoccerRulesetForm', () => {
-  it('未知值回到 F9A', () => {
-    expect(SoccerRulesetForm.parse(undefined)).toBe('f9a');
-    expect(SoccerRulesetForm.parse('taipei')).toBe('taipei');
+  it('沒寫就是臺北賽制，進階 F9A 要明確指定', () => {
+    expect(SoccerRulesetForm.parse(undefined)).toBe('taipei');
+    expect(SoccerRulesetForm.parse('f9a')).toBe('f9a');
+    expect(SoccerRulesetForm.locksField('taipei')).toBe(true);
+    expect(SoccerRulesetForm.locksField('f9a')).toBe(false);
+    expect(SoccerRulesetForm.fieldNote('taipei')).toContain('不能改成大場');
   });
 
   it('臺北賽制說明含先進球與扣分，F9A 說明不含', () => {

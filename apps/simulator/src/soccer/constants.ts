@@ -94,46 +94,48 @@ export const SOCCER_PRESETS: Record<SoccerClassCode, SoccerClassPreset> = {
   'F9A-B': F9A_B,
 };
 
-export const DEFAULT_SOCCER_CLASS: SoccerClassCode = 'F9A-A';
+/** 沒有伺服器場地時用的子類。臺北賽制是預設，固定配 F9A-B 小場。 */
+export const DEFAULT_SOCCER_CLASS: SoccerClassCode = 'F9A-B';
+
+const DEFAULT_PRESET = F9A_B;
 
 /**
- * 起飛區進深（沿 z、往場內）。F9A-A 為 1.5 m（F9A.2.2）。
+ * 起飛區進深（沿 z、往場內）。預設是 F9A-B 的 1 m。
  * 多人若伺服器下發 startDepth，以 field.ts 的生效值為準。
  */
-export const SOCCER_START_DEPTH = F9A_A.startDepth;
+export const SOCCER_START_DEPTH = DEFAULT_PRESET.startDepth;
 /**
  * 單人練習的起飛區長度（沿 x）= 1 人 × 球徑。
  * 多人長度 = 人數 × 球徑，由伺服器依上場人數下發 startWidth。
  */
-export const SOCCER_START_WIDTH = F9A_A.shieldR * 2;
+export const SOCCER_START_WIDTH = DEFAULT_PRESET.shieldR * 2;
 
 /**
- * 生效 fallback／單人練習場地：預設 F9A-A。
- * 長軸 z（兩門連線）、寬 x、中線 z=0。
+ * 生效 fallback／單人練習場地：預設 F9A-B（6×3×3）。
+ * 長軸 z（兩門連線）、寬 x、中線 z=0。進階 F9A 大場由伺服器下發，不寫在這裡。
  */
 export const SOCCER_FIELD = {
-  halfX: F9A_A.halfX,
-  halfZ: F9A_A.halfZ,
-  top: F9A_A.top,
+  halfX: DEFAULT_PRESET.halfX,
+  halfZ: DEFAULT_PRESET.halfZ,
+  top: DEFAULT_PRESET.top,
   /** 球門面 |z| = halfZ − 離底線 */
-  goalZ: F9A_A.halfZ - F9A_A.goalInset,
-  goalY: F9A_A.goalY,
-  goalR: F9A_A.goalR,
-  goalTube: F9A_A.goalTube,
+  goalZ: DEFAULT_PRESET.halfZ - DEFAULT_PRESET.goalInset,
+  goalY: DEFAULT_PRESET.goalY,
+  goalR: DEFAULT_PRESET.goalR,
+  goalTube: DEFAULT_PRESET.goalTube,
   /** 單人練習起飛區中心 z（貼 +z 底線內側） */
-  startZ: F9A_A.halfZ - SOCCER_START_DEPTH / 2,
-  shieldR: F9A_A.shieldR,
+  startZ: DEFAULT_PRESET.halfZ - SOCCER_START_DEPTH / 2,
+  shieldR: DEFAULT_PRESET.shieldR,
 } as const;
 
 /** 球門面離底線（與預設子類 goalInset 同一份） */
-export const SOCCER_GOAL_INSET = F9A_A.goalInset;
+export const SOCCER_GOAL_INSET = DEFAULT_PRESET.goalInset;
 
 /**
- * 球形護罩半徑。F9A-A 直徑 40 cm（F9A.1.1：40 cm +2 cm）。
- * 小於內半徑，中心才過得了洞；擦到框仍會被擋。
+ * 球形護罩半徑。預設 F9A-B 直徑 20 cm。
  * 多人若伺服器下發 shieldR，以 field.ts 的生效值為準，這份是 fallback。
  */
-export const SOCCER_BALL_R = F9A_A.shieldR;
+export const SOCCER_BALL_R = DEFAULT_PRESET.shieldR;
 
 /** 隊色（與 legacy SOCCER_TEAM_COLORS 相同） */
 export const SOCCER_TEAM_COLORS: Record<SoccerTeam, number> = {

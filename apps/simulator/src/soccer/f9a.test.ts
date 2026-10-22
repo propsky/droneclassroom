@@ -17,46 +17,50 @@ import {
 import { soccerBoundaryMarkSize } from './field';
 import { formatSoccerMatchLine, type SoccerHudInput } from '../ui/soccerHud';
 
+describe('預設場地', () => {
+  it('預設是臺北賽制的 F9A-B 小場，不是 14 m 大場', () => {
+    expect(DEFAULT_SOCCER_CLASS).toBe('F9A-B');
+    expect(SOCCER_FIELD.halfX * 2).toBe(3);
+    expect(SOCCER_FIELD.halfZ * 2).toBe(6);
+    expect(SOCCER_FIELD.top).toBe(3);
+    expect(SOCCER_FIELD.goalR).toBe(F9A_B.goalR);
+    expect(SOCCER_FIELD.shieldR).toBe(F9A_B.shieldR);
+    expect(SOCCER_BALL_R).toBeCloseTo(0.1);
+    expect(SOCCER_START_DEPTH).toBe(1);
+    expect(SOCCER_GOAL_INSET).toBe(1);
+    expect(SOCCER_FIELD.goalZ).toBeCloseTo(2);
+    expect(SOCCER_FIELD.startZ).toBeCloseTo(SOCCER_FIELD.halfZ - 0.5);
+    expect(SOCCER_BALL_R).toBeLessThan(SOCCER_FIELD.goalR);
+  });
+});
+
 describe('F9A-A 場地與圓環', () => {
-  it('預設就是 F9A-A，場地 14×7×5', () => {
-    expect(DEFAULT_SOCCER_CLASS).toBe('F9A-A');
-    expect(SOCCER_FIELD.halfX * 2).toBe(7);
-    expect(SOCCER_FIELD.halfZ * 2).toBe(14);
-    expect(SOCCER_FIELD.halfZ).toBe(SOCCER_FIELD.halfX * 2);
-    expect(SOCCER_FIELD.top).toBe(5);
-    expect(SOCCER_FIELD.goalR).toBe(F9A_A.goalR);
-    expect(SOCCER_FIELD.shieldR).toBe(F9A_A.shieldR);
+  it('大場數字仍在，給進階 F9A 用', () => {
+    expect(F9A_A.halfX * 2).toBe(7);
+    expect(F9A_A.halfZ * 2).toBe(14);
+    expect(F9A_A.top).toBe(5);
+    expect(F9A_A.goalR).toBeCloseTo(0.3);
+    expect(F9A_A.shieldR).toBeCloseTo(0.2);
   });
 
   it('內徑 60cm、管厚 20cm、外徑 100cm，圓心 3.30m、離底線 1.5m', () => {
-    expect(soccerGoalInnerDiameter()).toBeCloseTo(0.6);
-    expect(soccerGoalThickness()).toBeCloseTo(0.2);
-    expect(soccerGoalOuterDiameter()).toBeCloseTo(1);
+    expect(soccerGoalInnerDiameter(F9A_A.goalR)).toBeCloseTo(0.6);
+    expect(soccerGoalThickness(F9A_A.goalTube)).toBeCloseTo(0.2);
+    expect(soccerGoalOuterDiameter(F9A_A.goalR, F9A_A.goalTube)).toBeCloseTo(1);
     expect(F9A_A.thicknessMax).toBeCloseTo(0.2);
     expect(F9A_A.innerBottom).toBeCloseTo(3);
-    expect(SOCCER_FIELD.goalY).toBeCloseTo(3.3);
-    expect(SOCCER_GOAL_INSET).toBe(1.5);
-    expect(SOCCER_FIELD.goalZ).toBe(SOCCER_FIELD.halfZ - SOCCER_GOAL_INSET);
-    expect(SOCCER_FIELD.goalZ).toBeCloseTo(5.5);
+    expect(F9A_A.goalY).toBeCloseTo(3.3);
+    expect(F9A_A.goalInset).toBe(1.5);
+    expect(F9A_A.halfZ - F9A_A.goalInset).toBeCloseTo(5.5);
     expect(soccerBoundaryMarkSize(F9A_A.halfX, F9A_A.halfZ)).toEqual({ width: 7, length: 14 });
-    // 環心直徑 = 內半徑 + 管半徑，洞才對得上穿環判定
-    expect(soccerGoalTorusDiameter()).toBeCloseTo(0.8);
-    expect(soccerGoalTorusThickness()).toBeCloseTo(0.2);
+    expect(soccerGoalTorusDiameter(F9A_A.goalR, F9A_A.goalTube)).toBeCloseTo(0.8);
+    expect(soccerGoalTorusThickness(F9A_A.goalTube)).toBeCloseTo(0.2);
   });
 
-  it('起飛區進深 1.5m，單人長度是一顆球徑', () => {
-    expect(SOCCER_START_DEPTH).toBe(1.5);
+  it('起飛區進深 1.5m，每隊最多 5 人', () => {
     expect(F9A_A.startDepth).toBe(1.5);
     expect(F9A_A.maxPlayers).toBe(5);
     expect(SOCCER_START_WIDTH).toBeCloseTo(SOCCER_BALL_R * 2);
-    expect(SOCCER_FIELD.startZ).toBe(SOCCER_FIELD.halfZ - SOCCER_START_DEPTH / 2);
-    expect(SOCCER_FIELD.startZ).toBeCloseTo(6.25);
-  });
-
-  it('護罩直徑 40cm，小於內徑 60cm', () => {
-    expect(SOCCER_BALL_R).toBeCloseTo(0.2);
-    expect(SOCCER_BALL_R).toBeLessThan(SOCCER_FIELD.goalR);
-    expect(SOCCER_BALL_R * 2).toBeLessThan(soccerGoalInnerDiameter());
   });
 });
 

@@ -5,7 +5,15 @@
 // 之後老師調場地大小，客戶端零改動。
 // 單人練習：沒有伺服器 → 進場時 resetSoccerField() 回 constants.ts 的 fallback。
 import type { SoccerFieldDef } from '@creafly/shared';
-import { SOCCER_BALL_R, SOCCER_FIELD, SOCCER_GOAL_INSET, SOCCER_START_DEPTH } from './constants';
+import {
+  DEFAULT_SOCCER_CLASS,
+  SOCCER_BALL_R,
+  SOCCER_FIELD,
+  SOCCER_GOAL_INSET,
+  SOCCER_PRESETS,
+  SOCCER_START_DEPTH,
+  type SoccerClassCode,
+} from './constants';
 
 /** 生效場地：協定 SoccerFieldDef + 客戶端衍生欄位（goalZ / goalTube / startZ） */
 export interface ActiveSoccerField {
@@ -126,7 +134,25 @@ export function soccerBoundaryMarkSize(
   return { width: halfX * 2, length: halfZ * 2 };
 }
 
-/** 回 fallback（單人練習進場 / 離開多人對戰時呼叫，避免殘留上一場的伺服器場地） */
+/** 依子類代碼套用整組尺寸。不認得的代碼用預設（F9A-B）。 */
+export function setSoccerFieldFromPreset(code: string | null | undefined): boolean {
+  const preset =
+    code === 'F9A-A' || code === 'F9A-B' ? SOCCER_PRESETS[code as SoccerClassCode] : SOCCER_PRESETS[DEFAULT_SOCCER_CLASS];
+  return setSoccerFieldFromServer({
+    halfX: preset.halfX,
+    halfZ: preset.halfZ,
+    goalY: preset.goalY,
+    goalR: preset.goalR,
+    ceil: preset.top,
+    goalTube: preset.goalTube,
+    goalZ: preset.halfZ - preset.goalInset,
+    shieldR: preset.shieldR,
+    startDepth: preset.startDepth,
+    startWidth: preset.shieldR * 2,
+  });
+}
+
+/** 回 fallback（離開多人對戰時呼叫，避免殘留上一場的伺服器場地） */
 export function resetSoccerField(): void {
   current = fromFallback();
 }

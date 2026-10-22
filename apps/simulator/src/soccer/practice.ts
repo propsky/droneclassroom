@@ -1,18 +1,49 @@
 // ⚽ 無人機足球 — 單人自由練習。
-// 沒有關卡任務、沒有過關。護罩從場內正面穿過任一端圓環就加 1 分，分數不封頂。
-// 從球門後方（端牆那一側）穿回場內不算。穿環幾何在 crossing.ts，與對戰同一套。
-// 視覺（場地 / 球門 / 門框碰撞 / 球形保護框）在 render/soccerField.ts；分數在 ui/soccerHud.ts。
+// 跟對戰同一套進球：練習員站 +z（紅隊那一側），只有從場內正面穿過對方（-z）球門才算分。
+// 穿自己這側的門不加分。得分後要先回到自己半場（z > 0），下一球才算。
+// 不計時、不扣分。場地用房間目前的子類；沒進房就用預設 F9A-B。
+// 穿環幾何在 crossing.ts，與對戰同一套。
 import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
 import { setMeshCollisionBackend, setSolidObstacles } from '../core/physics';
 import { clearLevel } from '../core/level';
 import { GameSession } from '../core/session';
 import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
-import { SOCCER_FIELD } from './constants';
+import { wsState } from '../net/ws';
 import { advanceRingPassage, createRingPassage, type RingCross, type RingPassage } from './crossing';
 import { bounceSoccerWalls } from './contact';
-import { activeSoccerField, resetSoccerField } from './field';
+import { activeSoccerField, setSoccerFieldFromPreset } from './field';
 import { showSoccerPracticeHud, setPracticeStatus, showSoccerFeel } from '../ui/soccerHud';
+
+/** 練習計分。站在 +z、攻 -z。靜態方法，方便跟對戰規則對照。 */
+export class PracticeScoring {
+  /** 對方球門在 -z。 */
+  static readonly attackSign = -1 as const;
+
+  static onOwnHalf(z: number): boolean {
+    return z > 0;
+  }
+
+  /**
+   * opponentPassed：從場內正面穿過對方門。
+   * ownPassed：穿過自己這側的門，一律不加分。
+   * 得分後 needReturn，直到回到自己半場。
+   */
+  static apply(
+    count: number,
+    needReturn: boolean,
+    opponentPassed: boolean,
+    ownPassed: boolean,
+    z: number,
+  ): { count: number; needReturn: boolean; scored: boolean } {
+    void ownPassed;
+    const back = needReturn && PracticeScoring.onOwnHalf(z) ? false : needReturn;
+    if (!opponentPassed || back) {
+      return { count, needReturn: back, scored: false };
+    }
+    return { count: count + 1, needReturn: true, scored: true };
+  }
+}
 
 /** 畫面分數。不出現任務步驟或「練習完成」。 */
 export function formatPracticeScore(count: number): string {
@@ -20,25 +51,12 @@ export function formatPracticeScore(count: number): string {
   return `分數：${n}`;
 }
 
-/**
- * 這一 tick 兩端圓環有沒有從場內向外穿過。
- * far／near 必須已經由 crossing 用進攻方向濾過；這裡只累加，不封頂、不要求回半場。
- */
-export function notePracticeGoals(
-  count: number,
-  farPassed: boolean,
-  nearPassed: boolean,
-): { count: number; scored: boolean } {
-  let next = count;
-  if (farPassed) next += 1;
-  if (nearPassed) next += 1;
-  return { count: next, scored: next !== count };
-}
-
 export const practiceState = {
   active: false,
   /** 自由練習累計進球，不封頂 */
   count: 0,
+  /** 剛得分，還沒回到自己半場 */
+  needReturn: false,
   startTime: 0,
   /** 上一 tick 的位置（穿環看護罩後緣與行進方向） */
   prevX: 0,
@@ -68,13 +86,14 @@ export function enterSoccerPractice(): void {
   GameSession.enter('soccer-practice');
   practiceState.active = true;
   practiceState.count = 0;
+  practiceState.needReturn = false;
   practiceState.startTime = Date.now();
 
   if (flags.mode !== 'manual') setMode('manual');
   clearLevel(); // 一般關卡判定 / 物件 / HUD 停用（main.ts 依 active 改跑 tickSoccerPractice）
 
-  // 單人沒有伺服器 → 生效場地回 constants fallback（避免殘留上一場多人下發的尺寸）
-  resetSoccerField();
+  // 跟房間同一組場地。沒進房（或舊伺服器沒帶子類）用預設 F9A-B。
+  setSoccerFieldFromPreset(wsState.room?.soccerClass);
   bus.emit('soccer-entered', { variant: 'practice' }); // render 建場地 + 球門碰撞 + 縮小飛機
   bus.emit('soccer-view-changed', { sign: 1 }); // 窄邊定點視角：站 +z 端看向遠端門
   bus.emit('soccer-dummies-changed', { spheres: [] });
@@ -103,6 +122,7 @@ function teardownSoccerPractice(): void {
   if (!practiceState.active) return;
   practiceState.active = false;
   practiceState.count = 0;
+  practiceState.needReturn = false;
   practiceState.startTime = 0;
   farPassage = createRingPassage();
   nearPassage = createRingPassage();
@@ -128,9 +148,10 @@ GameSession.onExit('soccer-practice', teardownSoccerPractice);
  * 機頭朝遠端門（yaw 0 = -Z）。
  */
 function resetPracticeDronePos(): void {
+  const field = activeSoccerField();
   droneState.position.x = 0;
   droneState.position.y = HOME_POSITION.y;
-  droneState.position.z = SOCCER_FIELD.startZ;
+  droneState.position.z = field.startZ;
   droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
   droneState.yaw = 0;
   droneState.isFlying = false;
@@ -164,22 +185,32 @@ export function tickSoccerPractice(): void {
   const p = droneState.position;
   const prev = { x: practiceState.prevX, y: practiceState.prevY, z: practiceState.prevZ };
   // 遠端門在 -z，合法方向是往 -z（由場內向外）。近端門相反。背後穿回 attackSign 對不上，passed 為 false。
-  const farStep = advanceRingPassage(farPassage, prev, p, practiceRing(-1));
+  const farStep = advanceRingPassage(farPassage, prev, p, practiceRing(PracticeScoring.attackSign));
   const nearStep = advanceRingPassage(nearPassage, prev, p, practiceRing(1));
   farPassage = farStep.state;
   nearPassage = nearStep.state;
-  const next = notePracticeGoals(practiceState.count, farStep.passed, nearStep.passed);
+  const next = PracticeScoring.apply(
+    practiceState.count,
+    practiceState.needReturn,
+    farStep.passed,
+    nearStep.passed,
+    p.z,
+  );
+  practiceState.needReturn = next.needReturn;
   if (next.scored) {
     practiceState.count = next.count;
     sound('ring');
     const text = formatPracticeScore(practiceState.count);
-    toast(`⚽ ${text}`, 'success');
-    stateHud(`⚽ ${text}`);
+    toast(`⚽ ${text}，先回自己半場`, 'success');
+    stateHud(`⚽ ${text}，先回自己半場`);
   }
   practiceState.prevX = p.x;
   practiceState.prevY = p.y;
   practiceState.prevZ = p.z;
-  setPracticeStatus(formatPracticeScore(practiceState.count));
+  const text = practiceState.needReturn
+    ? `${formatPracticeScore(practiceState.count)}，先回自己半場`
+    : formatPracticeScore(practiceState.count);
+  setPracticeStatus(text);
 }
 
 /** 場地邊界：護罩貼牆後輕微反彈（地板仍由 integrate 落地） */

@@ -1,13 +1,14 @@
 """每間房自己的足球場地（F9A-A／F9A-B）。
 
-沒釘選的房用 SOCCER_CLASS。部署腳本沒設這個變數，程式預設 F9A-A，
-所以既有房間（含預設房 MAIN）跟改版前一樣。舊客戶端不送 soccerClass 也開得了房。
+沒寫賽制的房是臺北賽制，場地固定 F9A-B，不看 SOCCER_CLASS。
+進階 F9A 才用釘選；沒釘選才落到 SOCCER_CLASS（程式預設仍是 F9A-A）。
+舊客戶端不送 soccerClass 也開得了房。
 """
 
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.games.soccer_presets import F9A_A, F9A_B, RoomSoccerClass
+from app.games.soccer_presets import F9A_B, RoomSoccerClass
 from app.main import create_app
 from tests.conftest import recv_until, settle, teacher_connect
 
@@ -33,13 +34,14 @@ class TestRoomSoccerClass:
         assert RoomSoccerClass.parse("F9A-B") == "F9A-B"
 
 
-def test_預設房是F9A_A且舊客戶端不送場地也能開房(
+def test_預設房是臺北賽制小場且舊客戶端不送場地也一樣(
     client: TestClient, teacher_ticket: str
 ) -> None:
-    """SOCCER_CLASS 沒設 → F9A-A。room_create 不帶 soccerClass 維持這個預設。"""
+    """沒寫 soccerRuleset／soccerClass → 臺北賽制 + F9A-B。不讀環境變數的大場。"""
     soccer = client.app.state.soccer
-    assert soccer.field.code == "F9A-A"
-    assert soccer.field.half_z == F9A_A.half_z
+    assert soccer.ruleset == "taipei"
+    assert soccer.field.code == "F9A-B"
+    assert soccer.field.half_z == F9A_B.half_z
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         t.send_json({"type": "room_create", "settings": {"name": "舊客戶端"}})
@@ -54,8 +56,11 @@ def test_預設房是F9A_A且舊客戶端不送場地也能開房(
                 break
         assert created is not None
         assert created.settings.soccer_class is None
-        assert created.soccer.field.code == "F9A-A"
-        assert created.info().soccerClass == "F9A-A"
+        assert created.settings.soccer_ruleset is None
+        assert created.soccer.ruleset == "taipei"
+        assert created.soccer.field.code == "F9A-B"
+        assert created.info().soccerClass == "F9A-B"
+        assert created.info().soccerRuleset == "taipei"
         assert created.info().soccerClassPinned is False
 
 
@@ -65,6 +70,15 @@ def test_釘選F9A_B後學生收到新場地且超過人數會卸隊(
     soccer = client.app.state.soccer
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
+        t.send_json(
+            {
+                "type": "room_update",
+                "roomCode": "MAIN",
+                "settings": {"soccerRuleset": "f9a", "soccerClass": "F9A-A"},
+            }
+        )
+        settle(client)
+        assert soccer.field.code == "F9A-A"
         sockets = [client.websocket_connect("/") for _ in range(5)]
         entered = [s.__enter__() for s in sockets]
         try:
@@ -116,18 +130,24 @@ def test_釘選F9A_B後學生收到新場地且超過人數會卸隊(
                 s.__exit__(None, None, None)
 
 
-def test_比賽中拒絕換場地(client: TestClient, teacher_ticket: str) -> None:
+def test_比賽中拒絕改成大場或換成進階F9A(client: TestClient, teacher_ticket: str) -> None:
     soccer = client.app.state.soccer
     soccer.status = "countdown"
     with teacher_connect(client, teacher_ticket) as t:
         recv_until(t, "student_list")
         t.send_json(
-            {"type": "room_update", "roomCode": "MAIN", "settings": {"soccerClass": "F9A-B"}}
+            {
+                "type": "room_update",
+                "roomCode": "MAIN",
+                "settings": {"soccerRuleset": "f9a", "soccerClass": "F9A-A"},
+            }
         )
         settle(client)
-        assert soccer.field.code == "F9A-A"
-        assert client.app.state.rooms.default.settings.soccer_class is None
-        assert client.app.state.rooms.default.info().soccerClassPinned is False
+        assert soccer.ruleset == "taipei"
+        assert soccer.field.code == "F9A-B"
+        room = client.app.state.rooms.default
+        assert room.settings.soccer_ruleset is None
+        assert room.settings.soccer_class is None
 
 
 def test_取消釘選回到環境變數(tmp_path) -> None:
@@ -152,7 +172,14 @@ def test_取消釘選回到環境變數(tmp_path) -> None:
             assert recv_until(ws, "room_list")["rooms"][0]["soccerClass"] == "F9A-B"
             assert recv_until(ws, "student_list")
             ws.send_json(
-                {"type": "room_create", "settings": {"name": "釘A", "soccerClass": "F9A-A"}}
+                {
+                    "type": "room_create",
+                    "settings": {
+                        "name": "釘A",
+                        "soccerRuleset": "f9a",
+                        "soccerClass": "F9A-A",
+                    },
+                }
             )
             listed = recv_until(ws, "room_list")
             created = next(room for room in listed["rooms"] if room["name"] == "釘A")
