@@ -129,6 +129,9 @@ export interface SoccerResetMsg { type: 'soccer_reset'; clearTeams?: boolean }
 // 老師一條 WS 管多間；「作用房間」由每則老師訊息的 roomCode 指定（缺省 = 老師目前選定的房間）。
 // 未來帳號系統：Room 加 ownerId/持久化即可，協定不變。
 
+/** 足球場地子類。尺寸在伺服器 soccer_presets／客戶端 soccer/constants，兩邊同一組數字。 */
+export type SoccerClassCode = 'F9A-A' | 'F9A-B';
+
 /** 房間設定（老師可改）；伺服器端另有預設值（config），全部不寫死 */
 export interface RoomSettings {
   /** 顯示名稱（如「三年二班」）；缺省用房間碼 */
@@ -139,6 +142,12 @@ export interface RoomSettings {
   maxStudents?: number;
   /** 鎖房：禁止新加入，已在房內的不受影響 */
   locked?: boolean;
+  /**
+   * 這間房的足球場地。不帶 = 不動。
+   * 'server' = 取消釘選，改跟伺服器 SOCCER_CLASS（沒設時為 F9A-A）。
+   * 舊客戶端不送這個欄位，房間維持原樣。
+   */
+  soccerClass?: SoccerClassCode | 'server';
 }
 
 export interface RoomInfo {
@@ -156,6 +165,13 @@ export interface RoomInfo {
   teamId?: number | null;
   /** 主房（code = 班級碼）或分房（一班多房；獨立產碼）；非班級房恆為 true */
   isMain?: boolean;
+  /**
+   * 這間房實際在用的足球場地。舊伺服器不帶時，老師端當成 F9A-A
+   * （與程式預設、正式環境未設 SOCCER_CLASS 時相同）。
+   */
+  soccerClass?: SoccerClassCode;
+  /** true = 老師釘選過；false／缺省 = 跟著伺服器 SOCCER_CLASS */
+  soccerClassPinned?: boolean;
 }
 
 /**

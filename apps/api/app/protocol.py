@@ -397,6 +397,8 @@ class RoomSettingsIn(_StrictModel):
     password: str | None = None
     maxStudents: int | None = Field(default=None, ge=1)
     locked: bool | None = None
+    # 不帶 = 不動。server = 取消釘選，改跟 SOCCER_CLASS。舊客戶端不送這個欄位。
+    soccerClass: Literal["F9A-A", "F9A-B", "server"] | None = None
 
 
 class RoomCreateMsg(_StrictModel):
@@ -617,6 +619,10 @@ class RoomInfo(BaseModel):
     teamId: int | None = None
     # 主房（code = 班級碼）或分房（一班多房；獨立產碼）；非班級房恆為 True
     isMain: bool = True
+    # 實際採用的場地。舊客戶端會忽略這兩個欄位。
+    soccerClass: Literal["F9A-A", "F9A-B"] = "F9A-A"
+    # False = 沒釘選，跟著伺服器 SOCCER_CLASS（沒設環境變數時就是上面的 F9A-A）
+    soccerClassPinned: bool = False
 
 
 class TeamInfo(BaseModel):

@@ -32,8 +32,9 @@ class Settings(BaseSettings):
     - max_students：學生人數上限（顯示用，/api/info 帶出）
     - game_tick_interval：賽局主迴圈週期秒（legacy setInterval 80ms）；
       設 0 不啟動 asyncio tick task（測試注入假時鐘、手動呼叫 tick()）
-    - soccer_class：足球子類，F9A-A（預設）或 F9A-B。尺寸只在
-      games/soccer_presets.py，環境變數 SOCCER_CLASS 可切換，伺服器整組下發。
+    - soccer_class：沒在房間裡釘選場地時的預設子類，F9A-A（預設）或 F9A-B。
+      尺寸只在 games/soccer_presets.py。環境變數 SOCCER_CLASS 可切換這份預設；
+      老師在房間設定選的場地優先於它。正式部署腳本沒有設這個變數，所以是 F9A-A。
     - soccer_air_contact_cards：空中機對機「接近速度」黃／紅牌的教學選項。
       2026 F9A.9 沒有這條，預設關閉（SOCCER_AIR_CONTACT_CARDS=1 才開）。
       墜機紅牌不受這個開關影響。
@@ -84,7 +85,7 @@ class Settings(BaseSettings):
     )
     max_students: int = 12
     game_tick_interval: float = 0.08
-    # 足球子類。尺寸見 games/soccer_presets.py，不在這裡再寫一組數字。
+    # 房間沒釘選場地時用的足球子類。尺寸見 games/soccer_presets.py。
     soccer_class: Literal["F9A-A", "F9A-B"] = "F9A-A"
     # 空中接近速度罰牌（教學用）。預設關。打開後走警告，不是直接發牌。
     soccer_air_contact_cards: bool = False
