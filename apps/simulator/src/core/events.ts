@@ -160,6 +160,38 @@ export interface CoreEventMap {
     buttons: { index: number; pressed: boolean; changed: boolean }[];
     summaryLines: string[];
   };
+  /**
+   * 通道對應表面板。狀態機不碰 DOM。
+   * 精簡只列必要列；專業才帶死區、行程、曲線與原始通道。
+   */
+  'calib-map': {
+    detail: 'simple' | 'pro';
+    listening: string | null;
+    guiding: boolean;
+    status: string;
+    missingAxesNote: string | null;
+    hatNote: string;
+    deadzone: number;
+    expo: number;
+    rows: {
+      id: string;
+      label: string;
+      group: 'stick' | 'arm' | 'switch';
+      deviceLabel: string;
+      radioLabel: string;
+      sourceText: string;
+      reversed: boolean;
+      bar: number;
+      rawText: string;
+      centerText: string;
+      rangeText: string;
+      listening: boolean;
+      optional: boolean;
+      canEndpoint: boolean;
+      endpointOn: boolean;
+    }[];
+    rawAxes: { deviceLabel: string; radioLabel: string; raw: number; delta: number }[];
+  };
   /** 校正結束（saved = 是否儲存套用） */
   'calib-ended': { saved: boolean };
   /** 實體搖桿 / BLE 連線狀態變化（設定面板、連線提示訂閱） */
