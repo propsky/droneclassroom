@@ -115,20 +115,51 @@ export interface CoreEventMap {
   // ---- 搖桿校正精靈（input/calibration.ts → ui/calibrationOverlay.ts）----
   /** 顯示 / 隱藏校正 overlay */
   'calib-show': { show: boolean };
-  /** 進入新步驟（done = 8 步全部完成，等待儲存/取消） */
-  'calib-step': {
+  /**
+   * 精靈每一拍的完整畫面。狀態機不碰 DOM，overlay 只照這份畫。
+   * 時間只會推進「放開」；對應要等使用者按「就用這個」。
+   */
+  'calib-view': {
+    stepId: string;
     stepIdx: number;
     total: number;
     label: string;
     hint: string;
-    hasTimer: boolean;
-    durationMs: number;
     done: boolean;
+    /** Mode 2 只決定圖上哪一手 */
+    diagram: 'left' | 'right' | 'none';
+    modeNote: string;
+    letGo: { pct: number; remainSec: number } | null;
+    seenText: string | null;
+    alsoSeenText: string | null;
+    confirmLabel: string;
+    showConfirm: boolean;
+    showSkip: boolean;
+    /** 解鎖步的跳過要和「就用這個」一樣明顯 */
+    skipProminent: boolean;
+    showUsePartial: boolean;
+    showHandsOff: boolean;
+    showPicks: boolean;
+    idleHint: string | null;
+    occupiedHint: string | null;
+    motionHint: string | null;
+    extraHint: string | null;
+    mismatchHint: string | null;
+    missingAxesNote: string | null;
+    hatNote: string;
+    focus: { kind: 'axis' | 'button'; index: number } | null;
+    axes: {
+      index: number;
+      deviceLabel: string;
+      radioLabel: string;
+      raw: number;
+      delta: number;
+      span: number;
+      tag: string;
+    }[];
+    buttons: { index: number; pressed: boolean; changed: boolean }[];
+    summaryLines: string[];
   };
-  /** 步驟倒數進度（獨立 setInterval 驅動，防 rAF 卡住） */
-  'calib-timer': { pct: number; remainSec: number };
-  /** 校正中即時軸值 / 按鍵狀態（overlay 底部 live 區） */
-  'calib-live': { axes: number[]; buttons: boolean[] };
   /** 校正結束（saved = 是否儲存套用） */
   'calib-ended': { saved: boolean };
   /** 實體搖桿 / BLE 連線狀態變化（設定面板、連線提示訂閱） */

@@ -14,6 +14,7 @@ import {
   gamepadAxes,
   gamepadState,
   isButtonJustPressed,
+  readGamepadSnapshot,
 } from './gamepad';
 import { gamepadConfig, initCalibration, tickCalibration, calibration } from './calibration';
 import { initBle, bleAxes, bleState, bleButtonEdges, syncBleButtonSample } from './ble';
@@ -42,11 +43,7 @@ export function initInputs(opts: { toggleView: () => void }): void {
   initKeyboard(opts);
   initVirtualJoystick();
   initGamepad();
-  initCalibration(() => ({
-    connected: gamepadState.connected,
-    axes: gamepadState.axes,
-    buttons: gamepadState.buttons,
-  }));
+  initCalibration(() => readGamepadSnapshot());
   initBle();
   registerBleConnectedChecker(() => bleState.connected);
 }
@@ -74,9 +71,9 @@ function handlePadButtons(
 export function tickInputDevices(manualLocked: boolean): void {
   pollGamepad();
   tickCalibration();
-  if (calibration.active) return;
-
+  // 校正中也要跑選單層：它看到校正進行中會收起底部提示，避免蓋住精靈按鈕。
   padUi.tick();
+  if (calibration.active) return;
   const uiCapturing = padUi.isCapturing();
 
   if (!uiCapturing && !manualLocked) {
@@ -145,6 +142,7 @@ export function collectControlFrame(): ControlFrame {
   if (keys['arrowleft']) frame.yawDelta += YAW_KEY_RATE;
   if (keys['arrowright']) frame.yawDelta -= YAW_KEY_RATE;
 
+  // 校正若記下解鎖開關，飛行迴圈也不讀。鍵盤、虛擬搖桿、實體搖桿都維持開始 + 起飛。
   if (stick.throttle !== 0) {
     frame.lift += -stick.throttle;
     if (stick.throttle < -0.3) frame.wantsTakeoff = true;

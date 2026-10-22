@@ -1,7 +1,8 @@
 // 實體搖桿（Web Gamepad API）— 輪詢 + 校正套用（Phase 2）。
-// 標準 mapping：axes[0]=左X(yaw)、axes[1]=左Y(throttle)、axes[2]=右X(roll)、axes[3]=右Y(pitch)
+// 標準 mapping 只是初始猜測：axes[0]=左X(yaw)、axes[1]=左Y(throttle)、axes[2]=右X(roll)、axes[3]=右Y(pitch)。
 // 每軸讀值經 (raw - center) / range 正規化再套死區（center/range 來自校正精靈，預設 0/1）。
 // 開發後門：?fakepad=1 注入假搖桿訊號（headless 驗收 / 沒實體搖桿時測校正精靈用）。
+// 軸數以連線實際回報為準，不補 0、不截成 4，校正精靈才不會把「沒有的軸」看成停在中心的開關。
 import { bus, toast } from '../core/events';
 import { gamepadConfig } from './calibration';
 import { normalizeGamepadAxis } from './padMath';
@@ -10,10 +11,23 @@ export const gamepadState = {
   connected: false,
   index: null as number | null,
   id: '',
-  axes: [0, 0, 0, 0] as number[],
+  axes: [] as number[],
   buttons: [] as boolean[],
   prevButtons: [] as boolean[],
 };
+
+/** 瀏覽器一條連線實際會露出的軸上限；超出的不讀，缺少的不補。 */
+const MAX_REPORTED_AXES = 16;
+
+function reportedAxes(src: ArrayLike<number>): number[] {
+  const n = Math.min(src.length, MAX_REPORTED_AXES);
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = Number(src[i]);
+    out.push(Number.isFinite(v) ? v : 0);
+  }
+  return out;
+}
 
 // =============================================================================
 // ?fakepad=1 開發後門：假 gamepad 訊號源
@@ -33,10 +47,27 @@ function setGamepadConnected(on: boolean, id = ''): void {
 function disconnectGamepad(): void {
   gamepadState.index = null;
   gamepadState.id = '';
-  gamepadState.axes = [0, 0, 0, 0];
+  gamepadState.axes = [];
   gamepadState.buttons = [];
   gamepadState.prevButtons = [];
   setGamepadConnected(false);
+}
+
+/** 校正精靈用的即時快照。fakepad 直接讀目前的陣列，不經過補 0。 */
+export function readGamepadSnapshot(): { connected: boolean; axes: number[]; buttons: boolean[] } {
+  if (fakepad) {
+    return {
+      connected: true,
+      axes: reportedAxes(fakepad.axes),
+      buttons: fakepad.buttons.slice(),
+    };
+  }
+  if (!gamepadState.connected) return { connected: false, axes: [], buttons: [] };
+  return {
+    connected: true,
+    axes: gamepadState.axes.slice(),
+    buttons: gamepadState.buttons.slice(),
+  };
 }
 
 function initFakepad(): void {
@@ -45,6 +76,7 @@ function initFakepad(): void {
   (window as unknown as Record<string, unknown>)['__fakepad'] = fakepad;
   gamepadState.index = -1;
   gamepadState.id = 'Fake Gamepad (?fakepad=1)';
+  gamepadState.axes = reportedAxes(fakepad.axes);
   gamepadState.buttons = fakepad.buttons.slice();
   gamepadState.prevButtons = fakepad.buttons.slice();
   setGamepadConnected(true, gamepadState.id);
@@ -84,8 +116,7 @@ export function initGamepad(): void {
 export function pollGamepad(): void {
   if (fakepad) {
     gamepadState.prevButtons = gamepadState.buttons;
-    gamepadState.axes = fakepad.axes.slice(0, 4);
-    while (gamepadState.axes.length < 4) gamepadState.axes.push(0);
+    gamepadState.axes = reportedAxes(fakepad.axes);
     gamepadState.buttons = fakepad.buttons.slice();
     return;
   }
@@ -109,8 +140,7 @@ export function pollGamepad(): void {
     return;
   }
   gamepadState.prevButtons = gamepadState.buttons;
-  gamepadState.axes = Array.from(gp.axes).slice(0, 4);
-  while (gamepadState.axes.length < 4) gamepadState.axes.push(0);
+  gamepadState.axes = reportedAxes(gp.axes);
   gamepadState.buttons = gp.buttons.map((b) => b.pressed);
 }
 
@@ -125,14 +155,13 @@ export function gamepadAxes(): { throttle: number; yaw: number; pitch: number; r
   if (!gamepadState.connected) return { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
   let throttle = axis(gamepadConfig.axes.throttle);
   let pitch = axis(gamepadConfig.axes.pitch);
+  let yaw = axis(gamepadConfig.axes.yaw);
+  let roll = axis(gamepadConfig.axes.roll);
   if (gamepadConfig.invertThrottle) throttle = -throttle;
   if (gamepadConfig.invertPitch) pitch = -pitch;
-  return {
-    throttle,
-    yaw: axis(gamepadConfig.axes.yaw),
-    pitch,
-    roll: axis(gamepadConfig.axes.roll),
-  };
+  if (gamepadConfig.invertYaw) yaw = -yaw;
+  if (gamepadConfig.invertRoll) roll = -roll;
+  return { throttle, yaw, pitch, roll };
 }
 
 export function isButtonJustPressed(idx: number): boolean {
