@@ -8,11 +8,12 @@ from app.games.soccer_rules import shield_passes_ring
 from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 from tests.test_soccer import _countdown_to_go, _gkey, _join_soccer, _register, f9a_cross
 
-pytestmark = pytest.mark.usefixtures("f9a_room")
-
 
 def test_護罩穿過開口才算_打到框與只到球心都不算() -> None:
-    y, gz, z0, z1 = f9a_cross()
+    gz = F9A_A.half_z - F9A_A.goal_inset
+    y = F9A_A.goal_y
+    z0 = gz - F9A_A.shield_r - 0.1
+    z1 = gz + F9A_A.shield_r + 0.1
     kw = {
         "goal_z": gz,
         "goal_y": y,
@@ -131,14 +132,21 @@ def test_倒數離開起飛點不採用_照常開局(
             _join_soccer(s2)
             t.send_json({"type": "soccer_start", "durationSec": 40, "mode": "striker"})
             assert recv_until(s1, "soccer_countdown")["n"] == 3
-
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 0.4, "z": -6.25, "yaw": 3.14})
+            ming = soccer.players[_gkey("小明")]
+            s1.send_json(
+                {
+                    "type": "soccer_pos",
+                    "x": ming.spawn_x,
+                    "y": 0.4,
+                    "z": ming.spawn_z,
+                    "yaw": 3.14,
+                }
+            )
             settle(client)
             clock.advance(500)
-            s1.send_json({"type": "soccer_pos", "x": 0, "y": 1.2, "z": -4.0, "yaw": 3.14})
+            s1.send_json({"type": "soccer_pos", "x": 0, "y": 1.2, "z": -1.0, "yaw": 3.14})
             settle(client)
-            ming = soccer.players[_gkey("小明")]
-            assert ming.z == pytest.approx(-6.25)
+            assert ming.z == pytest.approx(ming.spawn_z)
             assert soccer.status == "countdown"
 
             clock.advance(500)
@@ -258,10 +266,13 @@ def test_墜機本局排除下一局恢復(
 
             clock.advance(5_000)
             tick(client)
-            assert soccer.status == "break"
-            clock.advance(15_000)
+            assert soccer.phase == "landing"
+            assert soccer.players[_gkey("小明")].disabled is True
+            clock.advance(10_000)
             tick(client)
-            assert soccer.status == "running"
+            assert soccer.status == "done"
+            t.send_json({"type": "soccer_start", "durationSec": 5, "mode": "striker"})
+            _countdown_to_go(client, clock, s1)
             assert soccer.players[_gkey("小明")].disabled is False
             assert soccer.players[_gkey("小明")].striker is True
 

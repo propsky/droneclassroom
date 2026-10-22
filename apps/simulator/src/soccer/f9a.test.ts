@@ -106,9 +106,11 @@ function hud(over: Partial<SoccerHudInput> = {}): SoccerHudInput {
 }
 
 describe('F9A 階段一 HUD 賽制', () => {
-  it('等待開始寫三局兩勝', () => {
-    expect(formatSoccerMatchLine(hud())).toContain('三局兩勝');
-    expect(formatSoccerMatchLine(hud())).toContain('我：藍隊・前鋒');
+  it('沒寫賽制是臺北；舊的 f9a 紀錄仍讀得出三局兩勝', () => {
+    expect(formatSoccerMatchLine(hud())).toContain('臺北賽制');
+    expect(formatSoccerMatchLine(hud())).not.toContain('三局兩勝');
+    expect(formatSoccerMatchLine(hud({ ruleset: 'f9a' }))).toContain('三局兩勝');
+    expect(formatSoccerMatchLine(hud({ ruleset: 'f9a' }))).toContain('我：藍隊・前鋒');
   });
 
   it('臺北賽制寫扣分與降落，不寫三局兩勝', () => {
@@ -130,9 +132,10 @@ describe('F9A 階段一 HUD 賽制', () => {
     );
   });
 
-  it('進行中顯示局數、本節比分與回半場', () => {
+  it('舊的 f9a 紀錄仍顯示局數、休息、黃金進球與 PK', () => {
     const line = formatSoccerMatchLine(
       hud({
+        ruleset: 'f9a',
         status: 'running',
         scores: { blue: 1, red: 0 },
         sets: { blue: 0, red: 0 },
@@ -145,17 +148,15 @@ describe('F9A 階段一 HUD 賽制', () => {
     expect(line).toContain('第1局 藍 1 : 0 紅');
     expect(line).toContain('1:00');
     expect(line).toContain('全隊先退回半場');
-  });
-
-  it('局間休息、黃金進球、PK 各有自己的一行', () => {
-    expect(formatSoccerMatchLine(hud({ status: 'break', sets: { blue: 1, red: 0 }, endTime: 15_000 }))).toContain(
-      '局間休息',
-    );
     expect(
-      formatSoccerMatchLine(hud({ status: 'golden', endTime: 180_000, now: 0 })),
-    ).toContain('黃金進球');
+      formatSoccerMatchLine(hud({ ruleset: 'f9a', status: 'break', sets: { blue: 1, red: 0 }, endTime: 15_000 })),
+    ).toContain('局間休息');
+    expect(formatSoccerMatchLine(hud({ ruleset: 'f9a', status: 'golden', endTime: 180_000, now: 0 }))).toContain(
+      '黃金進球',
+    );
     const pk = formatSoccerMatchLine(
       hud({
+        ruleset: 'f9a',
         status: 'pk',
         pkTurn: 'blue',
         pkRound: 2,

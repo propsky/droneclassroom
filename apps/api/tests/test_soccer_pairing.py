@@ -1,6 +1,6 @@
 """臺北賽制預設，而且一定配 F9A-B。已存的 JSON 不改寫，只在讀的時候換算。"""
 
-from app.games.soccer_presets import F9A_A, F9A_B
+from app.games.soccer_presets import F9A_B
 from app.games.taipei_rules import SoccerPairing
 
 
@@ -12,12 +12,13 @@ class TestSoccerPairing:
         (None, None, "F9A-A", "f9a", "F9A-A", "taipei", "F9A-B"),
         (None, "F9A-A", "F9A-A", "f9a", "F9A-A", "taipei", "F9A-B"),
         (None, "F9A-B", "F9A-A", "f9a", "F9A-B", "taipei", "F9A-B"),
-        ("f9a", None, "F9A-A", "f9a", "F9A-A", "f9a", "F9A-A"),
-        ("f9a", "F9A-A", "F9A-B", "f9a", "F9A-A", "f9a", "F9A-A"),
-        ("f9a", "F9A-B", "F9A-A", "f9a", "F9A-B", "f9a", "F9A-B"),
+        ("f9a", None, "F9A-A", "f9a", "F9A-A", "taipei", "F9A-B"),
+        ("f9a", "F9A-A", "F9A-B", "f9a", "F9A-A", "taipei", "F9A-B"),
+        ("f9a", "F9A-B", "F9A-A", "f9a", "F9A-B", "taipei", "F9A-B"),
         ("taipei", None, "F9A-A", "taipei", "F9A-A", "taipei", "F9A-B"),
         ("taipei", "F9A-A", "F9A-A", "taipei", "F9A-A", "taipei", "F9A-B"),
         ("taipei", "F9A-B", "F9A-A", "taipei", "F9A-B", "taipei", "F9A-B"),
+        ("nope", "F9A-A", "legacy", "f9a", "F9A-A", "taipei", "F9A-B"),
     )
 
     @staticmethod
@@ -33,10 +34,13 @@ class TestSoccerPairing:
             assert SoccerPairing.ruleset(stored_rules) == a_rules
             assert spec.code == a_field
 
-    def test_臺北賽制不能留在大場_進階F9A可以(self) -> None:
+    def test_任何舊值都是臺北小場(self) -> None:
         assert SoccerPairing.allows_big_field("taipei") is False
+        assert SoccerPairing.allows_big_field("f9a") is False
         assert SoccerPairing.allows_big_field(None) is False
-        assert SoccerPairing.allows_big_field("f9a") is True
         assert SoccerPairing.field_spec("taipei", "F9A-A", "F9A-A") is F9A_B
-        assert SoccerPairing.field_spec("f9a", "F9A-A", "F9A-B") is F9A_A
-        assert SoccerPairing.field_spec("nope", None, "F9A-A").code == "F9A-B"
+        assert SoccerPairing.field_spec("f9a", "F9A-A", "F9A-A") is F9A_B
+        assert SoccerPairing.field_spec("nope", None, "legacy").code == "F9A-B"
+        assert SoccerPairing.legacy_ruleset_token("f9a") == "f9a"
+        assert SoccerPairing.legacy_ruleset_token("taipei") == "taipei"
+        assert SoccerPairing.legacy_ruleset_token("nope") is None

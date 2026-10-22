@@ -163,7 +163,7 @@ def test_同分先進球者勝且裁判扣分進淨分(
         t_cm.__exit__(None, None, None)
 
 
-def test_停留己方球門滿一秒扣分_F9A警告不改比分(
+def test_停留己方球門滿一秒扣分_舊的f9a開賽仍扣分(
     client: TestClient, teacher_ticket: str, clock: FakeClock
 ) -> None:
     soccer, t, t_cm, sockets, entered = _boot(client, teacher_ticket, clock)
@@ -198,9 +198,9 @@ def test_停留己方球門滿一秒扣分_F9A警告不改比分(
         recv_until(entered[0], "soccer_go")
         t.send_json({"type": "soccer_warn", "studentId": "s1", "reason": "conduct", "deduct": True})
         settle(client)
-        assert soccer.deductions == {"blue": 0, "red": 0}
+        assert soccer.deductions["blue"] == 1
         assert soccer.scores == {"blue": 0, "red": 0}
-        assert soccer.ruleset == "f9a"
+        assert soccer.ruleset == "taipei"
     finally:
         for cm in sockets:
             cm.__exit__(None, None, None)

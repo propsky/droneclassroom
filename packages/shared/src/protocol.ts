@@ -110,7 +110,7 @@ export interface ArenaStopMsg { type: 'arena_stop' }
 export type SoccerMode = 'striker';
 /** 局數打平之後怎麼走。預設 pk_then_golden（WDSC：先各 3 球 PK，再黃金進球）。 */
 export type SoccerTieBreak = 'pk_then_golden' | 'golden_then_pk';
-/** f9a = 三局兩勝（預設）。taipei = 臺北市 115 單場制。舊客戶端不送，伺服器當 f9a。 */
+/** f9a = 舊比賽紀錄。新的比賽一律 taipei，讀到 f9a 也不改去三局兩勝。 */
 export type SoccerRuleset = 'f9a' | 'taipei';
 export interface SoccerStartMsg {
   type: 'soccer_start';
@@ -155,12 +155,12 @@ export interface RoomSettings {
   /** 鎖房：禁止新加入，已在房內的不受影響 */
   locked?: boolean;
   /**
-   * 這間房的足球場地。不帶 = 不動。
-   * 'server' = 取消釘選，改跟伺服器 SOCCER_CLASS（沒設時為 F9A-A）。
-   * 舊客戶端不送這個欄位，房間維持原樣。
+   * 老師自選場地已拿掉。舊客戶端仍可能送 F9A-A／F9A-B／server。
+   * 伺服器收下釘選、比賽固定 F9A-B，不回填。
+   * 'server' = 取消釘選（舊語意）。不影響這一場用的場地。
    */
   soccerClass?: SoccerClassCode | 'server';
-  /** 這間房的足球賽制。不帶 = 不動。舊客戶端不送，維持 F9A。 */
+  /** 舊房間可能寫著 f9a。伺服器讀到一律當臺北賽制，不改已存的字。 */
   soccerRuleset?: SoccerRuleset;
 }
 
@@ -180,13 +180,13 @@ export interface RoomInfo {
   /** 主房（code = 班級碼）或分房（一班多房；獨立產碼）；非班級房恆為 true */
   isMain?: boolean;
   /**
-   * 這間房實際在用的足球場地。舊伺服器不帶時，老師端當成 F9A-A
-   * （與程式預設、正式環境未設 SOCCER_CLASS 時相同）。
+   * 這間房實際在用的足球場地。現在固定 F9A-B。
+   * 舊伺服器不帶時，老師端仍顯示 F9A-B。
    */
   soccerClass?: SoccerClassCode;
-  /** true = 老師釘選過；false／缺省 = 跟著伺服器 SOCCER_CLASS */
+  /** true = JSON 裡還留著釘選。比賽不採用，固定 F9A-B。 */
   soccerClassPinned?: boolean;
-  /** 實際賽制。舊伺服器不帶時老師端當成 f9a。 */
+  /** 實際賽制。現在固定 taipei。舊紀錄若寫 f9a，仍是合法字，畫面不當成三局兩勝。 */
   soccerRuleset?: SoccerRuleset;
 }
 
