@@ -3,8 +3,10 @@
 // - 換關 / 清關（老師廣播、進大亂鬥 / 足球）時自動收起；
 // - 1-0 熱身關走 duration 自動跳關（core/level.ts checkDuration），不發 level-complete、不經過這裡。
 import { bus } from '../core/events';
+import { FlightReview } from '../core/flightReview';
 import { levelState } from '../core/level';
 import { loadLevel } from '../net/levelLoad';
+import { fillFlightReviewGrid } from './hud';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -42,11 +44,20 @@ export function initLevelComplete(): void {
 
   bus.on('level-complete', ({ levelId, timeMs }) => {
     completedId = levelId;
+    // 過關當下的回顧。之後模擬還在跑，不能等到卡片出現才讀。
+    const stats = FlightReview.snapshot();
     if (showTimer != null) clearTimeout(showTimer);
     showTimer = window.setTimeout(() => {
       showTimer = null;
       if (levelState.current?.id !== levelId) return; // 等待期間已被換關（老師廣播等）
-      body.textContent = `用時 ${(timeMs / 1000).toFixed(1)} 秒`;
+      const timeEl = $('level-complete-time');
+      const review = $('level-complete-review');
+      if (timeEl && review) {
+        timeEl.textContent = `用時 ${(timeMs / 1000).toFixed(1)} 秒`;
+        fillFlightReviewGrid(review, stats);
+      } else {
+        body.textContent = `用時 ${(timeMs / 1000).toFixed(1)} 秒`;
+      }
       nextBtn.style.display = nextIdOf(levelId) != null && !locked ? '' : 'none';
       modal.classList.add('show');
     }, SHOW_DELAY_MS);

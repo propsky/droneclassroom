@@ -1,4 +1,6 @@
 // 搖桿輸入純函式（零 DOM / 零 Gamepad API）— 供 gamepad.ts / calibration.ts / index.ts 共用與 Vitest 驗證。
+// 死區縮放見 StickCurve.applyDeadband（ShramkoGSFPV MIT，Copyright (c) 2026 Andrii Shramko）。
+import { StickCurve } from './stickCurve';
 
 export interface StickAxes {
   throttle: number;
@@ -14,7 +16,10 @@ export interface UrlPresetOverrides {
   deadzone?: number;
 }
 
-/** 單軸：(raw - center) / range → clamp → 死區 */
+/**
+ * 單軸：(raw - center) / range → clamp → 死區。
+ * 死區內為 0；死區外扣除後再縮放，滿舵仍為 ±1。
+ */
 export function normalizeGamepadAxis(
   raw: number,
   center: number,
@@ -23,7 +28,7 @@ export function normalizeGamepadAxis(
 ): number {
   const norm = (raw - center) / (range || 1);
   const clamped = Math.max(-1, Math.min(1, norm));
-  return Math.abs(clamped) < deadzone ? 0 : clamped;
+  return StickCurve.applyDeadband(clamped, deadzone);
 }
 
 /** 校正精靈結算：每軸 range 取 center 兩側最大飄移，保底 0.5 */

@@ -146,6 +146,12 @@
                     <div class="row"><span class="label">狀態</span><span class="value" id="hud-state">待命</span></div>
                     <div class="row"><span class="label">模式</span><span class="value" id="hud-mode">手動</span></div>
                 </div>
+                <div id="flight-review-live" class="flight-review-live" aria-label="本趟飛行">
+                    <div class="row"><span class="label">空中</span><span class="value mono" id="hud-air">0.0 秒</span></div>
+                    <div class="row"><span class="label">距離</span><span class="value mono" id="hud-dist">0.0 m</span></div>
+                    <div class="row"><span class="label" title="最高速度（公尺／秒）">極速</span><span class="value mono" id="hud-top" title="公尺／秒">0.0</span></div>
+                    <div class="row"><span class="label">最高</span><span class="value mono" id="hud-ceil">0.0 m</span></div>
+                </div>
             </div>
             <!-- 右上：任務卡堆疊（同角多卡 --sp-3 垂直堆疊，禁止重疊） -->
             <div class="hud-stack hud-stack-tr">
@@ -235,6 +241,12 @@
                 </div>
             </div>
             <div id="heading-hud" style="display:none;"></div>
+            <!-- 降落 / 程式結束的本趟小卡。過關時改由結算 modal 顯示，不跟這張疊。 -->
+            <div id="flight-review" class="hud" hidden>
+                <div class="hud-title">本趟飛行</div>
+                <div id="flight-review-grid" class="flight-review-grid"></div>
+                <button type="button" id="flight-review-close" class="flight-review-close">關閉</button>
+            </div>
         </div>
     </div>
 </div>
@@ -257,7 +269,11 @@
 <div id="level-complete" class="modal-overlay">
     <div class="modal-card">
         <div class="level-intro-title">🎉 過關！</div>
-        <div class="level-intro-body" id="level-complete-body"></div>
+        <div class="level-intro-body" id="level-complete-body">
+            <p id="level-complete-time"></p>
+            <div class="flight-review-kicker">本趟飛行</div>
+            <div id="level-complete-review" class="flight-review-grid"></div>
+        </div>
         <button id="level-complete-next" class="modal-btn">下一關 →</button>
         <button id="level-complete-replay" class="modal-btn modal-btn-ghost">↻ 再玩一次</button>
         <button id="level-complete-stay" class="modal-btn modal-btn-ghost">留在本關繼續飛</button>
@@ -481,6 +497,14 @@
             <div class="pad-tuning-row">
                 <button type="button" id="pad-inv-throttle" class="pad-toggle">升降反轉：關</button>
             </div>
+        </div>
+        <div id="pad-settings-yaw" class="pad-tuning">
+            <div class="pad-tuning-row">
+                <span class="pad-tuning-label pad-tuning-label-wide">偏航曲線</span>
+                <input id="pad-yaw-expo" class="pad-slider" type="range" min="0" max="100" step="1" value="0" aria-label="偏航曲線">
+                <span id="pad-yaw-expo-val" class="pad-tuning-val pad-tuning-val-wide mono">線性</span>
+            </div>
+            <p class="pad-note">預設線性，手感與關卡難度維持原樣。調高後小幅偏航較柔，推到底的轉速與原本相同。</p>
         </div>
         <p id="pad-settings-ble-note" class="pad-note" style="display:none;">BLE 手把已預先校正，軸向固定為美國手 Mode 2。飛行：A=起飛、B=降落、X=重置。選單：A=確認、B=返回、Y / Back=關卡、START=暫停。</p>
         <div id="pad-settings-gamepad-only" class="pad-section">

@@ -15,7 +15,11 @@ export function hashF64(h: bigint, x: number): bigint {
   return h;
 }
 
-/** 單 tick 結束後的無人機狀態混入 hash */
+/**
+ * 單 tick 結束後混入 hash 的只有位置 xyz、速度 xyz、yaw。
+ * 飛行回顧（空中時間、路徑長、最高速度、最高高度）由 FlightReview 另計，
+ * 故意不進這個函式，因此不影響 replayHash。
+ */
 export function hashDroneTick(h: bigint): bigint {
   h = hashF64(h, droneState.position.x);
   h = hashF64(h, droneState.position.y);
