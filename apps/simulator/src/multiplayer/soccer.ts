@@ -35,6 +35,8 @@ import {
 import { getSoccerFeel, SOCCER_FEELS } from '../soccer/flightFeel';
 import { activeSoccerField, setSoccerFieldFromServer, resetSoccerField } from '../soccer/field';
 import { showSoccerMatchHud, setSoccerMatchTimer, formatSoccerMatchLine, showSoccerFeel } from '../ui/soccerHud';
+import { hideSoccerResults, showSoccerResults } from '../ui/soccerResults';
+import { SoccerPenaltyLabel } from '@creafly/shared';
 import { GoalAnnounceOverlay } from '../ui/goalAnnounce';
 
 // ---- 常數（與 legacy / server 對齊）----
@@ -93,6 +95,10 @@ export const soccerState = {
   pkRound: 0,
   pkShooterId: null as string | null,
   pkDefenderId: null as string | null,
+  ruleset: 'f9a' as 'f9a' | 'taipei',
+  phase: 'idle',
+  deductions: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
+  firstGoal: null as SoccerTeam | null,
   /** 起槳後、GO 之前 */
   motorsArmed: false,
   myCard: null as 'yellow' | 'red' | null,
@@ -252,6 +258,7 @@ function teardownSoccerMatch(): void {
   bus.emit('soccer-exited', {}); // render 清場地 / 分身 / 彩帶（dispose）、還原機體
   showSoccerMatchHud(false);
   showSoccerFeel(false);
+  hideSoccerResults();
   flags.multiplayerLock = false;
   resetDroneState();
   bus.emit('trail-clear', {}); // 瞬移回原點後清軌跡，避免舊取樣點連到原點拉出長直線
@@ -295,6 +302,7 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       notePhase(prev);
       syncSoccerLock();
       updateMatchHud();
+      if (msg.status !== 'done') hideSoccerResults();
       break;
     }
     case 'soccer_players':
@@ -340,6 +348,7 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       );
       syncSoccerLock();
       updateMatchHud();
+      hideSoccerResults();
       break;
     case 'soccer_scores': {
       const prev = soccerState.status;
@@ -369,8 +378,13 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       break;
     }
     case 'soccer_warning':
-      toast(`警告：${msg.byName || ''}（第 ${msg.count} 次）`, 'error');
-      if (msg.by === wsState.myId) stateHud('警告：同理由再一次會變黃牌');
+      if (msg.deduction) {
+        toast(`扣分：${msg.byName || ''} ${SoccerPenaltyLabel.text(msg.reason)}`, 'error');
+        if (msg.deductions) soccerState.deductions = msg.deductions;
+      } else {
+        toast(`警告：${msg.byName || ''}（第 ${msg.count} 次）`, 'error');
+        if (msg.by === wsState.myId) stateHud('警告：同理由再一次會變黃牌');
+      }
       updateMatchHud();
       break;
     case 'soccer_safety':
@@ -424,6 +438,10 @@ function applyMatch(match: SoccerMatchMeta | undefined): void {
   soccerState.pkRound = match.pkRound || 0;
   soccerState.pkShooterId = match.pkShooterId ?? null;
   soccerState.pkDefenderId = match.pkDefenderId ?? null;
+  soccerState.ruleset = match.ruleset === 'taipei' ? 'taipei' : 'f9a';
+  soccerState.phase = match.phase || 'idle';
+  if (match.deductions) soccerState.deductions = match.deductions;
+  soccerState.firstGoal = match.firstGoal === 'blue' || match.firstGoal === 'red' ? match.firstGoal : null;
 }
 
 function notePhase(prev: SoccerMatchStatus): void {
@@ -432,6 +450,9 @@ function notePhase(prev: SoccerMatchStatus): void {
   if (s === 'break') stateHud('⏸ 局間休息');
   else if (s === 'golden') stateHud('⚡ 平手！黃金進球，先進球者勝');
   else if (s === 'pk') stateHud('🎯 點球：每球 10 秒，按 K 可以換人來罰');
+  else if (soccerState.ruleset === 'taipei' && soccerState.phase === 'landing') {
+    stateHud('時間到，10 秒內降落');
+  }
 }
 
 /** 玩法固定前鋒穿門。舊封包若還帶 ball，忽略、維持 striker。 */
@@ -532,6 +553,16 @@ function showMatchResult(msg: SoccerEndMsg): void {
     return;
   }
   stateHud('🏁 足球結束！');
+  showSoccerResults({
+    ruleset: msg.match?.ruleset === 'taipei' ? 'taipei' : 'f9a',
+    winner: msg.winner,
+    goals: s,
+    deductions: msg.match?.deductions,
+    firstGoal: msg.match?.firstGoal,
+    sets: msg.match?.sets,
+    pkScores: msg.match?.pkScores,
+    reason: msg.reason,
+  });
   const sets = msg.match ? ` 局數 ${msg.match.sets.blue}:${msg.match.sets.red}` : '';
   const pk =
     msg.reason === 'pk' && msg.match
@@ -690,6 +721,9 @@ function updateMatchHud(): void {
       myTeam: team,
       myStriker: soccerState.myStriker,
       needReturn: !!team && soccerState.armed[team] === false,
+      ruleset: soccerState.ruleset,
+      phase: soccerState.phase,
+      deductions: soccerState.deductions,
       pkScores: soccerState.pkScores,
       pkTurn: soccerState.pkTurn,
       pkRound: soccerState.pkRound,

@@ -6,6 +6,7 @@ export * from './levelGoalPresets';
 export * from './levelEditorUtils';
 export * from './levelObjectDefaults';
 export * from './protocol';
+export * from './taipeiSoccer';
 export * from './goalAnnounce';
 export * from './entitlement';
 export * from './math';

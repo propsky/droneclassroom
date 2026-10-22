@@ -101,6 +101,8 @@ F9A_B = SoccerClassSpec(
 
 PRESETS: dict[str, SoccerClassSpec] = {F9A_A.code: F9A_A, F9A_B.code: F9A_B}
 DEFAULT_CLASS: SoccerClassCode = "F9A-A"
+# 房間設定用來「取消覆寫、改跟伺服器 SOCCER_CLASS」。不是一種場地。
+SERVER_DEFAULT = "server"
 
 
 def preset_for(code: str | None) -> SoccerClassSpec:
@@ -108,3 +110,43 @@ def preset_for(code: str | None) -> SoccerClassSpec:
     if code is not None and code in PRESETS:
         return PRESETS[code]
     return F9A_A
+
+
+class RoomSoccerClass:
+    """一間房用哪一組場地。
+
+    房間可以釘選 F9A-A 或 F9A-B。沒釘選就用伺服器 SOCCER_CLASS
+    （沒設環境變數時程式預設 F9A-A，與改版前整台伺服器同一組）。
+    班級列的 settings JSON 用鍵 soccerClass，不另開資料庫欄位。
+    """
+
+    @staticmethod
+    def parse(raw: object) -> SoccerClassCode | None:
+        """只接受兩組代碼。其他（含空、server、打錯字）都當沒指定。"""
+        if raw in PRESETS:
+            return raw  # type: ignore[return-value]
+        return None
+
+    @staticmethod
+    def resolve(explicit: str | None, fallback: str) -> SoccerClassSpec:
+        """explicit 有合法代碼就用它，否則用 fallback（再不行回到 F9A-A）。"""
+        chosen = explicit if RoomSoccerClass.parse(explicit) else fallback
+        return preset_for(chosen)
+
+    @staticmethod
+    def read(settings: object) -> SoccerClassCode | None:
+        """從 teams.settings 讀釘選。沒有鍵、或值不合法 = 跟伺服器。"""
+        if not isinstance(settings, dict):
+            return None
+        return RoomSoccerClass.parse(settings.get("soccerClass"))
+
+    @staticmethod
+    def write(settings: dict | None, code: str | None) -> dict:
+        """寫回釘選。code 空 = 拿掉鍵（改跟伺服器）。其他鍵（例如 rooms）保留。"""
+        nxt = dict(settings or {})
+        parsed = RoomSoccerClass.parse(code)
+        if parsed is None:
+            nxt.pop("soccerClass", None)
+        else:
+            nxt["soccerClass"] = parsed
+        return nxt

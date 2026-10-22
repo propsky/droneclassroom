@@ -9,8 +9,9 @@
 - 位置級防作弊（base.py）：座標 clamp、速度上限
 - 賽終狀態線上值沿用 legacy 的 'done'（shared/protocol.ts 註記 'ended' 與 legacy 實際不符，
   以 legacy 為準）
-- 場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
-  完整 SoccerFieldDef（含護罩半徑），client 據此渲染。SOCCER_CLASS 選子類
+-     場地尺寸只在 soccer_presets.py（F9A-A／F9A-B）：soccer_state / soccer_go 下發
+  完整 SoccerFieldDef（含護罩半徑），client 據此渲染。每間房自己選子類；
+  沒選的房用 SOCCER_CLASS（沒設環境變數時是 F9A-A）。
 - 玩法只有前鋒穿門（SoccerStartMsg.mode='striker'）：只有攻擊手穿對方圓環得分；
     得分後該隊全員先回己方半場才能再攻（F9A.8.4）。沒回完就再穿，這一球不算，不罰球。
     穿環看整顆護罩與行進方向，伺服器不單信 soccer_goal。
@@ -34,7 +35,7 @@ from ..config import Settings
 from ..protocol import SoccerPosMsg, SoccerStartMode
 from ..roster import Roster, StudentRecord, send_safe
 from .base import MIN_POS_INTERVAL_MS, BaseGame, FieldBounds, game_player_key
-from .soccer_presets import F9A_A, SoccerClassSpec, preset_for
+from .soccer_presets import F9A_A, SoccerClassCode, SoccerClassSpec, preset_for
 from .soccer_rules import (
     CROSS_GRANT_MS,
     PENALTY_SEC,
@@ -44,6 +45,7 @@ from .soccer_rules import (
     false_start_radius,
     shield_passes_ring,
 )
+from .taipei_rules import DWELL_MS, LAND_GRACE_SEC, RULESETS, TaipeiRules
 
 logger = logging.getLogger("creafly.api.games.soccer")
 
@@ -83,6 +85,8 @@ class SoccerField:
     shield_r: float
     start_depth: float
     max_players: int
+    # 子類代碼（F9A-A／F9A-B）。房間列表與換場地都看這個。
+    code: SoccerClassCode = "F9A-A"
 
     @property
     def goal_z(self) -> float:
@@ -104,6 +108,7 @@ class SoccerField:
             shield_r=chosen.shield_r,
             start_depth=chosen.start_depth,
             max_players=chosen.max_players,
+            code=chosen.code,
         )
 
     @classmethod
@@ -167,6 +172,9 @@ class SoccerPlayer:
     vz: float = 0.0
     # 倒數時是否已在起飛點報到（報到後再離開才算搶跑）
     spawn_checked_in: bool = False
+    # 臺北賽制：這一場已經為這位扣過的一次性項目
+    early_takeoff_penalized: bool = False
+    late_landing_penalized: bool = False
 
 
 class SoccerGame(BaseGame):
@@ -179,9 +187,12 @@ class SoccerGame(BaseGame):
         *,
         air_contact_cards: bool = False,
         tie_break: str = "pk_then_golden",
+        ruleset: str = "f9a",
     ) -> None:
         super().__init__(roster)
+        self.players: dict[str, SoccerPlayer] = {}
         self.field = field or SoccerField.from_spec(F9A_A)
+        self._bind_field(self.field)
         # 空中機對機接近速度罰牌。預設關（2026 F9A.9 沒有這條）；教學可打開。
         # 打開時走警告 → 黃牌 → 紅牌，不是直接發牌。
         self.air_contact_cards = air_contact_cards
@@ -189,6 +200,13 @@ class SoccerGame(BaseGame):
             tie_break if tie_break in TIE_BREAKS else "pk_then_golden"  # type: ignore[assignment]
         )
         self.tie_break: TieBreak = self.tie_break_default
+        self.ruleset_default: str = ruleset if ruleset in RULESETS else "f9a"
+        self.ruleset: str = self.ruleset_default
+        self.deductions: dict[str, int] = {"blue": 0, "red": 0}
+        self.first_goal: str | None = None
+        self._dwell_ms: dict[str, float] = {}
+        self._dwell_penalized: set[str] = set()
+        self._dwell_mark: float | None = None
         self._rng = random.Random()
         # 玩法固定前鋒穿門。推球已移除，開賽若送來 ball 會在 start() 拒絕。
         self.mode = SoccerStartMode.STRIKER
@@ -197,7 +215,6 @@ class SoccerGame(BaseGame):
         self.scores: dict[str, int] = {"blue": 0, "red": 0}
         self.armed: dict[str, bool] = {"blue": True, "red": True}  # 得分隊全員回半場前為 False
         self.winner: str | None = None
-        self.players: dict[str, SoccerPlayer] = {}
         # 三局兩勝。phase：idle / period / break / golden / pk
         self.phase = "idle"
         self.period = 0
@@ -216,28 +233,80 @@ class SoccerGame(BaseGame):
         # 前鋒失能後的暫停換人，每局一次（F9A.8.5）
         self.timeout_used: dict[str, bool] = {"blue": False, "red": False}
         self._contact_latch: set[tuple[str, str]] = set()
-        # 防作弊：位置 clamp 邊界（隨場地設定換算，不留舊尺寸殘值）
+
+    def _bind_field(self, field: SoccerField) -> None:
+        """換上這一組尺寸：邊界、兩隊攻守門。比賽進行中不要呼叫。"""
+        self.field = field
         self._clamp = FieldBounds(
-            max_x=self.field.half_x,
-            max_z=self.field.half_z,
+            max_x=field.half_x,
+            max_z=field.half_z,
             min_y=0.0,
-            max_y=self.field.ceil,
+            max_y=field.ceil,
         )
-        # 每隊站位端 / 攻門 / 守門（z 軸，隨場地換算）：
         # 藍隊站 -z 端、攻 +z 門；紅隊站 +z 端、攻 -z 門。
-        # 門在 goal_z（底線往場內 goal_inset、與 client 門環視覺同位置），不是 half_z 端牆。
-        self._teams: dict[str, dict[str, float]] = {
+        # 門在 goal_z（底線往場內 goal_inset），不是 half_z 端牆。
+        self._teams = {
             "blue": {
-                "stationZ": -self.field.half_z,
-                "attackGoalZ": self.field.goal_z,
-                "defendGoalZ": -self.field.goal_z,
+                "stationZ": -field.half_z,
+                "attackGoalZ": field.goal_z,
+                "defendGoalZ": -field.goal_z,
             },
             "red": {
-                "stationZ": self.field.half_z,
-                "attackGoalZ": -self.field.goal_z,
-                "defendGoalZ": self.field.goal_z,
+                "stationZ": field.half_z,
+                "attackGoalZ": -field.goal_z,
+                "defendGoalZ": field.goal_z,
             },
         }
+        for p in self.players.values():
+            p.x = min(max(p.x, -field.half_x), field.half_x)
+            p.z = min(max(p.z, -field.half_z), field.half_z)
+            p.y = min(max(p.y, 0.0), field.ceil)
+
+    def _fit_roster_to_cap(self) -> None:
+        """換到人數較少的子類時，多出來的人先卸隊。前鋒優先留下。"""
+        cap = self.field.max_players
+        for team in SOCCER_TEAM_NAMES:
+            members = [p for p in self.players.values() if p.team == team and p.active]
+            if len(members) <= cap:
+                self._ensure_striker(team)
+                continue
+            ranked = sorted(members, key=lambda p: (0 if p.striker else 1, p.record.id))
+            keep = {p.record.id for p in ranked[:cap]}
+            for p in members:
+                if p.record.id not in keep:
+                    p.team = None
+                    p.striker = False
+            self._ensure_striker(team)
+
+    async def set_class(self, spec: SoccerClassSpec) -> bool:
+        """換成另一組場地。進行中（含倒數、休息、黃金、PK）拒絕，避免半場改尺寸。
+
+        回 True 表示現在就是這一組（本來就是，或剛換上並廣播）。
+        """
+        if self.field.code == spec.code:
+            return True
+        if self.status not in ("idle", "done"):
+            logger.info("[Soccer] 比賽進行中，拒絕把場地改成 %s", spec.code)
+            return False
+        self._bind_field(SoccerField.from_spec(spec))
+        self._fit_roster_to_cap()
+        if self._active():
+            self._assign_spawns()
+        await self.broadcast_state()
+        logger.info("[Soccer] 場地改為 %s", spec.code)
+        return True
+
+    async def set_ruleset(self, code: str) -> bool:
+        """換賽制。進行中若跟這一場不同就拒絕，避免半場改規則。"""
+        chosen = code if code in RULESETS else "f9a"
+        if self.status not in ("idle", "done") and chosen != self.ruleset:
+            logger.info("[Soccer] 比賽進行中，拒絕把賽制改成 %s", chosen)
+            return False
+        self.ruleset_default = chosen
+        if self.status in ("idle", "done"):
+            self.ruleset = chosen
+            await self.broadcast_state()
+        return True
 
     # ---------- 內部狀態 ----------
 
@@ -390,6 +459,13 @@ class SoccerGame(BaseGame):
             "pkShooterId": self.pk_shooter_id,
             "pkDefenderId": self.pk_defender_id,
             "tieBreak": self.tie_break,
+            "ruleset": self.ruleset,
+            "firstGoal": self.first_goal,
+            "deductions": dict(self.deductions),
+            "netScores": {
+                "blue": self.scores["blue"] - self.deductions["blue"],
+                "red": self.scores["red"] - self.deductions["red"],
+            },
         }
 
     def _clear_return_flags(self) -> None:
@@ -413,7 +489,16 @@ class SoccerGame(BaseGame):
         self._sync_armed()
 
     def _winner_now(self) -> str:
-        """依局數、當前節比分、PK 點球決定勝者；都平手才是 draw。"""
+        """依局數、當前節比分、PK 點球決定勝者；都平手才是 draw。
+
+        臺北賽制改看淨分，淨分相同則先進第 1 球的隊伍勝。
+        """
+        if self.ruleset == "taipei":
+            return TaipeiRules.winner(
+                self.scores["blue"] - self.deductions["blue"],
+                self.scores["red"] - self.deductions["red"],
+                self.first_goal,
+            )
         if self.phase == "pk" and self.pk_scores["blue"] != self.pk_scores["red"]:
             return "blue" if self.pk_scores["blue"] > self.pk_scores["red"] else "red"
         if self.sets["blue"] != self.sets["red"]:
@@ -579,7 +664,12 @@ class SoccerGame(BaseGame):
             or not self.armed.get(p.team, True)
         ):
             return
+        # 臺北賽制時間到之後只剩降落，不再計分。
+        if self.ruleset == "taipei" and self.phase != "period":
+            return
         self.scores[p.team] += 1
+        if self.ruleset == "taipei" and self.first_goal is None:
+            self.first_goal = p.team
         ok = self._goal_ok(team=p.team, by=record.id, by_name=record.name)
         if self.status == "golden":
             await self._announce_goal(ok)
@@ -607,7 +697,11 @@ class SoccerGame(BaseGame):
     # ---------- 老師訊息 ----------
 
     async def start(
-        self, duration_sec: float, mode: str = "striker", tie_break: str | None = None
+        self,
+        duration_sec: float,
+        mode: str = "striker",
+        tie_break: str | None = None,
+        ruleset: str | None = None,
     ) -> None:
         """開始比賽：前鋒穿門。推球（ball）拒絕、維持現狀。比分與局數歸零後進入 3 秒倒數。"""
         accepted = SoccerStartMode.playable(mode)
@@ -617,8 +711,13 @@ class SoccerGame(BaseGame):
         self.mode = accepted
         chosen = tie_break if tie_break in TIE_BREAKS else self.tie_break_default
         self.tie_break = chosen  # type: ignore[assignment]
+        if ruleset in RULESETS:
+            self.ruleset = ruleset
+        else:
+            self.ruleset = self.ruleset_default
         self.duration_sec = max(5, duration_sec or SOCCER_DURATION_DEFAULT)
         self.scores = {"blue": 0, "red": 0}
+        self._reset_taipei_book()
         self.sets = {"blue": 0, "red": 0}
         self.pk_scores = {"blue": 0, "red": 0}
         self.pk_taken = {"blue": 0, "red": 0}
@@ -709,6 +808,8 @@ class SoccerGame(BaseGame):
         self.pk_shooter_id = None
         self.pk_defender_id = None
         self.pk_started = False
+        self.ruleset = self.ruleset_default
+        self._reset_taipei_book()
         self._clear_return_flags()
         self._clear_discipline(restore=True, match=True)
         self.winner = None
@@ -1082,6 +1183,15 @@ class SoccerGame(BaseGame):
         if dist <= false_start_radius(self.field.shield_r):
             p.spawn_checked_in = True
             return False
+        # 已在起飛點報到又離開：臺北賽制扣 1 分（每位只扣一次）。座標仍不採用。
+        if (
+            p.spawn_checked_in
+            and self.ruleset == "taipei"
+            and not p.early_takeoff_penalized
+            and p.team in SOCCER_TEAM_NAMES
+        ):
+            p.early_takeoff_penalized = True
+            await self._deduct(p.team, "early_takeoff", p)
         return True
 
     async def _on_segment(self, p: SoccerPlayer, prev: tuple[float, float, float]) -> None:
@@ -1110,6 +1220,20 @@ class SoccerGame(BaseGame):
             return
         if self.status not in ("running", "golden"):
             return
+        if (
+            self.ruleset == "taipei"
+            and self.phase == "period"
+            and TaipeiRules.reverse_through_own(
+                prev,
+                curr,
+                defend_goal_z=self._teams[p.team]["defendGoalZ"],
+                goal_y=self.field.goal_y,
+                goal_r=self.field.goal_r,
+                half_thick=self.field.goal_tube,
+                shield_r=self.field.shield_r,
+            )
+        ):
+            await self._deduct(p.team, "reverse_block", p)
         if OwnGoal.shield_into_own(
             prev,
             curr,
@@ -1200,9 +1324,110 @@ class SoccerGame(BaseGame):
         await self.broadcast_state()
         logger.info("[Soccer] 安全事件 %s（%s），本局少一人", p.record.name, reason)
 
-    async def warn(self, student_id: str, reason: str = "conduct") -> None:
-        """老師（裁判）記一次警告。同理由兩次升黃牌。"""
-        p = next((q for q in self._active() if q.record.id == student_id), None)
+    def _reset_taipei_book(self) -> None:
+        """清掉這一場的扣分、先進球、停留計時。F9A 不使用這些數字。"""
+        self.deductions = {"blue": 0, "red": 0}
+        self.first_goal = None
+        self._dwell_ms = {}
+        self._dwell_penalized = set()
+        self._dwell_mark = None
+        for p in self.players.values():
+            p.early_takeoff_penalized = False
+            p.late_landing_penalized = False
+
+    async def _deduct(self, team: str, reason: str, player: SoccerPlayer | None = None) -> None:
+        """臺北賽制扣 1 分。F9A 直接略過，避免警告升牌的路徑改到比分。"""
+        if self.ruleset != "taipei" or team not in SOCCER_TEAM_NAMES:
+            return
+        if self.status not in ("countdown", "running", "break", "golden", "pk"):
+            return
+        self.deductions[team] += 1
+        who = player.record if player is not None else None
+        msg = {
+            "type": "soccer_warning",
+            "by": who.id if who is not None else "",
+            "byName": who.name if who is not None else ("藍隊" if team == "blue" else "紅隊"),
+            "team": team,
+            "reason": reason,
+            "count": self.deductions[team],
+            "deduction": 1,
+            "deductions": dict(self.deductions),
+        }
+        await self._broadcast(self._active(), msg)
+        await self._broadcast_teachers(msg)
+        await self.broadcast_scores()
+        logger.info("[Soccer] 臺北賽制 %s 扣 1 分（%s）", team, reason)
+
+    async def _tick_own_goal_dwell(self) -> None:
+        """停在己方球門開口裡滿 1 秒扣 1 分。離開再進來可以再扣。"""
+        now = self.now_ms()
+        prev = self._dwell_mark
+        self._dwell_mark = now
+        if prev is None:
+            return
+        dt = min(500.0, max(0.0, now - prev))
+        for p in self._active():
+            if p.disabled or p.team not in SOCCER_TEAM_NAMES:
+                continue
+            inside = TaipeiRules.inside_own_goal(
+                (p.x, p.y, p.z),
+                goal_z=self._teams[p.team]["defendGoalZ"],
+                goal_y=self.field.goal_y,
+                goal_r=self.field.goal_r,
+                half_thick=self.field.goal_tube,
+                shield_r=self.field.shield_r,
+            )
+            pid = p.record.id
+            if not inside:
+                self._dwell_ms.pop(pid, None)
+                self._dwell_penalized.discard(pid)
+                continue
+            if pid in self._dwell_penalized:
+                continue
+            acc = self._dwell_ms.get(pid, 0.0) + dt
+            if acc < DWELL_MS:
+                self._dwell_ms[pid] = acc
+                continue
+            self._dwell_penalized.add(pid)
+            self._dwell_ms.pop(pid, None)
+            await self._deduct(p.team, "own_goal_dwell", p)
+
+    async def _begin_landing(self) -> None:
+        """時間到：再給 10 秒降落。這段不再計分。"""
+        self.phase = "landing"
+        self.end_time = int(self.now_ms() + LAND_GRACE_SEC * 1000)
+        self._dwell_mark = None
+        await self.broadcast_scores()
+        logger.info("[Soccer] 臺北賽制時間到，%.0f 秒內降落", LAND_GRACE_SEC)
+
+    async def _finish_landing(self) -> None:
+        """10 秒後還沒落地的人，每位扣 1 分，然後結算。"""
+        for p in self._active():
+            if p.disabled or p.ejected_match or p.team not in SOCCER_TEAM_NAMES:
+                continue
+            if p.late_landing_penalized or TaipeiRules.landed(p.y):
+                continue
+            p.late_landing_penalized = True
+            await self._deduct(p.team, "late_landing", p)
+        await self._end("taipei")
+
+    async def warn(
+        self,
+        student_id: str,
+        reason: str = "conduct",
+        team: str | None = None,
+        deduct: bool = False,
+    ) -> None:
+        """老師（裁判）記一次警告。F9A 同理由兩次升黃牌。
+
+        臺北賽制且 deduct：改扣該隊 1 分，不升牌。沒有 studentId 時用 team。
+        """
+        p = next((q for q in self._active() if student_id and q.record.id == student_id), None)
+        if self.ruleset == "taipei" and deduct:
+            target = p.team if p is not None and p.team in SOCCER_TEAM_NAMES else team
+            if target in SOCCER_TEAM_NAMES:
+                await self._deduct(target, reason or "manual", p)
+            return
         if p is None or p.team not in SOCCER_TEAM_NAMES:
             return
         await self._give_warning(p, reason or "conduct")
@@ -1379,8 +1604,16 @@ class SoccerGame(BaseGame):
         if self.status in ("running", "golden"):
             await self._tick_returns()
             await self._tick_contacts()
+            if self.ruleset == "taipei" and self.phase == "period":
+                await self._tick_own_goal_dwell()
         if self.status == "running" and now >= self.end_time:
-            await self._resolve_period()
+            if self.ruleset == "taipei":
+                if self.phase == "landing":
+                    await self._finish_landing()
+                else:
+                    await self._begin_landing()
+            else:
+                await self._resolve_period()
         elif self.status == "break" and now >= self.end_time:
             self.period += 1
             await self._open_period(first=False)
