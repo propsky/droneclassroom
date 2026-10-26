@@ -112,6 +112,11 @@ export interface CoreEventMap {
   'soccer-exited': Record<string, never>;
   /** 窄邊定點視角切換：sign = 站哪個 z 端往場內看（+1 / -1）；null = 還原跟隨視角 */
   'soccer-view-changed': { sign: number | null };
+  /**
+   * 相機模式切換（跟隨／全場／考證／第一人稱）。
+   * 足球前景半透明聽這個：離開全場或考證要還原不透明。
+   */
+  'camera-view-changed': { mode: 'follow' | 'team' | 'exam' | 'fpv' };
   /** 練習 P-5 假人（球形；位置每 tick 更新。碰撞在 practice，用護罩半徑） */
   'soccer-dummies-changed': { spheres: { x: number; y: number; z: number; r: number }[] };
   // ---- 搖桿校正精靈（input/calibration.ts → ui/calibrationOverlay.ts）----

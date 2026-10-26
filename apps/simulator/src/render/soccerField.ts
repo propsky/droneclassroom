@@ -4,6 +4,7 @@
 import {
   Scene,
   Mesh,
+  LinesMesh,
   MeshBuilder,
   StandardMaterial,
   DynamicTexture,
@@ -52,6 +53,7 @@ import { soccerScoreboardPoses } from '../soccer/scoreboardPose';
 import { createSoccerScoreboard, stretchScoreboardRods, type SoccerScoreboard } from './soccerScoreboard';
 import { setSoccerArenaAudio } from '../ui/audio';
 import { setSoccerEndScreen, setSoccerFlag } from '../ui/soccerHud';
+import { SOCCER_SIGHT_VEIL, soccerSightVeiled, type SoccerSightMode } from './soccerSight';
 
 const CLONE_LABEL_Y = 0.34;
 
@@ -86,6 +88,11 @@ interface EnclosureFace {
   sign: 1 | -1;
   inner: number;
 }
+
+/** 全場／考證可淡化的一片。end 是場地的 +z／-z，不是「鏡頭近端」。 */
+type SightVeil =
+  | { kind: 'solid'; mesh: Mesh; end: 1 | -1 }
+  | { kind: 'line'; mesh: LinesMesh; end: 1 | -1; baseAlpha: number };
 
 interface SavedOutdoor {
   clear: Color4;
@@ -135,6 +142,11 @@ export class SoccerFieldVisuals {
   private goalFlashZ = 0;
   private preview: string | null = null;
   private previewHeld = false;
+  /** 門環、端牆中橫梁、兩端牆網。只在全場／考證淡化鏡頭這一端。 */
+  private sightVeils: SightVeil[] = [];
+  private sightMode: SoccerSightMode = 'follow';
+  /** 鏡頭站的 z 端。練習預設 +z。 */
+  private nearEnd: 1 | -1 = 1;
   private previewBurstTick = 0;
   private casters: Mesh[] = [];
 
@@ -148,6 +160,14 @@ export class SoccerFieldVisuals {
     bus.on('soccer-dummies-changed', ({ spheres }) => this.syncDummies(spheres));
     bus.on('soccer-field-changed', () => {
       if (this.active) this.build(this.variant);
+    });
+    bus.on('camera-view-changed', ({ mode }) => {
+      this.sightMode = mode;
+      this.applySightVeil();
+    });
+    bus.on('soccer-view-changed', ({ sign }) => {
+      if (sign !== null) this.nearEnd = sign > 0 ? 1 : -1;
+      this.applySightVeil();
     });
     bus.on('sound', ({ name }) => {
       if (!this.active) return;
@@ -169,6 +189,14 @@ export class SoccerFieldVisuals {
       },
       burstGoal: () => this.burstGoal(),
       burstHit: () => this.burstHit(),
+      sight: () =>
+        this.sightVeils.map((v) => ({
+          name: v.mesh.name,
+          end: v.end,
+          kind: v.kind,
+          visibility: v.mesh.visibility,
+          alpha: v.kind === 'line' ? v.mesh.alpha : 1,
+        })),
     };
     (window as unknown as Record<string, unknown>).__creaflySoccer = api;
   }
@@ -228,6 +256,7 @@ export class SoccerFieldVisuals {
       stretchScoreboardRods(board.root, F.top - 0.05, pose.height);
       this.scoreboards.push(board);
     }
+    this.applySightVeil();
     this.syncBroadcast();
     this.syncLedger();
   }
@@ -348,10 +377,17 @@ export class SoccerFieldVisuals {
     }
 
     const beamT = 0.16;
-    const ys = [beamT / 2, F.top * 0.5, F.top - beamT / 2];
+    const midY = F.top * 0.5;
+    const ys = [beamT / 2, midY, F.top - beamT / 2];
     for (const y of ys) {
-      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, -F.halfZ, steel);
-      addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, F.halfZ, steel);
+      const beamNeg = addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, -F.halfZ, steel);
+      const beamPos = addBox('soccerBeamX', F.halfX * 2, beamT, beamT, 0, y, F.halfZ, steel);
+      // 端牆中橫梁會橫過全場／考證。上下兩根與長邊橫梁不擋開球視線，維持實心。
+      // 鋼架材質是共用的，只改這兩根的 visibility，不要動 steel.alpha。
+      if (y === midY) {
+        this.trackSightVeil(beamNeg, -1);
+        this.trackSightVeil(beamPos, 1);
+      }
       addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, -F.halfX, y, 0, steel);
       addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, F.halfX, y, 0, steel);
     }
@@ -439,6 +475,7 @@ export class SoccerFieldVisuals {
       Math.round(((F.halfX - inset) * 2) / cell),
       netLo,
       netHi,
+      -1,
     );
     this.addSplitNet(
       'soccerNetNear',
@@ -448,6 +485,7 @@ export class SoccerFieldVisuals {
       Math.round(((F.halfX - inset) * 2) / cell),
       netLo,
       netHi,
+      1,
     );
     this.addSplitNet(
       'soccerNetLeft',
@@ -628,12 +666,23 @@ export class SoccerFieldVisuals {
     cellsU: number,
     lower: Color3,
     upper: Color3,
+    /** 端牆網才傳。長邊網不擋開球視線，不進半透明名單。 */
+    end: 1 | -1 | null = null,
   ): void {
     const cell = 0.18;
     const mid = height * 0.45;
-    this.addNet(name + 'Lo', origin, axisU, new Vector3(0, mid, 0), cellsU, Math.max(2, Math.round(mid / cell)), lower, 0.84);
+    const lo = this.addNet(
+      name + 'Lo',
+      origin,
+      axisU,
+      new Vector3(0, mid, 0),
+      cellsU,
+      Math.max(2, Math.round(mid / cell)),
+      lower,
+      0.84,
+    );
     const hi = origin.add(new Vector3(0, mid, 0));
-    this.addNet(
+    const upperNet = this.addNet(
       name + 'Hi',
       hi,
       axisU,
@@ -643,6 +692,10 @@ export class SoccerFieldVisuals {
       upper,
       0.92,
     );
+    if (end) {
+      this.trackSightLine(lo, end);
+      this.trackSightLine(upperNet, end);
+    }
   }
 
   private addNet(
@@ -654,7 +707,7 @@ export class SoccerFieldVisuals {
     cellsV: number,
     color: Color3,
     alpha: number,
-  ): Mesh {
+  ): LinesMesh {
     const lines: Vector3[][] = [];
     const cu = Math.max(2, cellsU);
     const cv = Math.max(2, cellsV);
@@ -803,6 +856,8 @@ export class SoccerFieldVisuals {
     ring.receiveShadows = true;
     this.cast(ring);
     this.goals.push({ z, color, mat, baseEmissive: c.scale(0.92) });
+    // 碰撞烤的是這顆 mesh 的三角形，跟後來的 visibility 無關。
+    this.trackSightVeil(ring, z > 0 ? 1 : -1);
     return ring;
   }
 
@@ -1204,6 +1259,33 @@ export class SoccerFieldVisuals {
     this.casters.push(mesh);
   }
 
+  /** 記下全場／考證可淡化的門環或端牆中橫梁。不進碰撞。鋼架材質共用，只改 visibility。 */
+  private trackSightVeil(mesh: Mesh, end: 1 | -1): void {
+    this.sightVeils.push({ kind: 'solid', mesh, end });
+  }
+
+  /** 端牆網是線段，alpha 在 LinesMesh 上，不走材質。 */
+  private trackSightLine(mesh: LinesMesh, end: 1 | -1): void {
+    this.sightVeils.push({ kind: 'line', mesh, end, baseAlpha: mesh.alpha });
+  }
+
+  /**
+   * 全場／考證：鏡頭這一端的門環、中橫梁、端網變半透明，看得到後面的球場。
+   * 另一端（進攻門）維持實心，才瞄得準。跟隨與第一人稱還原。
+   * 鋼架是同一份材質，只用 mesh.visibility，避免長邊橫梁一起變淡。
+   */
+  private applySightVeil(): void {
+    for (const veil of this.sightVeils) {
+      if (veil.mesh.isDisposed()) continue;
+      const on = this.active && soccerSightVeiled(this.sightMode, veil.end, this.nearEnd);
+      if (veil.kind === 'line') {
+        veil.mesh.alpha = on ? SOCCER_SIGHT_VEIL : veil.baseAlpha;
+      } else {
+        veil.mesh.visibility = on ? SOCCER_SIGHT_VEIL : 1;
+      }
+    }
+  }
+
   /** 記下朝場內的那一面。center／thickness 沿 axis。 */
   private trackFace(
     mesh: Mesh,
@@ -1248,6 +1330,7 @@ export class SoccerFieldVisuals {
     for (const mesh of this.casters) this.shadows?.removeShadowCaster(mesh);
     this.casters = [];
     this.enclosure = [];
+    this.sightVeils = [];
     this.fieldMeshes.forEach((m) => m.dispose(false, true));
     this.fieldMeshes = [];
     this.goalMeshes = [];
