@@ -159,7 +159,7 @@ export class CameraRig {
       return true;
     }
 
-    // ⚽ 足球全場：站在己方端牆內側、偏離門軸，才不會被近端門框擋住。
+    // ⚽ 足球全場：退到近端門後方並偏離門軸，才不會從門洞看出去。
     if (this.soccerSign !== null && this.mode === 'team') {
       const sign = this.soccerSign > 0 ? 1 : -1;
       this.place(PilotView.soccerTeam(activeSoccerField(), sign));
