@@ -137,6 +137,7 @@ export class CameraRig {
     this.mode = mode;
     this.fpv = mode === 'fpv';
     if (mode === 'follow' && this.soccerSign != null) this.soccerSnap = true;
+    bus.emit('camera-view-changed', { mode: this.mode });
   }
 
   /** 每個渲染幀更新（pos/yaw 已是插值後的值）。回傳機身是否應顯示。 */
