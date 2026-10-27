@@ -111,10 +111,12 @@ class StudentsCreateResponse(BaseModel):
     """建立結果 + 邀請信寄送結果（email → true/false；停用寄信時全 false）。"""
 
     created: list[StudentEntry]
-    # 沿用既有帳號、只加入這個班（不是新建 Student）
+    # 本班自己建立、之前移出的學生，這次加回來（不是新建 Student）
     joined: list[StudentEntry] = []
     invitesSent: dict[str, bool]  # noqa: N815
-    # 既有帳號的「你已被加入班級」通知（不是設密碼邀請）
+    # 已有帳號的 email：老師不能直接把別人的帳號掛進班，只寄信請本人用班級碼加入
+    pendingJoin: list[str] = []  # noqa: N815
+    # 寄給 pendingJoin 的「邀請你加入班級」信（email → true/false）
     noticesSent: dict[str, bool] = {}  # noqa: N815
 
 
@@ -424,33 +426,27 @@ def _invite_mail(
     return subject, html, text
 
 
-def _added_mail(
+def _join_invite_mail(
     *,
     student_name: str,
     team_name: str,
     teacher_name: str,
     team_code: str,
-    student_code: str,
-    has_password: bool,
+    has_join_password: bool,
 ) -> tuple[str, str, str]:
-    """既有帳號加入班級的通知。不是設密碼邀請，連結裡沒有 invite token。"""
-    subject = f"CREAFLY 無人機教室 — 你已被加入「{team_name}」"
-    if has_password:
-        how = (
-            "請用你原本的帳號（email 與密碼）登入，不必重新設定密碼。\n"
-            f"也可以用班級碼 {team_code}、學生碼 {student_code} 登入（仍要輸入密碼）。"
-        )
-    else:
-        how = (
-            f"請用班級碼 {team_code}、學生碼 {student_code} 登入。\n"
-            "這個通知不是設密碼信；若要改用 email 登入，"
-            "請用原本那封設密碼邀請，或請原班級老師重寄。"
-        )
+    """已有帳號的人：老師邀請加入班級。要本人登入後自己輸入班級碼，老師不能直接掛帳號。"""
+    subject = f"CREAFLY 無人機教室 — 老師邀請你加入「{team_name}」"
+    how = (
+        "請用你原本的帳號登入，點右上角頭像 →「我的班級」，"
+        f"輸入班級碼 {team_code}"
+        + ("，再輸入老師給你的班級密碼。" if has_join_password else "。")
+        + "\n你自己加入之後，才會出現在這個班的名單上。"
+    )
     text = (
         f"{student_name} 同學你好：\n\n"
-        f"{teacher_name} 老師已把你加入 CREAFLY 教室無人機模擬器的班級「{team_name}」。\n"
+        f"{teacher_name} 老師邀請你加入 CREAFLY 教室無人機模擬器的班級「{team_name}」。\n"
         f"{how}\n\n"
-        "如果你不認識這位老師，忽略這封信即可。\n"
+        "如果你不認識這位老師，忽略這封信即可，你的帳號不會有任何變動。\n"
     )
     esc_student = html_escape.escape(student_name)
     esc_team = html_escape.escape(team_name)
@@ -458,11 +454,11 @@ def _added_mail(
     esc_how = html_escape.escape(how).replace("\n", "<br>")
     html = (
         f"<p>{esc_student} 同學你好：</p>"
-        f"<p>{esc_teacher} 老師已把你加入 CREAFLY 教室無人機模擬器的班級"
+        f"<p>{esc_teacher} 老師邀請你加入 CREAFLY 教室無人機模擬器的班級"
         f"「<b>{esc_team}</b>」。</p>"
         f"<p>{esc_how}</p>"
-        f"<p style=\"color:#666\">這封是加入班級通知，不用重新設定密碼。"
-        f"如果你不認識這位老師，忽略這封信即可。</p>"
+        f"<p style=\"color:#666\">這封不是設密碼信。"
+        f"如果你不認識這位老師，忽略這封信即可，你的帳號不會有任何變動。</p>"
     )
     return subject, html, text
 
@@ -513,22 +509,21 @@ async def _send_invite(
     return sent
 
 
-async def _send_notice(
-    request: Request, team: Team, student: Student, teacher: Teacher, student_code: str
+async def _send_join_invite(
+    request: Request, team: Team, student: Student, teacher: Teacher
 ) -> bool:
-    """既有帳號加入班級：只寄通知，不發邀請 token、不改 invite_status。"""
+    """已有帳號的人：寄「邀請你加入」信。不發 token、不改帳號、不建成員資格。"""
     assert student.email
     mailer: Mailer = request.app.state.mailer
-    subject, html, text = _added_mail(
+    subject, html, text = _join_invite_mail(
         student_name=student.name,
         team_name=team.name,
         teacher_name=teacher.name,
         team_code=team.team_code,
-        student_code=student_code,
-        has_password=student.password_hash is not None,
+        has_join_password=team.join_password_hash is not None,
     )
     if not mailer.enabled:
-        logger.info("[MAIL] 停用模式加入班級通知（%s）：%s", student.email, subject)
+        logger.info("[MAIL] 停用模式加入班級邀請（%s）：%s", student.email, subject)
         return False
     return await mailer.send(to=student.email, subject=subject, html=html, text=text)
 
@@ -544,10 +539,12 @@ async def students_create(
     teacher: CurrentTeacher,
     session: DbSession,
 ) -> StudentsCreateResponse:
-    """批次加名單。email 已有帳號 → 只加成員並寄加入通知；沒有才新建並寄設密碼邀請。
+    """批次加名單。沒有帳號的 email 新建並寄設密碼邀請；沒填 email 的走班級碼＋學生碼。
 
-    沒填 email 的維持班級碼＋學生碼。班內已經有這個 email（含大小寫）整批回滾 409。
-    建立先 commit（寄信失敗不影響已建立的學生）。
+    email 已有帳號時，老師不能直接把別人的帳號掛進自己班（否則可冒用未設密碼的帳號、
+    或撿走別人搶註的 email）：只寄信請本人登入後用班級碼加入，列在 pendingJoin。
+    例外是本班自己建立、之前移出的學生，可以直接加回。平台停用的帳號一律不動。
+    班內已經有這個 email（含大小寫）整批回滾 409。建立先 commit（寄信失敗不影響已建立的學生）。
     """
     team = await _owned_team(session, teacher, team_id, for_update=True)
     in_class = (
@@ -565,6 +562,7 @@ async def students_create(
     reserved: set[str] = set()
     created: list[tuple[Student, StudentMembership]] = []
     joined: list[tuple[Student, StudentMembership]] = []
+    pending: list[Student] = []
     batch_emails: set[str] = set()
     for i, item in enumerate(body.students, start=1):
         email = _normalize_email(item.email) if item.email else None
@@ -583,28 +581,30 @@ async def students_create(
                     raise HTTPException(
                         status_code=409, detail=f"第 {i} 列 email 已存在班內：{email}"
                     )
-                if existing.status != "active":
-                    existing.status = "active"
-                code = mem.student_code if mem is not None else await _next_student_code(
-                    session, team.id, reserved
-                )
-                if mem is None:
-                    mem = StudentMembership(
-                        student_id=existing.id,
-                        team_id=team.id,
-                        student_code=code,
-                        origin="linked",
+                if existing.status == "disabled":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"第 {i} 列 email 的帳號已被平台停用，請聯絡管理員：{email}",
                     )
-                    session.add(mem)
-                else:
+                if mem is not None and mem.origin == "created":
+                    # 本班自己建立、之前移出的學生：老師可以直接加回
+                    existing.status = "active"
                     mem.status = "active"
                     mem.left_at = None
-                if existing.team_id is None:
-                    existing.team_id = team.id
-                    existing.student_code = code
-                if existing.active_team_id is None:
-                    existing.active_team_id = team.id
-                joined.append((existing, mem))
+                    if existing.team_id is None:
+                        existing.team_id = team.id
+                        existing.student_code = mem.student_code
+                    if existing.active_team_id is None:
+                        existing.active_team_id = team.id
+                    joined.append((existing, mem))
+                    continue
+                if existing.status != "active":
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"第 {i} 列 email 的帳號已停用，無法加入：{email}",
+                    )
+                # 別人的帳號（自行註冊或他班建立）：不掛進班，請本人自己用班級碼加入
+                pending.append(existing)
                 continue
         elif email is None and item.email:
             raise HTTPException(status_code=422, detail=f"第 {i} 列 email 格式不正確")
@@ -666,17 +666,18 @@ async def students_create(
                 invites_sent[student.email] = await _send_invite(
                     request, session, team, student, teacher
                 )
-        for student, mem in joined:
+        for student in pending:
             if student.email:
-                notices_sent[student.email] = await _send_notice(
-                    request, team, student, teacher, mem.student_code
+                notices_sent[student.email] = await _send_join_invite(
+                    request, team, student, teacher
                 )
         await session.commit()
     logger.info(
-        "[Students] 班級 #%d 新建 %d、加入既有帳號 %d（邀請 %d、通知 %d）",
+        "[Students] 班級 #%d 新建 %d、加回本班學生 %d、待本人加入 %d（邀請 %d、通知 %d）",
         team.id,
         len(created),
         len(joined),
+        len(pending),
         sum(invites_sent.values()),
         sum(notices_sent.values()),
     )
@@ -684,6 +685,7 @@ async def students_create(
         created=[_entry(s, m) for s, m in created],
         joined=[_entry(s, m) for s, m in joined],
         invitesSent=invites_sent,
+        pendingJoin=[s.email for s in pending if s.email],
         noticesSent=notices_sent,
     )
 
@@ -717,6 +719,11 @@ async def student_reinvite(
     student, team, mem = await _owned_student(session, teacher, student_id, teamId)
     if student.status != "active" or mem.status != "active":
         raise HTTPException(status_code=404, detail="學生不存在")
+    if mem.origin != "created":
+        # 重寄會撤銷舊邀請：只有建立這個帳號的班級能做，別班不能撤掉原班的邀請
+        raise HTTPException(
+            status_code=400, detail="這位學生不是本班建立的帳號，請由原班級老師重寄邀請"
+        )
     if not student.email:
         raise HTTPException(status_code=400, detail="該學生沒有 email，無法寄邀請信")
     if student.password_hash is not None:
@@ -1018,6 +1025,9 @@ async def invite_accept(
     row, student, team = found
     student.password_hash = hash_password(body.password)
     student.invite_status = "accepted"
+    # 點得到邀請信 = 確實擁有這個信箱
+    if student.email_verified_at is None:
+        student.email_verified_at = _now()
     await revoke_session(session, row)  # 一次性：用過即失效
     result = await _issue_student_login(request, session, student, team)
     await record_event(

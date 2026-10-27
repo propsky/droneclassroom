@@ -61,20 +61,35 @@ organizations ─┬─ teachers ─┬─ sessions（老師/學生共用）
 
 （同校多老師共管一隊：未來加 `team_teachers` 關聯表，現在 owner 一人夠用。）
 
-### students — 學生（由老師建、邀請制；可無 email）
+### students — 學生（一人一帳；老師建或自行註冊；可無 email）
 | 欄位 | 型別 | 說明 |
 |---|---|---|
 | id | bigint identity PK | |
-| team_id | bigint NOT NULL FK teams | 索引 |
+| team_id | bigint NULL FK teams | 老師建立時的原班級（索引）；自行註冊可為空。班級歸屬以 `student_memberships` 為準 |
 | name | text NOT NULL | 顯示名 |
 | emoji | text NOT NULL DEFAULT '🙂' | 學生端頭像（沿用現有產品語言） |
-| email | text NULL | 有 email 才能走邀請信；`UNIQUE (LOWER(email))` 部分索引 WHERE email IS NOT NULL（全站一人一帳，不分大小寫）。既有重複要先跑 `uv run python -m app.student_merge` dry-run，確認後才 `--apply`，migration 0009 不會自動合併 |
+| email | text NULL | 有 email 才能走邀請信；`UNIQUE (LOWER(email))` 部分索引 WHERE email IS NOT NULL（全站一人一帳，不分大小寫；removed 帳號留著的 email 也算）。既有重複要先跑 `uv run python -m app.student_merge` dry-run，確認後才 `--apply`；標「需要人工決定」的組要加 `--keep <id>`。migration 0009 不會自動合併 |
+| email_verified_at | timestamptz NULL | 接受設密碼邀請時記下（點得到邀請信 = 擁有信箱）；自行註冊不驗證 |
 | password_hash | text NULL | 設過密碼才有 |
-| student_code | text NOT NULL | 隊內學生碼（如 `03`）；`UNIQUE (team_id, student_code)`。無 email 學生用 `team_code + student_code` 登入 |
+| student_code | text NULL | 原班級學生碼；`UNIQUE (team_id, student_code)` |
 | invite_status | text NOT NULL DEFAULT 'none' CHECK in ('none','sent','accepted') | 邀請信狀態 |
-| status | text NOT NULL DEFAULT 'active' CHECK in ('active','removed') | 老師移除學生 → removed（進度保留可查） |
+| status | text NOT NULL DEFAULT 'active' CHECK in ('active','disabled','removed') | 老師移除本班建立的學生 → removed；平台管理員停用 → disabled（老師加名單不會重新啟用） |
+| licensed_until | timestamptz NULL | 授權期限 |
+| active_team_id | bigint NULL FK teams | 目前進房用的班級；NULL = 不自動進班 |
+| progress_mode | text NOT NULL DEFAULT 'personal' CHECK in ('personal','class') | 進度記在自己的帳本或 active_team 的班級帳本 |
 | created_at / updated_at | timestamptz | |
 | last_seen_at | timestamptz NULL | |
+
+### student_memberships — 學生加入的班級（可多班；退出只改 status）
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| id | bigint identity PK | |
+| student_id | bigint NOT NULL FK students | `UNIQUE (student_id, team_id)` |
+| team_id | bigint NOT NULL FK teams | 索引 |
+| student_code | text NOT NULL | 這個班的學生碼；`UNIQUE (team_id, student_code)`。無 email 學生用 `team_code + student_code` 登入 |
+| status | text NOT NULL DEFAULT 'active' CHECK in ('active','left') | |
+| origin | text NOT NULL DEFAULT 'created' CHECK in ('created','linked') | created＝老師在這班新建的帳號；linked＝學生自己用班級碼加入（老師不能把已有帳號直接掛進班，只能寄邀請信）。migration 0009 把既有成員一律補成 created |
+| joined_at / left_at | timestamptz | |
 
 ### progress — 關卡進度（一生一關一列，upsert）
 | 欄位 | 型別 | 說明 |
@@ -146,7 +161,6 @@ PK 即唯一索引，`ON CONFLICT (student_id, level_id) DO UPDATE` 做 upsert�
 | matches 表（賽局明細） | 現在沒人查；先記 audit 事件 | 需要報表時開表，從 audit 回填 |
 | team_levels（專屬關卡） | 關卡仍是 JSON 檔；老闆說的「專屬關卡」先用 teams.settings.level_ids 字串陣列 | 關卡編輯器落地後開表 |
 | 平台管理員 / 計費 | 單租戶期不需要 | organizations.plan 已留欄位 |
-| 學生多隊 | 一生一隊夠用一學期 | 改 students.team_id 為關聯表 |
 | 密碼重設 token 表 | 用 sessions 同機制：principal + 短 TTL + purpose 欄位即可，需要時加一欄 | |
 
 ## 4. 工具與慣例

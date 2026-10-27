@@ -399,10 +399,12 @@ class ArenaGame(BaseGame):
         await self.broadcast_scores()
         logger.info("[Arena] 停止本場（%s），回 idle", reason)
 
-    async def release_results(self) -> None:
+    async def release_results(self, dispatch_reason: str | None = None) -> None:
         """時間到的結算停留結束：回 idle 並解凍。不另發 arena_end。
 
         老師切關、重置、或開計時賽時呼叫。再來一輪走 start()，不經過這裡。
+        dispatch_reason 有值時通知派送收尾（'level_switch' 跟著新關卡走，其餘送回原關卡）；
+        None ＝ 又送進大亂鬥本身，派送進來的學生留在場上。
         """
         if not self.holding_results():
             return
@@ -416,6 +418,8 @@ class ArenaGame(BaseGame):
         await self._broadcast_teachers(snap)
         await self.broadcast_scores()
         logger.info("[Arena] 結算結束，回 idle")
+        if dispatch_reason is not None:
+            await self._notify_match_end(dispatch_reason)
 
     # ---------- 倒數 / 開賽 ----------
 
@@ -466,6 +470,10 @@ class ArenaGame(BaseGame):
         await self._broadcast_teachers(msg)  # 老師後台也要收到結束 / 勝負
         await self.broadcast_scores()
         logger.info("[Arena] 結束：%s winner=%s（%s）", self.mode, winner, reason)
+        if reason == "time_up":
+            # 時間到停在結算：派送進來的學生跟全場一起看名次，
+            # 老師再來一輪就留在場上；切關／重置時才由 release_results 通知派送收尾
+            return
         await self._notify_match_end(reason)
 
     # ---------- tick（legacy setInterval 80ms 的對應）----------

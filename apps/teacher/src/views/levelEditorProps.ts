@@ -18,6 +18,7 @@ import {
   DEFAULT_RING_SPIN,
   DEFAULT_ZONE_MARKER_DIAMETER,
   HEADING_TOLERANCE_DEG,
+  HeadingJudge,
   OBSTACLE_PHYSICS_SOLID,
   PHYSICS_DEFAULTS,
   balloonDiameter,
@@ -386,8 +387,9 @@ export function createPropsController(host: PropsHost): PropsController {
       } else if (ztype === 'heading') {
         const hz = z as HeadingZone;
         q<HTMLInputElement>(root, '#le-zone-yaw').value = String(hz.targetYaw ?? 0);
-        q<HTMLInputElement>(root, '#le-zone-tol').value = String(hz.tolerance ?? HEADING_TOLERANCE_DEG);
-        q<HTMLSelectElement>(root, '#le-zone-yaw-mode').value = hz.yawMode ?? 'accumulated';
+        // 顯示實際的判定：沒寫 yawMode 的舊關卡是比機頭朝向、容差沿用 20°
+        q<HTMLInputElement>(root, '#le-zone-tol').value = String(HeadingJudge.toleranceOf(hz));
+        q<HTMLSelectElement>(root, '#le-zone-yaw-mode').value = HeadingJudge.modeOf(hz);
       }
     }
 

@@ -6,13 +6,31 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketTestSession
 
 from app.config import Settings
 from app.main import create_app
 
 TEACHER_PASSWORD = "test123"
+# 等不到訊息就讓測試失敗，不要整套卡住
+WS_RECEIVE_TIMEOUT_SEC = 10.0
+
+
+@pytest.fixture(autouse=True)
+def _ws_receive_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """測試 WS 收訊息加逾時（Starlette 預設會無限等待）。"""
+
+    def receive(self: WebSocketTestSession) -> Any:
+        async def _get() -> Any:
+            with anyio.fail_after(WS_RECEIVE_TIMEOUT_SEC):
+                return await self._send_rx.receive()
+
+        return self.portal.call(_get)
+
+    monkeypatch.setattr(WebSocketTestSession, "receive", receive)
 
 
 class FakeClock:

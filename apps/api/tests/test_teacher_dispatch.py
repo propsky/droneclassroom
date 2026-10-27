@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 
 from app.teacher_dispatch import ARENA_CAP, SOCCER_CAP, TeacherDispatch
-from tests.conftest import recv_until, settle, teacher_connect
+from tests.conftest import FakeClock, recv_until, settle, teacher_connect, tick
 
 
 def test_上限常數與前端一致() -> None:
@@ -184,3 +184,89 @@ def test_學生斷線重連仍在等待名單且看板上得回來(
             state = recv_until(t, "dispatch_state")
             assert state["waiting"][0]["id"] == new_id
             assert state["waiting"][0]["name"] == "小明"
+
+
+def _arena_time_up(client: TestClient, t, s, sid: str, clock: FakeClock) -> None:  # noqa: ANN001
+    """派送一人進大亂鬥、開賽、跑到時間到。"""
+    t.send_json({"type": "dispatch_add", "activity": "arena", "studentIds": [sid]})
+    recv_until(s, "dispatch_hold")
+    t.send_json({"type": "arena_start", "durationSec": 30, "mode": "balloon"})
+    recv_until(s, "dispatch_go")
+    for _ in range(3):
+        clock.advance(1000)
+        tick(client)
+    recv_until(s, "arena_go")
+    clock.advance(31_000)
+    tick(client)
+    assert recv_until(s, "arena_end")["reason"] == "time_up"
+
+
+def _kinds_until_pong(s) -> list[str]:  # noqa: ANN001
+    s.send_json({"type": "ping", "t": 1})
+    return [m["type"] for m in _between(s, "pong")]
+
+
+def test_大亂鬥時間到_派送的學生留在結算畫面不被送走(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s:
+            sid = _register(s, t, "小明")
+            s.send_json({"type": "progress", "levelId": "1-2"})
+            recv_until(t, "student_update")
+            _arena_time_up(client, t, s, sid, clock)
+            settle(client)
+            kinds = _kinds_until_pong(s)
+            assert "load_level" not in kinds
+            assert "dispatch_release" not in kinds
+            arena = client.app.state.arena
+            assert arena.holding_results()
+            assert any(p.record.id == sid and p.active for p in arena.players.values())
+
+
+def test_大亂鬥結算中再來一輪_派送的學生還在場上(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s:
+            sid = _register(s, t, "小明")
+            _arena_time_up(client, t, s, sid, clock)
+            t.send_json({"type": "arena_start", "durationSec": 30, "mode": "balloon"})
+            assert recv_until(s, "arena_countdown")["n"] == 3
+            arena = client.app.state.arena
+            assert any(p.record.id == sid and p.active for p in arena.players.values())
+
+
+def test_大亂鬥結算中老師切關_派送的學生跟新關卡走(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s:
+            sid = _register(s, t, "小明")
+            s.send_json({"type": "progress", "levelId": "1-2"})
+            recv_until(t, "student_update")
+            _arena_time_up(client, t, s, sid, clock)
+            t.send_json({"type": "broadcast", "payload": {"type": "load_level", "levelId": "2-3"}})
+            seen = _between(s, "load_level")
+            # 切關＝跟著新關卡走：不另送原關卡，看板／活動鈕在轉發新關卡前就解鎖
+            assert [m["levelId"] for m in seen if m["type"] == "load_level"] == ["2-3"]
+            assert {"type": "dispatch_gate", "locked": False} in seen
+            assert not client.app.state.arena.holding_results()
+
+
+def test_大亂鬥結算中老師重置_派送的學生送回原關卡(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s:
+            sid = _register(s, t, "小明")
+            s.send_json({"type": "progress", "levelId": "1-2"})
+            recv_until(t, "student_update")
+            _arena_time_up(client, t, s, sid, clock)
+            t.send_json({"type": "broadcast", "payload": {"type": "reset_all"}})
+            assert recv_until(s, "load_level") == {"type": "load_level", "levelId": "1-2"}
+            assert recv_until(s, "dispatch_release")["type"] == "dispatch_release"

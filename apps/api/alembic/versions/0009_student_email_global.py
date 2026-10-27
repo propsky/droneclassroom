@@ -44,6 +44,7 @@ def upgrade() -> None:
             "  uv run python -m app.student_merge\n"
             "確認後才寫入：\n"
             "  uv run python -m app.student_merge --apply\n"
+            "報告標「需要人工決定」的組，確認本人後加 --keep <帳號 id> 再跑一次。\n"
             "完成後再執行 uv run creafly-migrate。\n"
             f"重複 email：\n{preview}{extra}"
         )

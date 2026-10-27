@@ -92,11 +92,16 @@ export interface StudentsCreateRequest {
 export interface StudentsCreateResponse {
   /** 這次新建的學生帳號 */
   created: StudentEntry[];
-  /** 沿用既有帳號、只加入這個班 */
+  /** 本班自己建立、之前移出的學生，這次加回來 */
   joined: StudentEntry[];
   /** 設密碼邀請寄送結果（email → true/false；停用寄信時全 false） */
   invitesSent: Record<string, boolean>;
-  /** 既有帳號的加入班級通知（不是設密碼邀請） */
+  /**
+   * 已有帳號的 email：老師不能直接掛進班，只寄信請本人登入後用班級碼加入。
+   * 舊版伺服器沒有這個欄位。
+   */
+  pendingJoin?: string[];
+  /** 寄給 pendingJoin 的「邀請你加入班級」信 */
   noticesSent: Record<string, boolean>;
 }
 

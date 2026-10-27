@@ -53,6 +53,10 @@ export function initSceneEnvControl(): void {
   bus.on('level-loaded', ({ level }) => {
     paint(level.sceneEnv ?? choice);
   });
+  // 離開指定背景的關卡（例如進大亂鬥／足球）：場景回到學生自己選的，按鈕字也要跟著回來
+  bus.on('level-cleared', () => {
+    paint(choice);
+  });
 }
 
 function parseScene(search: string): boolean {

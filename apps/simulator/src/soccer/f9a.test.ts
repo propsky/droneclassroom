@@ -113,6 +113,20 @@ describe('F9A 階段一 HUD 賽制', () => {
     expect(formatSoccerMatchLine(hud({ ruleset: 'f9a' }))).toContain('我：藍隊・前鋒');
   });
 
+  it('比賽結束時 phase 還停在 landing，也要顯示結束與淨分，不是降落倒數', () => {
+    const line = formatSoccerMatchLine(
+      hud({
+        status: 'done',
+        phase: 'landing',
+        scores: { blue: 2, red: 1 },
+        deductions: { blue: 1, red: 0 },
+      }),
+    );
+    expect(line).toContain('結束');
+    expect(line).toContain('淨分 1:1');
+    expect(line).not.toContain('降落倒數');
+  });
+
   it('臺北賽制寫扣分與降落，不寫三局兩勝', () => {
     const line = formatSoccerMatchLine(
       hud({

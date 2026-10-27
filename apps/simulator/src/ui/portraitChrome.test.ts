@@ -71,3 +71,17 @@ describe('PortraitChrome 直式操控區', () => {
     expect(css).toContain('env(safe-area-inset-top, 0px)');
   });
 });
+
+describe('封鎖網站資料', () => {
+  it('讀 localStorage 就丟錯時，直式選單照常初始化（預設收合）', () => {
+    const blocked = {
+      get localStorage(): never {
+        throw new DOMException('blocked', 'SecurityError');
+      },
+    };
+    const storage = PortraitChrome.storageOf(blocked as never);
+    expect(storage).toBeNull();
+    expect(PortraitChrome.readEntryOpen(storage)).toBe(false);
+    expect(() => PortraitChrome.writeEntryOpen(storage, true)).not.toThrow();
+  });
+});

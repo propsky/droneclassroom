@@ -23,6 +23,8 @@ import { replayRecording } from './replayRunner';
 import { verifyRecording } from './replayVerify';
 import { FNV_OFFSET, hashToHex } from './simHash';
 import { levelElapsedMs } from './level';
+import { DISPATCH_HOLD_UNVERIFIABLE } from './inputRecorder';
+import { StudentDispatch } from '../net/studentDispatch';
 
 const ch1 = JSON.parse(readFileSync(join(__dirname, '../../public/levels/chapter1.json'), 'utf-8'));
 const levels: LevelDef[] = Array.isArray(ch1) ? ch1 : ch1.levels;
@@ -266,6 +268,27 @@ describe('伺服器判定（verifyRecording）', () => {
       serverLevel: level10,
     });
     expect(r.status).toBe('ok');
+  });
+
+  it('飛到一半被老師派送、取消後照常過關 → 無法驗證（不是可疑）', async () => {
+    load('1-0');
+    startTiming();
+    for (let i = 0; i < 30; i++) await renderFrame([up]);
+    StudentDispatch.hold('soccer'); // 空中被派送：速度歸零、物理暫停
+    await fly(up, 20);
+    StudentDispatch.release(); // 老師取消，留在同一關繼續飛
+    for (let i = 0; i < 200 && !completedLog; i++) await renderFrame([up]);
+    for (let i = 0; i < 400 && !completedLog; i++) await renderFrame([down]);
+    const rec = completedLog!;
+    expect(rec.unverifiable).toBe(DISPATCH_HOLD_UNVERIFIABLE);
+    const r = await verifyRecording({
+      recording: structuredClone(rec),
+      claimedHash: rec.replayHash,
+      levelId: '1-0',
+      timeMs: rec.ticks * (1000 / 60) + levelElapsedMs(),
+      serverLevel: level10,
+    });
+    expect(r.status).toBe('unverifiable');
   });
 
   it('空錄製（0 tick）→ 重播沒過關 → 可疑', async () => {

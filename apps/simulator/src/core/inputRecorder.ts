@@ -50,6 +50,17 @@ function taint(reason: string): void {
   if (active && !active.rec.unverifiable) active.rec.unverifiable = reason;
 }
 
+/** 老師派送凍結飛行（不經 ControlFrame、重播重現不了）的那一刻呼叫 */
+export const DISPATCH_HOLD_UNVERIFIABLE = '老師派送暫停飛行';
+
+/**
+ * 錄製期間發生伺服器重播重現不了的外部操作 → 這次過關判「無法驗證」，不是可疑。
+ * 目前只有老師派送（net/studentDispatch.ts）。
+ */
+export function markRecordingUnverifiable(reason: string): void {
+  taint(reason);
+}
+
 /** 計時開始（level-timing-started）時呼叫 */
 export function startInputRecording(level: LevelDef): void {
   const rngSeed = ((Date.now() >>> 0) ^ ((Math.random() * 0xffffffff) >>> 0)) >>> 0;
@@ -99,6 +110,11 @@ export function recordAction(action: Omit<RecordedAction, 't' | 'inTick'>): void
 /** 一般關卡 tick 物理之前：記下本 tick 輸入 */
 export function beginRecordedTick(frame: ControlFrame): void {
   if (!active || active.rec.unverifiable) return;
+  if (flags.dispatchHold) {
+    // 派送凍結會跳過整段物理（simTick），錄製裡沒有對應操作
+    taint(DISPATCH_HOLD_UNVERIFIABLE);
+    return;
+  }
   if (active.rec.frames.length >= MAX_RECORDING_TICKS) {
     taint(`超過錄製上限 ${MAX_RECORDING_TICKS} ticks`);
     return;

@@ -61,7 +61,7 @@ describe('臺北賽制老師操作', () => {
     expect(sent[0]).toEqual({ type: 'soccer_start', durationSec: 120, mode: 'striker' });
   });
 
-  it('警告／扣分按鈕送 soccer_warn，結算寫出扣分與先進球', () => {
+  it('扣分按鈕要按兩次才送 soccer_warn，結算寫出扣分與先進球', () => {
     const dash = mount();
     dash.setRooms([room({ code: 'MAIN', createdAt: 1, soccerRuleset: 'taipei' })], 'MAIN');
     const state: SoccerStateMsg = {
@@ -89,8 +89,17 @@ describe('臺北賽制老師操作', () => {
       },
     };
     dash.onSoccerMsg(state);
-    document.querySelector<HTMLElement>('[data-act="warn"][data-id="s1"]')!.click();
-    document.querySelector<HTMLElement>('[data-act="warn-team"][data-team="red"]')!.click();
+    const one = (): HTMLElement => document.querySelector<HTMLElement>('[data-act="warn"][data-id="s1"]')!;
+    const team = (): HTMLElement =>
+      document.querySelector<HTMLElement>('[data-act="warn-team"][data-team="red"]')!;
+    // 第一次只進入待確認，不送；名單重畫後仍是待確認
+    one().click();
+    team().click();
+    expect(sent).toEqual([]);
+    dash.onSoccerMsg(state);
+    expect(one().textContent).toContain('確定扣 1 分');
+    one().click();
+    team().click();
     expect(sent).toEqual([
       { type: 'soccer_warn', studentId: 's1', reason: 'manual', deduct: true },
       { type: 'soccer_warn', team: 'red', reason: 'manual', deduct: true },

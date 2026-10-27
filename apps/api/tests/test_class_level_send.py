@@ -204,3 +204,111 @@ def test_無前綴別名與練習會結束足球_遲到學生補送(
                 "type": "load_level",
                 "levelId": "activity:soccer-practice",
             }
+
+
+def _game_player(game, name: str):  # noqa: ANN001, ANN202
+    return next((p for p in game.players.values() if p.record.name == name), None)
+
+
+def test_全班送進進行中的足球_晚到的學生真的加入那一場(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join(s1, "soccer")
+            t.send_json({"type": "soccer_start", "durationSec": 40})
+            _countdown_to_go(client, clock, s1, "soccer")
+            t.send_json(
+                {
+                    "type": "broadcast",
+                    "payload": {"type": "load_level", "levelId": "activity:soccer-match"},
+                }
+            )
+            recv_until(s2, "load_level")
+            # 學生端收到活動 id 後自己送 soccer_join
+            state = _join(s2, "soccer")
+            assert state["status"] == "running"
+            settle(client)
+            late = _game_player(soccer, "小華")
+            assert late is not None and late.active and late.team in ("blue", "red")
+            assert soccer.status == "running"
+
+
+def test_全班送進進行中的大亂鬥_晚到的學生真的加入那一場(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    arena = client.app.state.arena
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join(s1, "arena")
+            t.send_json({"type": "arena_start", "durationSec": 40, "mode": "balloon"})
+            _countdown_to_go(client, clock, s1, "arena")
+            t.send_json(
+                {
+                    "type": "broadcast",
+                    "payload": {"type": "load_level", "levelId": "activity:arena:balloon:grid"},
+                }
+            )
+            recv_until(s2, "load_level")
+            _join(s2, "arena")
+            settle(client)
+            late = _game_player(arena, "小華")
+            assert late is not None and late.active
+            assert arena.status == "running"
+
+
+def test_沒有全班傳送時_比賽中自行進場被拒並收到退出通知(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join(s1, "soccer")
+            t.send_json({"type": "soccer_start", "durationSec": 40})
+            _countdown_to_go(client, clock, s1, "soccer")
+            s2.send_json({"type": "soccer_join"})
+            assert recv_until(s2, "dispatch_join_rejected") == {
+                "type": "dispatch_join_rejected",
+                "activity": "soccer",
+            }
+            settle(client)
+            assert _game_player(soccer, "小華") is None
+
+
+def test_全班送進比賽_但在另一個活動派送名單上的人仍不能自行進場(
+    client: TestClient, teacher_ticket: str, clock: FakeClock
+) -> None:
+    soccer = client.app.state.soccer
+    roster = client.app.state.rooms.default.roster
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join(s1, "soccer")
+            t.send_json({"type": "soccer_start", "durationSec": 40})
+            _countdown_to_go(client, clock, s1, "soccer")
+            s2_id = next(r.id for r in roster.students if r.name == "小華")
+            t.send_json({"type": "dispatch_add", "activity": "arena", "studentIds": [s2_id]})
+            recv_until(s2, "dispatch_hold")
+            t.send_json(
+                {
+                    "type": "broadcast",
+                    "payload": {"type": "load_level", "levelId": "activity:soccer-match"},
+                }
+            )
+            recv_until(s2, "load_level")
+            s2.send_json({"type": "soccer_join"})
+            assert recv_until(s2, "dispatch_join_rejected")["activity"] == "soccer"
+            settle(client)
+            assert _game_player(soccer, "小華") is None

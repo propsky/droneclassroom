@@ -119,18 +119,34 @@ class TeacherDispatch:
 
     @staticmethod
     def allow_join(room: Any, activity: DispatchActivity, record: StudentRecord) -> bool:
-        """自行進場。有名單或比賽中時拒絕；已在這一場（重連／剛被送進去）仍放行。"""
+        """自行進場。有名單或比賽中時拒絕；已在這一場（重連／剛被送進去）仍放行。
+
+        老師把全班傳送到這個賽局時，還沒進場的學生要能加入進行中的那一場
+        （見 class_level_send），除非他正在另一個活動的派送名單上等。
+        """
         if not TeacherDispatch.gate_locked(room):
             return True
         key = game_player_key(record)
         if key in _queue(room, activity).playing:
             return True
         player = _game(room, activity).players.get(key)
-        if player is None:
-            return False
-        if player.active:
+        if player is not None and player.active:
             return True
-        return bool(player.disconnected and TeacherDispatch.match_is_live(room, activity))
+        if player is not None and player.disconnected and TeacherDispatch.match_is_live(
+            room, activity
+        ):
+            return True
+        if ClassLevelSend.sends_into(room.roster.current_level_id, activity):
+            waiting = (seat.key for act in _ACTIVITIES for seat in _queue(room, act).waiting)
+            return key not in set(waiting)
+        return False
+
+    @staticmethod
+    async def reject_join(record: StudentRecord, activity: DispatchActivity) -> None:
+        """自行進場被拒：叫學生端退出這個活動並提示，不要停在沒有伺服器狀態的空場上。"""
+        await TeacherDispatch._send(
+            record, {"type": "dispatch_join_rejected", "activity": activity}
+        )
 
     @staticmethod
     async def add(room: Any, activity: DispatchActivity, student_ids: list[str]) -> None:

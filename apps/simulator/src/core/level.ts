@@ -410,7 +410,7 @@ function checkRings(nowMs: number): void {
   const s = levelState;
   const p = droneState.position;
   s.rings.forEach((ring, i) => {
-    if (!RingJudge.isNext(s.rings.map((r) => r.passed), i)) return;
+    if (!RingJudge.canPass(s.rings.map((r) => r.passed), i, s.current?.ringOrder)) return;
     const ry = ringWorldY(i, ring.y, nowMs, ringBobAmp(ring));
     const dist = detHypot3(p.x - ring.x, p.y - ry, p.z - ring.z);
     if (!RingJudge.inRange(dist, ringPassRadius(ring))) return;

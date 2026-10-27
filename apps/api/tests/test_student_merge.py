@@ -21,6 +21,7 @@ from app.student_merge import (
     apply_groups,
     build_groups,
     format_dry_run,
+    keep_overrides_for,
 )
 from tests.test_accounts import DATABASE_URL, needs_db
 from tests.test_students import _cleanup, _insert_team, _setup_team
@@ -223,6 +224,23 @@ def test_dry_run不寫入_apply才合併且各班分開(db_client: TestClient) -
                 .where(func.lower(Student.email) == email, Student.status == "active")
             )
             assert still == 3  # dry-run 還沒合併
+            # 自行註冊 vs 老師建立：看不出誰是信箱本人，沒指定 --keep 就不合併
+            assert groups[0].needs_decision
+            assert "需要人工決定" in report
+            await apply_groups(s, groups)
+            await s.commit()
+            assert (
+                await s.scalar(
+                    select(func.count())
+                    .select_from(Student)
+                    .where(func.lower(Student.email) == email, Student.status == "active")
+                )
+                == 3
+            )
+            groups = build_groups(
+                snaps, mems, levels, keep_overrides_for(groups, [keep_id])
+            )
+            assert groups[0].needs_decision is None and groups[0].keep_id == keep_id
             await apply_groups(s, groups)
             await s.commit()
             left = (
@@ -305,3 +323,75 @@ def _null_email_then_index(email: str) -> None:
         await engine.dispose()
 
     asyncio.run(_go())
+
+
+def test_自行註冊對上老師建立_要人工決定_指定後才合併() -> None:
+    self_reg = _snap(id=10, name="自行註冊", has_password=True)
+    created = _snap(id=20, name="老師建的", team_id=1, team_name="甲班", student_code="03")
+    mems = [MembershipSnap(20, 1, "甲班", "03", "active", origin="created")]
+    groups = build_groups([self_reg, created], mems, [])
+    assert groups[0].needs_decision
+    assert "需要人工決定" in format_dry_run(groups)
+    picked = build_groups([self_reg, created], mems, [], keep_overrides_for(groups, [20]))
+    assert picked[0].needs_decision is None
+    assert picked[0].keep_id == 20 and [d.student_id for d in picked[0].drops] == [10]
+
+
+def test_都是老師建立的帳號_照規則自動合併() -> None:
+    a = _snap(id=10, team_id=1, team_name="甲班", student_code="01")
+    b = _snap(id=20, team_id=2, team_name="乙班", student_code="02")
+    mems = [
+        MembershipSnap(10, 1, "甲班", "01", "active", origin="created"),
+        MembershipSnap(20, 2, "乙班", "02", "active", origin="created"),
+    ]
+    groups = build_groups([a, b], mems, [])
+    assert groups[0].needs_decision is None and groups[0].keep_id == 10
+
+
+def test_removed帳號還留著email_與migration同一口徑_只清email() -> None:
+    live = _snap(id=10)
+    gone = _snap(id=20, name="已移除", status="removed")
+    groups = build_groups([live, gone], [], [])
+    assert len(groups) == 1
+    g = groups[0]
+    assert g.clear_removed == [(20, "已移除")]
+    assert g.drops == [] and g.keep_id == 10
+    assert "只清掉 email" in format_dry_run(groups)
+
+
+@needs_db
+def test_removed帳號佔著email_apply清掉後可建唯一索引(db_client: TestClient) -> None:
+    assert DATABASE_URL
+    email = f"gone-{uuid.uuid4().hex[:8]}@students-test.invalid"
+
+    async def run() -> None:
+        engine = create_engine(DATABASE_URL)
+        maker = create_sessionmaker(engine)
+        async with maker() as s:
+            await s.execute(text("DROP INDEX IF EXISTS uq_students_lower_email"))
+            live = Student(name="現用", email=email, progress_mode="personal")
+            gone = Student(
+                name="已移除", email=email.upper(), status="removed", progress_mode="personal"
+            )
+            s.add_all([live, gone])
+            await s.commit()
+            snaps, mems, levels = await _load(s)
+            groups = [g for g in build_groups(snaps, mems, levels) if g.email == email]
+            assert groups and groups[0].clear_removed == [(gone.id, "已移除")]
+            await apply_groups(s, groups)
+            await s.commit()
+            await s.refresh(live)
+            await s.refresh(gone)
+            assert live.email == email and live.status == "active"
+            assert gone.email is None
+            # 與 migration 0009 同一口徑：清完就沒有重複，唯一索引建得起來
+            await s.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_students_lower_email "
+                    "ON students (lower(email)) WHERE email IS NOT NULL"
+                )
+            )
+            await s.commit()
+        await engine.dispose()
+
+    asyncio.run(run())

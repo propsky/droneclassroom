@@ -6,6 +6,7 @@
 """
 
 import math
+from dataclasses import dataclass
 
 from .soccer_presets import F9A_A
 
@@ -271,6 +272,81 @@ def shield_passes_ring(
         half_thick=half_thick,
         shield_r=shield_r,
     )
+
+
+@dataclass
+class RingPassage:
+    """跨段穿環狀態（同 apps/simulator/src/soccer/crossing.ts 的 RingPassage）。
+
+    單一段 prev→curr 看不出護罩是從哪一面進環的：從門後伸進環厚再退出，
+    後緣也會跨過「出口面」。所以要記住這次接近有沒有從進攻側進入。
+    """
+
+    # 球心已從進攻側穿過入口面，後緣還沒離開出口面
+    live: bool = False
+    # 這次接近期間，掃掠球體有碰到開口
+    through_opening: bool = False
+
+    def reset(self) -> None:
+        self.live = False
+        self.through_opening = False
+
+
+def advance_ring_passage(
+    state: RingPassage,
+    prev: tuple[float, float, float],
+    curr: tuple[float, float, float],
+    *,
+    goal_z: float,
+    goal_y: float,
+    goal_r: float,
+    attack_sign: float,
+    half_thick: float,
+    shield_r: float = DEFAULT_SHIELD_R,
+) -> bool:
+    """推進一段軌跡，回傳這一段是否完成一次正面穿環。會就地更新 state。
+
+    與 crossing.ts 的 advanceRingPassage 同一套：球心先從進攻側越過入口面，
+    之後後緣離開出口面、而且期間掃掠體碰過開口，才算穿過。往回退出入口面就取消。
+    """
+    attack = 1 if attack_sign > 0 else -1 if attack_sign < 0 else 0
+    if attack == 0 or not goal_r > 0:
+        state.reset()
+        return False
+    entry = goal_z - attack * half_thick
+    dz = curr[2] - prev[2]
+    forward = dz * attack > _DIR_EPS
+
+    def before_entry(z: float) -> bool:
+        return z < entry - _DIR_EPS if attack > 0 else z > entry + _DIR_EPS
+
+    if not state.live and forward and before_entry(prev[2]) and not before_entry(curr[2]):
+        state.live = True
+        state.through_opening = False
+    if state.live and GoalDetector.swept_intersects_opening(
+        prev,
+        curr,
+        goal_z=goal_z,
+        goal_y=goal_y,
+        goal_r=goal_r,
+        half_thick=half_thick,
+        shield_r=shield_r,
+    ):
+        state.through_opening = True
+    if state.live and GoalDetector.trailing_edge_clears_exit(
+        prev,
+        curr,
+        goal_z=goal_z,
+        attack_sign=attack,
+        half_thick=half_thick,
+        shield_r=shield_r,
+    ):
+        passed = state.through_opening
+        state.reset()
+        return passed
+    if state.live and before_entry(curr[2]) and dz * attack < -_DIR_EPS:
+        state.reset()
+    return False
 
 
 class OwnGoal:

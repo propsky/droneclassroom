@@ -394,6 +394,9 @@ function handleMessage(msg: ServerToClient): void {
     case 'dispatch_gate':
       StudentDispatch.gate(msg.locked);
       break;
+    case 'dispatch_join_rejected':
+      StudentDispatch.joinRejected(msg.activity);
+      break;
     case 'dispatch_state':
       break;
     case 'show_message':

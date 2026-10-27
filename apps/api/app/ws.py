@@ -248,7 +248,13 @@ async def _apply_broadcast(room: Room, payload: TeacherBroadcastPayload) -> None
         level_id = payload.levelId if payload.type in ("load_level", "race_start") else ""
         # 時間到的結算還停著：切關／重置先解凍再轉發，學生才不會卡在結算畫面
         if room.arena.holding_results():
-            await room.arena.release_results()
+            if payload.type == "reset_all":
+                dispatch_reason: str | None = "reset"
+            elif ClassLevelSend.stops_arena(level_id):
+                dispatch_reason = "level_switch"
+            else:
+                dispatch_reason = None  # 又送進大亂鬥：派送進來的學生留在場上
+            await room.arena.release_results(dispatch_reason)
         if ClassLevelSend.stops_arena(level_id):
             await room.arena.stop("level_switch")
         if ClassLevelSend.stops_soccer(level_id):
@@ -512,6 +518,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 case ArenaJoinMsg():
                     if not TeacherDispatch.allow_join(room, "arena", record):
                         logger.info("[Dispatch] %s 派送或比賽中，拒絕自行加入大亂鬥", record.name)
+                        await TeacherDispatch.reject_join(record, "arena")
                         continue
                     await soccer.leave(record)  # 與足球互斥（legacy 只有足球→大亂鬥單向，補齊雙向）
                     await arena.join(record)
@@ -525,6 +532,7 @@ async def _student_endpoint(ws: WebSocket) -> None:
                 case SoccerJoinMsg():
                     if not TeacherDispatch.allow_join(room, "soccer", record):
                         logger.info("[Dispatch] %s 派送或比賽中，拒絕自行加入足球", record.name)
+                        await TeacherDispatch.reject_join(record, "soccer")
                         continue
                     await arena.leave(record)  # 與大亂鬥互斥（legacy soccerJoin 行為）
                     await soccer.join(record)
@@ -691,10 +699,9 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
             if room is None:
                 logger.info("[Room] 房間 %s 不存在，丟棄老師訊息 type=%s", code, valid.type)
                 continue
-            # 管理類訊息對班級房限擁有者（預設房 / 記憶體房所有老師共用）
-            if isinstance(valid, RoomUpdateMsg | RoomKickMsg | RoomCloseMsg) and not (
-                rooms.can_manage(room, teacher_id)
-            ):
+            # 班級房的所有操作（選房看名冊、開賽、派送、扣分、廣播、改設定…）限擁有者；
+            # 預設房 / 記憶體房所有老師共用。只擋管理類的話，知道班級碼就能干擾別班上課。
+            if not rooms.can_manage(room, teacher_id):
                 logger.info(
                     "[Room] 老師 %s 非班級房 %s 擁有者，忽略 type=%s",
                     teacher_id,
@@ -798,7 +805,10 @@ async def _teacher_endpoint(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        await rooms.remove_teacher(ws)
+        # 同學生端：收尾（釋放派送名單 → 看板 / 活動鈕解鎖）要完整跑完，
+        # 連線 task 被 cancel 也不能中斷
+        with anyio.CancelScope(shield=True):
+            await rooms.remove_teacher(ws)
 
 
 # ---------- 未知路徑 ----------

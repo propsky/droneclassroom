@@ -177,7 +177,9 @@ HUD/面板以純 TS + DOM 元件實作，但**核心層已透過 event bus 與 U
   **刻意無資料庫**：帳號/成績持久化需求出現時才引入 PostgreSQL + SQLAlchemy + Alembic。
 - [x] `apps/api/app/games/` 預留 GameHandler Protocol — Phase 2 多人賽局（arena/soccer）直接在此實作，不再移植到 Node
 - [x] `apps/server`（Node 版）已移除（2026-07-15，使用者決定不留備援；teacher.html 收斂為 api 一份 + legacy 原版）
-- [ ] 認證/短效 ticket、房間抽象、Redis、正式協定升級（envelope/版本欄位）→ 競賽版再議
+- [x] 老師認證短效 ticket、房間抽象（多房／一班多房）、帳號與班級（PostgreSQL 選配）、授權期限、平台管理員面板（`apps/admin`）—— 已完成，現況見 `architecture.md`
+- [x] 足球臺北市 115 賽制（F9A-B 固定）、教師派送、全班傳送到活動、真機 WebSocket 橋接（程式模式）—— 2026-10 完成，現況見 `architecture.md` 與 `drone-soccer-design.md`
+- [ ] Redis、正式協定升級（envelope/版本欄位）→ 競賽版再議
 
 ---
 

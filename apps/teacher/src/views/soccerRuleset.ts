@@ -19,9 +19,4 @@ export class SoccerRulesetForm {
   static hint(_ruleset?: SoccerRuleset): string {
     return '臺北市115：單場決勝負，2 分鐘，固定 F9A-B 小場。淨分高者勝；同分則先進第 1 球的隊伍勝。提前升空、停留或反向穿越己方球門、結束後 10 秒內沒落地，各扣 1 分。';
   }
-
-  /** 舊畫面若還停在 3 分鐘，改成條文的 2 分鐘。 */
-  static durationOnChange(current: string): string {
-    return current === '180' ? '120' : current;
-  }
 }

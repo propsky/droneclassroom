@@ -279,6 +279,8 @@ export interface DispatchGoMsg {
 }
 /** 有等待名單或比賽中：關掉右下活動鈕，學生不能自己進場。 */
 export interface DispatchGateMsg { type: 'dispatch_gate'; locked: boolean }
+/** 自行進場被拒（比賽中或有派送名單）：學生端退出這個活動並提示，不要停在空場上。 */
+export interface DispatchJoinRejectedMsg { type: 'dispatch_join_rejected'; activity: DispatchActivity }
 
 // ---------- Server → Client ----------
 
@@ -622,7 +624,8 @@ export type ServerToClient =
   | SoccerGoalOkMsg | SoccerScoresMsg
   | SoccerCardMsg | SoccerWarningMsg | SoccerSafetyMsg | SoccerTimeoutNotice | SoccerEndMsg
   | SoccerResumeMsg
-  | DispatchStateMsg | DispatchHoldMsg | DispatchReleaseMsg | DispatchGoMsg | DispatchGateMsg;
+  | DispatchStateMsg | DispatchHoldMsg | DispatchReleaseMsg | DispatchGoMsg | DispatchGateMsg
+  | DispatchJoinRejectedMsg;
 
 /** 同名 register 擠下線時 server 用的 close code（legacy 慣例：收到後不重連） */
 export const WS_CLOSE_REPLACED = 4000;

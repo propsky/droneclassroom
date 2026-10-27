@@ -62,6 +62,18 @@ export class DispatchCard {
     this.render('arena');
   }
 
+  /** 切換房間：舊房的學生與名單不能留著（按派送會送到新房、被伺服器拒絕）。等新房的 student_list / dispatch_state。 */
+  reset(): void {
+    this.students.splice(0, this.students.length);
+    for (const activity of ['soccer', 'arena'] as const) {
+      const view = this.views[activity];
+      view.phase = 'idle';
+      view.waiting = [];
+      view.selected.clear();
+      this.render(activity);
+    }
+  }
+
   apply(msg: DispatchStateMsg): void {
     const view = this.views[msg.activity];
     view.phase = msg.phase;

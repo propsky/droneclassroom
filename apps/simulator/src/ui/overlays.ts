@@ -31,6 +31,7 @@ import { GameSession } from '../core/session';
 import { goHome } from '../core/physics';
 import { iconHtml, mountIcons } from './icons';
 import { StudentAccountForm, type AccountMode } from './studentAccountForm';
+import { ProgressClassChoice } from './progressClassChoice';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 
@@ -374,10 +375,15 @@ function initLogout(): void {
           `要看哪個班級的進度？輸入班級碼（${lines}）。留空則記在自己名下。`,
           who?.teamCode ?? '',
         );
-        const found = classes.find((c) => c.teamCode === (code ?? '').trim().toUpperCase());
-        if (found) {
+        const choice = ProgressClassChoice.resolve(code, classes);
+        if (choice.kind === 'cancel') return; // 按取消：什麼都不改
+        if (choice.kind === 'unknown') {
+          toast(`找不到班級碼 ${choice.code}，進度記在哪裡沒有改變`, 'error');
+          return;
+        }
+        if (choice.kind === 'class') {
           mode = 'class';
-          teamId = found.teamId;
+          teamId = choice.teamId;
         }
       }
       const switched = await setProgressContext(token, mode, teamId);

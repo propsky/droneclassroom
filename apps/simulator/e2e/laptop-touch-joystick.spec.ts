@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { guestLogin, skipOnboarding } from './helpers';
+import { guestLogin, skipOnboarding, waitForFlightReady } from './helpers';
 
 test.beforeEach(async ({ page }) => {
   await skipOnboarding(page);
@@ -126,7 +126,8 @@ test.describe('觸控筆電：虛擬搖桿不被蓋住', () => {
           const p = window.CREAFLY.droneState.position;
           return { y: p.y, z: p.z };
         });
-        const lifted = await pushStickUp(page, 'joystick-left');
+        await waitForFlightReady(page); // 倒數中手動操控鎖住，推了也不會動
+      const lifted = await pushStickUp(page, 'joystick-left');
         expect(lifted.y).toBeGreaterThan(before.y + 0.2);
         const pitched = await pushStickUp(page, 'joystick-right');
         expect(Math.abs(pitched.z - lifted.z)).toBeGreaterThan(0.15);
@@ -191,6 +192,7 @@ test.describe('觸控筆電 1366×768 @1.5', () => {
     await entryButtonIsClickable(page);
     if (browserName === 'chromium') {
       const before = await page.evaluate(() => window.CREAFLY.droneState.position.y);
+      await waitForFlightReady(page); // 倒數中手動操控鎖住，推了也不會動
       const lifted = await pushStickUp(page, 'joystick-left');
       expect(lifted.y).toBeGreaterThan(before + 0.2);
     }

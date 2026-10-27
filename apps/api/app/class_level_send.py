@@ -83,6 +83,14 @@ class ClassLevelSend:
         return ClassLevelSend.find(level_id) is not None
 
     @staticmethod
+    def sends_into(level_id: str | None, activity: Literal["soccer", "arena"]) -> bool:
+        """老師全班傳送的目的地就是這個多人賽局（足球對戰／任一大亂鬥場地）。"""
+        dest = ClassLevelSend.find(level_id) if level_id else None
+        if dest is None:
+            return False
+        return dest.session == ("soccer-match" if activity == "soccer" else "arena")
+
+    @staticmethod
     def stops_arena(level_id: str) -> bool:
         activity = ClassLevelSend.find(level_id)
         if activity is None:

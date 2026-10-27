@@ -9,9 +9,14 @@
 - 保留帳號自己的個人進度不動。
 - 各班 ClassProgress 跟著成員改掛到保留帳號，同一班同一關才合併成績。
 - 被併入的帳號清掉 email、狀態改 removed、登入 session 撤銷。不刪列（稽核還指著它）。
+- 已經是 removed 但還留著 email 的帳號：只清掉 email（migration 0009 的唯一索引也算它們）。
+- 同一組同時有「學生自行註冊」與「老師建立」的帳號時，看不出哪個才是信箱本人
+  （自行註冊沒驗證 email，可能是別人先搶註）：--apply 跳過這組，要人工確認後用
+  --keep <帳號 id> 指定保留哪一個。
 
     uv run python -m app.student_merge
     uv run python -m app.student_merge --apply
+    uv run python -m app.student_merge --apply --keep 123 --keep 456
 """
 
 from __future__ import annotations
@@ -50,6 +55,8 @@ class MembershipSnap:
     team_name: str
     student_code: str
     status: str
+    # created＝老師在這班建立的帳號；linked＝既有帳號加入
+    origin: str = "created"
 
 
 @dataclass
@@ -76,10 +83,15 @@ class DropPlan:
 @dataclass
 class MergeGroup:
     email: str
-    keep_id: int
+    # None＝這組只剩 removed 帳號佔著 email，沒有要合併的
+    keep_id: int | None
     keep_name: str
     keep_reason: str
     drops: list[DropPlan] = field(default_factory=list)
+    # 已 removed 但還留著 email 的帳號：(id, 名字)，只清 email
+    clear_removed: list[tuple[int, str]] = field(default_factory=list)
+    # 有值＝要人工決定保留哪個，--apply 不合併這組（removed 的 email 仍會清）
+    needs_decision: str | None = None
 
 
 def choose_keep(students: list[StudentSnap]) -> StudentSnap:
@@ -98,28 +110,70 @@ def _keep_reason(keep: StudentSnap) -> str:
     return "較早建立（都還沒設密碼）"
 
 
+def _self_registered(s: StudentSnap, memberships: list[MembershipSnap]) -> bool:
+    """學生自己註冊的帳號：有密碼、沒有任何「老師在班上建立」的成員資格。"""
+    created = any(m.student_id == s.id and m.origin == "created" for m in memberships)
+    return s.has_password and not created
+
+
+def _teacher_created(s: StudentSnap, memberships: list[MembershipSnap]) -> bool:
+    return any(m.student_id == s.id and m.origin == "created" for m in memberships)
+
+
 def build_groups(
     students: list[StudentSnap],
     memberships: list[MembershipSnap],
     levels: list[LevelSnap],
+    keep_overrides: dict[str, int] | None = None,
 ) -> list[MergeGroup]:
-    """純函式：排出會合併誰。不碰資料庫。"""
+    """純函式：排出會合併誰。不碰資料庫。
+
+    與 migration 0009 用同一個口徑：removed 帳號留著的 email 也算重複。
+    keep_overrides：email → 人工指定保留的帳號 id（--keep）。
+    """
+    overrides = keep_overrides or {}
     by_email: dict[str, list[StudentSnap]] = {}
     for s in students:
-        if s.status == "removed" or not s.email:
+        if not s.email:
             continue
         by_email.setdefault(s.email.strip().lower(), []).append(s)
     groups: list[MergeGroup] = []
     for email in sorted(by_email):
-        rows = by_email[email]
-        if len(rows) < 2:
+        all_rows = by_email[email]
+        if len(all_rows) < 2:
             continue
-        keep = choose_keep(rows)
+        rows = [s for s in all_rows if s.status != "removed"]
+        removed = [(s.id, s.name) for s in all_rows if s.status == "removed"]
+        if len(rows) < 2:
+            only = rows[0] if rows else None
+            groups.append(
+                MergeGroup(
+                    email=email,
+                    keep_id=only.id if only else None,
+                    keep_name=only.name if only else "",
+                    keep_reason="只有這個帳號在用" if only else "",
+                    clear_removed=removed,
+                )
+            )
+            continue
+        picked = overrides.get(email)
+        keep = next((s for s in rows if s.id == picked), None) or choose_keep(rows)
+        needs_decision: str | None = None
+        if picked is None and (
+            any(_self_registered(s, memberships) for s in rows)
+            and any(_teacher_created(s, memberships) for s in rows)
+        ):
+            needs_decision = (
+                "同時有學生自行註冊與老師建立的帳號，自行註冊沒驗證 email，"
+                "看不出哪個才是信箱本人。確認後用 --keep <帳號 id> 指定保留哪一個"
+            )
         group = MergeGroup(
             email=email,
             keep_id=keep.id,
             keep_name=keep.name,
-            keep_reason=_keep_reason(keep),
+            keep_reason="人工指定（--keep）" if picked == keep.id else _keep_reason(keep),
+            clear_removed=removed,
+            needs_decision=needs_decision,
         )
         keep_teams = {m.team_id for m in memberships if m.student_id == keep.id}
         for drop in sorted((s for s in rows if s.id != keep.id), key=lambda s: s.id):
@@ -198,6 +252,16 @@ def format_dry_run(groups: list[MergeGroup]) -> str:
     for g in groups:
         lines.append("")
         lines.append(f"── {g.email} ──")
+        for rid, rname in g.clear_removed:
+            lines.append(f"已移除的帳號 #{rid} {rname} 還留著這個 email：只清掉 email")
+        if g.keep_id is None:
+            continue
+        if g.needs_decision:
+            ids = "、".join(f"#{i}" for i in [g.keep_id, *(d.student_id for d in g.drops)])
+            lines.append(f"⚠ 需要人工決定，--apply 不會合併這組：{g.needs_decision}")
+            lines.append(f"  候選帳號：{ids}")
+        if not g.drops:
+            continue
         lines.append(f"保留帳號 #{g.keep_id} {g.keep_name}（{g.keep_reason}）")
         lines.append("保留帳號自己的個人進度帳本不動。")
         for drop in g.drops:
@@ -280,6 +344,7 @@ async def _load(
             team_name=team.name,
             student_code=mem.student_code,
             status=mem.status,
+            origin=mem.origin,
         )
         for mem, team in mem_rows
     ]
@@ -386,6 +451,13 @@ async def apply_groups(session: AsyncSession, groups: list[MergeGroup]) -> None:
     """依 build_groups 的結果寫入。呼叫端負責 commit。"""
     now = datetime.now(UTC)
     for group in groups:
+        for rid, _name in group.clear_removed:
+            row = await session.get(Student, rid)
+            if row is not None and row.status == "removed":
+                row.email = None
+        await session.flush()
+        if group.keep_id is None or group.needs_decision:
+            continue
         keep = await session.get(Student, group.keep_id)
         if keep is None:
             continue
@@ -467,7 +539,18 @@ async def apply_groups(session: AsyncSession, groups: list[MergeGroup]) -> None:
             await session.flush()
 
 
-async def run(*, apply: bool) -> str:
+def keep_overrides_for(groups: list[MergeGroup], keep_ids: list[int]) -> dict[str, int]:
+    """把 --keep 的帳號 id 對到它所在那組的 email。"""
+    out: dict[str, int] = {}
+    for g in groups:
+        candidates = {g.keep_id, *(d.student_id for d in g.drops)}
+        for kid in keep_ids:
+            if kid in candidates:
+                out[g.email] = kid
+    return out
+
+
+async def run(*, apply: bool, keep_ids: list[int] | None = None) -> str:
     from .config import Settings
 
     cfg = Settings()
@@ -479,11 +562,24 @@ async def run(*, apply: bool) -> str:
         async with maker() as session:
             snaps, mems, levels = await _load(session)
             groups = build_groups(snaps, mems, levels)
+            if keep_ids:
+                groups = build_groups(
+                    snaps, mems, levels, keep_overrides_for(groups, keep_ids)
+                )
             report = format_dry_run(groups)
             if apply and groups:
                 await apply_groups(session, groups)
                 await session.commit()
-                report += "\n\n已寫入。請接著執行 uv run creafly-migrate 建立全站唯一索引。"
+                pending = [g.email for g in groups if g.needs_decision]
+                if pending:
+                    report += (
+                        "\n\n已寫入，但下列 email 需要人工決定、沒有合併："
+                        + "、".join(pending)
+                        + "\n確認後加 --keep <帳號 id> 再跑一次，"
+                        + "之後才能執行 uv run creafly-migrate。"
+                    )
+                else:
+                    report += "\n\n已寫入。請接著執行 uv run creafly-migrate 建立全站唯一索引。"
             else:
                 await session.rollback()
             return report
@@ -500,8 +596,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="寫入合併。沒有這個旗標時只印報告。",
     )
+    parser.add_argument(
+        "--keep",
+        type=int,
+        action="append",
+        default=[],
+        metavar="帳號ID",
+        help="人工指定這一組要保留的帳號 id（可重複）。用在需要人工決定的組。",
+    )
     args = parser.parse_args(argv)
-    report = asyncio.run(run(apply=args.apply))
+    report = asyncio.run(run(apply=args.apply, keep_ids=args.keep))
     print(report)
     return 0
 

@@ -2,6 +2,8 @@
 // 進場由 main 注入，避免這裡 import 多人模組跟 ws 循環。
 import { TeacherDispatch, type DispatchActivity } from '@creafly/shared';
 import { droneState, flags } from '../core/droneState';
+import { toast } from '../core/events';
+import { DISPATCH_HOLD_UNVERIFIABLE, markRecordingUnverifiable } from '../core/inputRecorder';
 import { stopProgram } from '../core/program';
 
 export interface DispatchEnterOpts {
@@ -10,20 +12,24 @@ export interface DispatchEnterOpts {
 }
 
 type EnterFn = (activity: DispatchActivity, opts: DispatchEnterOpts) => void;
+type LeaveFn = (activity: DispatchActivity) => void;
 
 const BOARD_ID = 'dispatch-board';
 
 /** 老師派送這位學生時的畫面與飛行鎖。靜態方法，DOM 不在就只改旗標（測試）。 */
 export class StudentDispatch {
   private static enter: EnterFn | null = null;
+  private static leave: LeaveFn | null = null;
   private static held: DispatchActivity | null = null;
 
-  static bind(enter: EnterFn): void {
+  static bind(enter: EnterFn, leave?: LeaveFn): void {
     this.enter = enter;
+    this.leave = leave ?? null;
   }
 
   static unbind(): void {
     this.enter = null;
+    this.leave = null;
   }
 
   static isHeld(): boolean {
@@ -33,6 +39,8 @@ export class StudentDispatch {
   /** 留在這一關。不需學生確認。 */
   static hold(activity: DispatchActivity): void {
     this.held = activity;
+    // 速度歸零、物理暫停都不在錄製裡：這次嘗試交給伺服器判「無法驗證」，不要被當成可疑
+    markRecordingUnverifiable(DISPATCH_HOLD_UNVERIFIABLE);
     flags.dispatchHold = true;
     droneState.velocity.x = 0;
     droneState.velocity.y = 0;
@@ -52,6 +60,12 @@ export class StudentDispatch {
   static go(activity: DispatchActivity, opts: DispatchEnterOpts = {}): void {
     this.release();
     this.enter?.(activity, opts);
+  }
+
+  /** 伺服器拒絕自行進場（比賽中或有派送名單）：退出這個活動，不要停在空場上。 */
+  static joinRejected(activity: DispatchActivity): void {
+    this.leave?.(activity);
+    toast(`${TeacherDispatch.title(activity)}正在進行或老師正在派送，請等老師下一場`, 'warning');
   }
 
   /** 有名單或比賽中，整房關掉右下活動入口。 */

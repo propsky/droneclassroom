@@ -12,11 +12,11 @@ CREAFLY 教室版無人機模擬器 — a browser-based drone flight simulator f
 
 ```bash
 pnpm install            # install all workspace deps
-pnpm dev                # simulator (:5173) + teacher (:5174) + api (:3000) in parallel
+pnpm dev                # simulator (:5173) + teacher (:5174) + admin (:5175) + api (:3000) in parallel
 pnpm dev:sim            # student client only
 pnpm typecheck          # tsc --noEmit across all packages (must stay clean)
 pnpm build              # production build → apps/simulator/dist (zero CDN deps)
-pnpm build:pages        # what Cloudflare Pages runs: simulator + teacher (/teacher/) in one dist
+pnpm build:pages        # what Cloudflare Pages runs: simulator + teacher (/teacher/) + admin (/admin/) in one dist
 pnpm test               # Vitest (shared / simulator / teacher) + pytest (api)
 pnpm test:e2e           # Playwright smoke (Chrome / Edge / Safari / iPad); starts api + sim dev servers
 pnpm --filter @creafly/simulator verify:determinism   # G-04 cross-engine (V8 ≡ JSC) replay gate
@@ -24,7 +24,7 @@ pnpm --filter @creafly/simulator build:replay-verifier # server replay verifier 
 pnpm legacy             # run the old Three.js version (node legacy/server.js, :3000)
 ```
 
-Tests: Vitest in `packages/shared`, `apps/simulator` (`src/**/*.test.ts`, pure `core/` logic runs in Node) and `apps/teacher`; pytest in `apps/api`. Real-PostgreSQL API tests only run when `TEST_DATABASE_URL` is set (never the `.env` `DATABASE_URL`). Visual verification is headless-Chrome screenshots — on macOS pass `--use-angle=swiftshader --enable-unsafe-swiftshader` for WebGL.
+Tests: Vitest in `packages/shared`, `apps/simulator` (`src/**/*.test.ts`, pure `core/` logic runs in Node) and `apps/teacher`; pytest in `apps/api`. Real-PostgreSQL API tests only run when `TEST_DATABASE_URL` is set (never the `.env` `DATABASE_URL`); a throwaway container works: `docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=test postgres:16-alpine`, then `DATABASE_URL=postgresql+asyncpg://postgres:test@localhost:55432/postgres uv run creafly-migrate` before `TEST_DATABASE_URL=… uv run pytest`. Test WS receives time out after 10 s (conftest) instead of hanging. Visual verification is headless-Chrome screenshots — on macOS pass `--use-angle=swiftshader --enable-unsafe-swiftshader` for WebGL.
 
 ## Monorepo layout
 
@@ -32,6 +32,7 @@ Tests: Vitest in `packages/shared`, `apps/simulator` (`src/**/*.test.ts`, pure `
 |---|---|---|
 | `apps/simulator` | `@creafly/simulator` | Student client: Babylon.js 8 + Vite + TS |
 | `apps/teacher` | `@creafly/teacher` | Teacher dashboard + level editor (Vite + TS, no framework); served at `/teacher/` |
+| `apps/admin` | `@creafly/admin` | Platform admin panel (accounts, licence expiry; Vite + TS, dev :5175); served at `/admin/` |
 | `apps/api` | `@creafly/api` | FastAPI + uv backend (REST + WS). PostgreSQL via SQLAlchemy 2 + Alembic is optional: without `DATABASE_URL` it runs fully in-memory (guest / classroom LAN mode) |
 | `packages/shared` | `@creafly/shared` | Level schema, WS protocol types, pure math — **zero runtime deps, keep it that way** |
 | `legacy/` | — | Old Three.js single-file app, still runnable; do not evolve it, only fix critical classroom bugs |

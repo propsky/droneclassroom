@@ -31,6 +31,7 @@ import type { DispatchStateMsg } from '@creafly/shared';
 import { SoccerFieldChoice } from './soccerFieldChoice';
 import { SoccerResultsPanel } from './soccerResultsPanel';
 import { SoccerRulesetForm } from './soccerRuleset';
+import { DEDUCT_CONFIRM_MS, DeductConfirm } from './deductConfirm';
 import type { TeacherArenaMsg, TeacherSoccerMsg } from '../ws';
 import { fetchTeamCurriculum } from '../api';
 import { clearEditorRoute, parseEditorRoute } from '../editorRoute';
@@ -440,8 +441,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                 <div class="field">
                   <label class="field-label" for="soccer-dur">比賽時間</label>
                   <select id="soccer-dur">
-                    <option value="180">3 分鐘</option>
-                    <option value="120" selected>2 分鐘</option>
+                    <option value="120" selected>2 分鐘（臺北賽制）</option>
                     <option value="60">1 分鐘</option>
                     <option value="30">30 秒（測試）</option>
                   </select>
@@ -846,7 +846,6 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const soccerRulesHint = root.querySelector<HTMLElement>('#soccer-rules-hint')!;
   const paintRulesHint = (): void => {
     soccerRulesHint.textContent = SoccerRulesetForm.hint();
-    if (soccerDurSel.value === '180') soccerDurSel.value = SoccerRulesetForm.durationOnChange('180');
   };
   paintRulesHint();
   root.querySelector<HTMLButtonElement>('#soccer-results-close')?.addEventListener('click', () => {
@@ -875,6 +874,20 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     sendGame({ type: 'soccer_reset', clearTeams: true }, '換新一輪（重新分隊）');
   });
 
+  // 扣分是永久的、沒有復原：第一次按只變成「確定扣 1 分？」，3 秒內再按才送出
+  const deductConfirm = new DeductConfirm();
+  const pressDeduct = (el: HTMLElement, key: string, idle: string): boolean => {
+    if (deductConfirm.press(key)) return true;
+    el.textContent = deductConfirm.label(key, idle);
+    el.classList.add('armed');
+    setTimeout(() => {
+      if (!deductConfirm.isArmed(key) && el.isConnected) {
+        el.textContent = idle;
+        el.classList.remove('armed');
+      }
+    }, DEDUCT_CONFIRM_MS + 50);
+    return false;
+  };
   // 名單操作用事件代理（名字/「設為前鋒」→ soccer_set_striker；「換隊」→ soccer_set_team）
   root.querySelector<HTMLElement>('.soccer-teams')!.addEventListener('click', (ev) => {
     const el = (ev.target as HTMLElement).closest<HTMLElement>('[data-act]');
@@ -882,7 +895,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const id = el.dataset['id'];
     if (el.dataset['act'] === 'warn-team') {
       const team: SoccerTeam = el.dataset['team'] === 'red' ? 'red' : 'blue';
-      sendGame({ type: 'soccer_warn', team, reason: 'manual', deduct: true });
+      if (pressDeduct(el, `team:${team}`, '全隊扣 1 分')) {
+        sendGame({ type: 'soccer_warn', team, reason: 'manual', deduct: true });
+      }
       return;
     }
     if (!id) return;
@@ -892,7 +907,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
       const team: SoccerTeam = el.dataset['team'] === 'red' ? 'red' : 'blue';
       sendGame({ type: 'soccer_set_team', studentId: id, team });
     } else if (el.dataset['act'] === 'warn') {
-      sendGame({ type: 'soccer_warn', studentId: id, reason: 'manual', deduct: true });
+      if (pressDeduct(el, `id:${id}`, '扣 1 分')) {
+        sendGame({ type: 'soccer_warn', studentId: id, reason: 'manual', deduct: true });
+      }
     }
   });
 
@@ -901,7 +918,8 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     for (const team of ['blue', 'red'] as const) {
       const other: SoccerTeam = team === 'blue' ? 'red' : 'blue';
       const list = players.filter((p) => p.team === team);
-      const tools = `<div class="soccer-team-tools"><span class="pick" data-act="warn-team" data-team="${team}">全隊警告／扣分</span></div>`;
+      const teamKey = `team:${team}`;
+      const tools = `<div class="soccer-team-tools"><span class="pick deduct${deductConfirm.isArmed(teamKey) ? ' armed' : ''}" data-act="warn-team" data-team="${team}">${deductConfirm.label(teamKey, '全隊扣 1 分')}</span></div>`;
       rosterEls[team].innerHTML =
         tools +
         (list.length > 0
@@ -912,7 +930,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
                   <span class="soccer-name" data-act="striker" data-id="${esc(p.id)}">${esc(p.name || '?')}${p.striker ? `<span class="striker-badge">${ICONS.target}前鋒</span>` : ''}</span>
                   <span class="pick" data-act="striker" data-id="${esc(p.id)}">${p.striker ? '前鋒' : '設為前鋒'}</span>
                   <span class="pick" data-act="team" data-id="${esc(p.id)}" data-team="${other}">${ICONS.swap}換到${other === 'blue' ? '藍隊' : '紅隊'}</span>
-                  <span class="pick" data-act="warn" data-id="${esc(p.id)}">警告／扣分</span>
+                  <span class="pick deduct${deductConfirm.isArmed(`id:${p.id}`) ? ' armed' : ''}" data-act="warn" data-id="${esc(p.id)}">${deductConfirm.label(`id:${p.id}`, '扣 1 分')}</span>
                 </div>`,
               )
               .join('')
@@ -1241,6 +1259,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     soccer.endTime = 0;
     renderSoccerRoster([]);
     renderSoccerScore();
+    dispatchUi.reset();
   };
 
   // 班級列：點開著的 chip 切房（樂觀高亮；伺服器 room_list 回來為準）；點沒開的班級 → room_open_team（伺服器開房後回 room_list，新房已 selected）

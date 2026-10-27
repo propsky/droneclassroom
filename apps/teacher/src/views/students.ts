@@ -35,7 +35,7 @@ function avatarChip(emoji: string): string {
 export function accountStatusText(kind: StudentEntry['accountKind']): string {
   switch (kind) {
     case 'linked':
-      return '既有帳號已加入';
+      return '學生自行加入';
     case 'pending_password':
       return '新帳號待設密碼';
     case 'password_set':
@@ -254,13 +254,17 @@ export function openStudentsPanel(opts: StudentsPanelOptions): StudentsPanel {
         const noticed = noticeResults.filter(Boolean).length;
         const failed = inviteResults.length - sent + (noticeResults.length - noticed);
         const parts: string[] = [];
+        const pendingJoin = res.pendingJoin ?? [];
         if (res.created.length > 0) parts.push(`已建立 ${res.created.length} 位新學生`);
-        if ((res.joined?.length ?? 0) > 0) parts.push(`已將 ${res.joined.length} 位既有帳號加入班級`);
+        if ((res.joined?.length ?? 0) > 0) parts.push(`已加回 ${res.joined.length} 位本班學生`);
+        if (pendingJoin.length > 0) {
+          parts.push(`${pendingJoin.length} 位已有帳號，要請學生登入後在「我的班級」輸入班級碼自己加入`);
+        }
         let text = parts.join('，') || '名單已更新';
         if (sendInvitesCk.checked && (inviteResults.length > 0 || noticeResults.length > 0)) {
           const mail: string[] = [];
           if (inviteResults.length > 0) mail.push(`設密碼邀請 ${sent} 封`);
-          if (noticeResults.length > 0) mail.push(`加入通知 ${noticed} 封`);
+          if (noticeResults.length > 0) mail.push(`加入班級邀請 ${noticed} 封`);
           text += `，${mail.join('、')}${failed > 0 ? `（失敗 ${failed} 封）` : ''}`;
         }
         toast(text, 'success');

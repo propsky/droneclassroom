@@ -295,16 +295,21 @@ def test_切換班級只看到該班進度_個人帳本分開(db_client: TestCli
     added_a = _create_students(
         db_client, headers, team_a, [{"name": "名單別名", "email": email}]
     )
-    assert added_a["created"] == []
-    assert added_a["joined"][0]["id"] == sid
-    assert added_a["joined"][0]["accountKind"] == "linked"
-    assert "已被加入" in mailer.sent[-1]["subject"]
+    # 已有帳號：老師只能寄邀請，學生自己用班級碼加入兩班
+    assert added_a["created"] == [] and added_a["joined"] == []
+    assert added_a["pendingJoin"] == [email]
+    assert "邀請你加入" in mailer.sent[-1]["subject"]
     assert "invite=" not in mailer.sent[-1]["html"]
     assert "設定密碼並加入" not in mailer.sent[-1]["html"]
     added_b = _create_students(
         db_client, headers, team_b, [{"name": "乙班別名", "email": email.upper()}]
     )
-    assert added_b["created"] == [] and added_b["joined"][0]["id"] == sid
+    assert added_b["created"] == [] and added_b["pendingJoin"] == [email]
+    for code in (code_a, code_b):
+        joined = db_client.post(
+            "/auth/student/teams/join", json={"teamCode": code}, headers=_bearer(token)
+        )
+        assert joined.status_code == 200, joined.text
 
     async def _email_rows() -> int:
         assert DATABASE_URL

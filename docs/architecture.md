@@ -79,6 +79,7 @@ droneclassroom/
 - **重播**：伺服器以 Node 執行打包的 `core/`（Docker 映像內建 `/app/replay/verify-recording.mjs`），**用伺服器資料庫的關卡定義**重跑，判定集中在 `core/replayVerify.ts`：hash 相符、確實過關、宣告用時不短於模擬時間、錄製關卡與過關關卡一致。結果三態：可疑（標 suspect）/ 無法驗證（舊版前端、前後端 `simVersion` 不同、老師剛改過關卡、程式模式）/ 通過。驗證器自身失敗一律不算學生的錯。
 - **安全：伺服器絕不執行學生端送來的程式碼**。程式模式錄製裡的 code 是任意字串，`new Function` 等同遠端執行任意程式 → 含 `run` 操作的錄製一律判「無法驗證」；驗證器另以 `node --disallow-code-generation-from-strings` 啟動、只傳 PATH 等必要環境變數（不含資料庫 / AWS 機密）作為縱深防禦。上傳端點先驗身分、限量串流讀取（2MB）並限制每生每分鐘 20 筆。要驗證程式模式需改為伺服器端從 Blockly 工作區重新產生程式碼或使用沙箱直譯器，屬後續工作。
 - **線上與重播共用 `core/simTick.ts`**；`core/replayParity.test.ts` 以真實操作情境守住兩邊一致。新增任何直接改無人機狀態的操作都必須呼叫 `recordAction` 並在 `replayRunner.ts` 對應重演。
+- **錄製期間被老師派送**（等待看板凍結飛行）：錄製標「老師派送暫停飛行」→ 無法驗證，不標可疑。
 - **`REPLAY_ENFORCE`**（預設關）：開啟後「未附錄製（非離線補傳）」與「無法驗證」也標可疑；PWA 新版於下次開啟才生效，確認錄製上傳穩定後再開。
 
 ### 多房間（`app/rooms.py`）
@@ -91,7 +92,20 @@ droneclassroom/
 
 ### 教師後台（`apps/teacher`）
 
-Vite + TS（無框架，同 simulator 慣例），dev :5174、生產由 api 以 `/teacher` 供檔（assets 掛 `/teacher-assets/`，`TEACHER_DIST` 設定）。相對 legacy 修掉三個 bug：關卡下拉三章全列（`GET /api/levels`）、顯示真 LAN 位址（`GET /api/info`，不再打 api.ipify.org）、人數上限來自 `MAX_STUDENTS` 設定。大亂鬥/足球分頁版面已備、待 2c 啟用。
+Vite + TS（無框架，同 simulator 慣例），dev :5174、生產由 api 以 `/teacher` 供檔（assets 掛 `/teacher-assets/`，`TEACHER_DIST` 設定）。相對 legacy 修掉三個 bug：關卡下拉三章全列（`GET /api/levels`）、顯示真 LAN 位址（`GET /api/info`，不再打 api.ipify.org）、人數上限來自 `MAX_STUDENTS` 設定。大亂鬥／足球分頁可開賽、看結算，並有派送卡（見下）。
+
+**班級房權限**：班級房（`team_id` 不為空）的所有老師操作——選房看名冊、開賽、派送、扣分、廣播、改設定——限班級擁有者（`RoomManager.can_manage`）；預設房與無資料庫的記憶體房所有老師共用。
+
+### 教師派送與全班傳送（`app/teacher_dispatch.py`、`app/class_level_send.py`）
+
+- **派送**（`dispatch_add` / `dispatch_cancel`）：把指定學生排進足球（上限 6）或大亂鬥（上限 8）的等待名單。學生留在原關卡看等待看板、不能飛；老師按開始才送進場（`dispatch_go`），賽後送回原關卡。有名單或比賽中整房關掉自行進場（`dispatch_gate`），被拒的學生收到 `dispatch_join_rejected` 並退出該活動。老師全離開時釋放等待名單。名單只在記憶體。
+- **大亂鬥時間到停在結算**：派送進場的學生跟全場一起看名次；老師再來一輪就留在場上，切關跟著新關卡走，全部重置才送回原關卡。
+- **全班傳送到活動**（`load_level` 帶 `activity:*` id）：一般關卡會先結束進行中的賽局；送進「正在進行的那一場」則不結束，還沒進場的學生可以加入那一場（除非他在另一個活動的派送名單上）。
+- 派送凍結飛行（`flags.dispatchHold`）不經 `ControlFrame`、重播重現不了：錄製標成「無法驗證」（不是可疑），見下方重播驗證。
+
+### 真機橋接（`apps/simulator/src/core/execution/`）
+
+程式模式可切到真機：`cf_*` 動作改送本機 WebSocket 橋接（預設 `ws://localhost:8765/ws`，1 模擬公尺 = 10 cm），一次一個指令、等飛機回覆。頁面載入不連線、預設模擬模式。這是 `core/` 裡唯一用到瀏覽器 WebSocket／Worker／牆鐘的地方（不在模擬路徑上，不進重播）。
 
 ## 工作慣例
 

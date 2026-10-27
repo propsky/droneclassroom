@@ -30,3 +30,19 @@ export async function dismissLevelIntroIfNeeded(page: Page): Promise<void> {
     await btn.click();
   }
 }
+
+/**
+ * 等關卡開始的 3-2-1 倒數結束（倒數中手動操控是鎖住的）。
+ * 倒數結束才開始計時，所以看 levelState.startTime。
+ */
+export async function waitForFlightReady(page: Page): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as unknown as { CREAFLY: { levelState: { startTime: number } } }).CREAFLY.levelState.startTime,
+        ),
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(0);
+}

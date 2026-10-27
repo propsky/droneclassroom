@@ -92,19 +92,25 @@ export interface PositionZone extends PassZoneBase {
  * accumulated：從本關開始的有號累積轉角（不折 360，多轉一圈不算）。
  * facing：機頭朝向（折回 360° 的最短角差），給「面對某方向」用。
  */
+/** 穿圈順序：sequential＝照陣列順序。 */
+export type RingOrder = 'sequential';
+
 export type HeadingYawMode = 'accumulated' | 'facing';
 
 export interface HeadingZone extends PassZoneBase {
   type: 'heading';
   /**
    * 目標角（度）。
-   * yawMode=accumulated（預設）時是累積轉角，例如左轉一整圈要寫 360，不是 0。
+   * yawMode=accumulated 時是累積轉角，例如左轉一整圈要寫 360，不是 0。
    * yawMode=facing 時是機頭朝向。
    */
   targetYaw: number;
-  /** 容差（度）。省略時用 HEADING_TOLERANCE_DEG */
+  /** 容差（度）。省略時用 HEADING_TOLERANCE_DEG；舊關卡（沒寫 yawMode）沿用當時的 20° */
   tolerance: number;
-  /** 預設 accumulated。facing 必須在關卡上寫明。 */
+  /**
+   * 判定方式。新關卡一律寫明（官方關卡、關卡編輯器、範本）。
+   * 沒寫的是舊關卡，當時比的是機頭朝向，所以視為 facing（見 HeadingJudge.modeOf）。
+   */
   yawMode?: HeadingYawMode;
 }
 
@@ -157,6 +163,8 @@ export interface LevelDef {
   guide?: [number, number][];
   penColors?: string[];
   rings?: RingDef[];
+  /** 'sequential'＝要照陣列順序穿圈。沒寫＝任意順序都算（老師自建的舊關卡照舊）。 */
+  ringOrder?: RingOrder;
   obstacles?: ObstacleDef[];
   balloons?: BalloonDef[];
   passZones?: PassZoneDef[];

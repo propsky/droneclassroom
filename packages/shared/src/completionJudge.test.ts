@@ -10,6 +10,7 @@ import {
   FaceYawJudge,
   HEADING_TOLERANCE_DEG,
   HeadingJudge,
+  LEGACY_HEADING_TOLERANCE_DEG,
   LandingJudge,
   OrderJudge,
   PassZoneJudge,
@@ -192,5 +193,34 @@ describe('PassZoneJudge', () => {
     };
     expect(PassZoneJudge.satisfies(zone, pose({ x: 0, y: 0.4, z: -7 }))).toBe(true);
     expect(PassZoneJudge.satisfies(zone, pose({ x: 0, y: 0.4, z: 0 }))).toBe(false);
+  });
+});
+
+describe('老師自建的舊關卡（沒寫 yawMode / ringOrder）照原本的判定', () => {
+  const legacy = (target: number, tolerance?: number): HeadingZone =>
+    ({ type: 'heading', x: 0, z: 0, label: '轉角', targetYaw: target, tolerance }) as HeadingZone;
+
+  it('沒寫 yawMode：比機頭朝向，轉一整圈回到 0° 也算', () => {
+    expect(HeadingJudge.modeOf(legacy(0, 15))).toBe('facing');
+    const settled = (deg: number): Pose => pose({ accumulatedYawDeg: deg, previousYawDeg: deg });
+    expect(PassZoneJudge.satisfies(legacy(0, 15), settled(360))).toBe(true);
+    expect(PassZoneJudge.satisfies(legacy(270, 15), settled(-90))).toBe(true);
+    // 明確寫 accumulated 的新關卡照新判定
+    expect(PassZoneJudge.satisfies({ ...legacy(0, 15), yawMode: 'accumulated' }, settled(360))).toBe(false);
+  });
+
+  it('沒寫 yawMode 且容差沒填或填 0：沿用當時的 20°', () => {
+    expect(HeadingJudge.toleranceOf(legacy(90))).toBe(LEGACY_HEADING_TOLERANCE_DEG);
+    expect(HeadingJudge.toleranceOf(legacy(90, 0))).toBe(LEGACY_HEADING_TOLERANCE_DEG);
+    expect(HeadingJudge.toleranceOf(legacy(90, 12))).toBe(12);
+    expect(HeadingJudge.toleranceOf({ ...legacy(90), yawMode: 'accumulated' })).toBe(HEADING_TOLERANCE_DEG);
+  });
+
+  it('沒寫 ringOrder：任意順序都算；sequential 才要照順序', () => {
+    const passed = [false, false, false];
+    expect(RingJudge.canPass(passed, 2, undefined)).toBe(true);
+    expect(RingJudge.canPass(passed, 2, 'sequential')).toBe(false);
+    expect(RingJudge.canPass(passed, 0, 'sequential')).toBe(true);
+    expect(RingJudge.canPass([true, false, false], 0, undefined)).toBe(false);
   });
 });

@@ -4,12 +4,17 @@
 // 旋轉：預設比「從本關開始的有號累積角」，不把角度折回 0–360。
 // 因此 360° ≠ 0°、450° ≠ 90°；轉超過容差、或一路轉過去沒停住，都不算。
 import { detHypot2 } from './detmath';
-import type { HeadingYawMode, PassZoneDef } from './levels';
+import type { HeadingYawMode, PassZoneDef, RingOrder } from './levels';
 import { zoneTriggerRadius } from './levelObjectDefaults';
 import { yawDiffDeg } from './math';
 
 /** 累積轉角預設容差（度）。過關需落在目標 ± 此值，含邊界。 */
 export const HEADING_TOLERANCE_DEG = 10;
+/**
+ * 沒寫 yawMode 的舊關卡（4e06238 以前老師自建、存在資料庫）原本的容差：
+ * 舊判定是 `zone.tolerance || 20`，沒填或填 0 都當 20°。
+ */
+export const LEGACY_HEADING_TOLERANCE_DEG = 20;
 
 /**
  * 單 tick 角變化小於此值（度）才算「停住」。
@@ -65,13 +70,29 @@ export class YawAccumulator {
   }
 }
 
-/** 旋轉任務：累積角或（明確選用時）機頭朝向。 */
+/** 旋轉任務：累積角或機頭朝向。 */
 export class HeadingJudge {
   static tolerance(configured?: number): number {
     if (configured == null || !Number.isFinite(configured) || configured < 0) {
       return HEADING_TOLERANCE_DEG;
     }
     return configured;
+  }
+
+  /**
+   * 這個旋轉區實際用哪種判定。沒寫 yawMode 的是舊關卡，當時一律比機頭朝向（facing）；
+   * 官方關卡、關卡編輯器與範本都會寫明，不受影響。
+   */
+  static modeOf(zone: { yawMode?: HeadingYawMode }): HeadingYawMode {
+    return zone.yawMode ?? 'facing';
+  }
+
+  /** 這個旋轉區實際的容差。舊關卡（沒寫 yawMode）沒填或填 0 時沿用當時的 20°。 */
+  static toleranceOf(zone: { yawMode?: HeadingYawMode; tolerance?: number }): number {
+    if (zone.yawMode === undefined && !(Number(zone.tolerance) > 0)) {
+      return LEGACY_HEADING_TOLERANCE_DEG;
+    }
+    return HeadingJudge.tolerance(zone.tolerance);
   }
 
   /**
@@ -209,6 +230,19 @@ export class RingJudge {
   static isNext(passed: readonly boolean[], index: number): boolean {
     return OrderJudge.isActive(passed, index);
   }
+
+  /**
+   * 這個圈現在穿過去算不算數。關卡寫 ringOrder:'sequential' 才要照陣列順序；
+   * 沒寫的舊關卡（老師自建）照舊任意順序都算。
+   */
+  static canPass(
+    passed: readonly boolean[],
+    index: number,
+    order: RingOrder | undefined,
+  ): boolean {
+    if (index < 0 || index >= passed.length || passed[index]) return false;
+    return order === 'sequential' ? RingJudge.isNext(passed, index) : true;
+  }
 }
 
 export class FaceYawJudge {
@@ -249,8 +283,8 @@ export class PassZoneJudge {
         pose.accumulatedYawDeg,
         pose.previousYawDeg,
         zone.targetYaw,
-        HeadingJudge.tolerance(zone.tolerance),
-        zone.yawMode ?? 'accumulated',
+        HeadingJudge.toleranceOf(zone),
+        HeadingJudge.modeOf(zone),
       );
     }
     return false;

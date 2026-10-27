@@ -127,11 +127,12 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
     const net = `淨分 ${s.scores.blue - d.blue}:${s.scores.red - d.red}`;
     const ded = `扣分 ${d.blue}:${d.red}`;
     if (s.status === 'countdown') return `臺北賽制｜起槳｜3-2-1…｜${who}${feel}`;
+    // 結束時伺服器的 phase 還停在 landing：要先看 done，否則一直顯示「降落倒數 0:00」
+    if (s.status === 'done') return `結束｜${net}｜${ded}｜${who}`;
     if (s.phase === 'landing') {
       const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
       return `降落倒數｜${t}｜${ded}｜${who}`;
     }
-    if (s.status === 'done') return `結束｜${net}｜${ded}｜${who}`;
     if (s.status === 'running') {
       const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
       return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜${t}｜${who}${back}${card}${feel}`;

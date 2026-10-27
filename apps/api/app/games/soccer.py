@@ -23,7 +23,7 @@
 import logging
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from fastapi import WebSocket
@@ -37,9 +37,9 @@ from .soccer_rules import (
     CROSS_GRANT_MS,
     RED_CLOSING_MPS,
     YELLOW_CLOSING_MPS,
-    OwnGoal,
+    RingPassage,
+    advance_ring_passage,
     false_start_radius,
-    shield_passes_ring,
 )
 from .taipei_rules import DWELL_MS, LAND_GRACE_SEC, TaipeiRules
 
@@ -166,6 +166,18 @@ class SoccerPlayer:
     # 臺北賽制：這一場已經為這位扣過的一次性項目
     early_takeoff_penalized: bool = False
     late_landing_penalized: bool = False
+    # 跨段穿環狀態：attack＝穿對方門、inbound＝從門後穿回自家門、outbound＝穿出自家門
+    passages: dict[str, RingPassage] = field(default_factory=dict)
+
+    def passage(self, kind: str) -> RingPassage:
+        found = self.passages.get(kind)
+        if found is None:
+            found = self.passages[kind] = RingPassage()
+        return found
+
+    def reset_passages(self) -> None:
+        for state in self.passages.values():
+            state.reset()
 
 
 class SoccerGame(BaseGame):
@@ -637,7 +649,9 @@ class SoccerGame(BaseGame):
             p.vz = (p.z - prev[2]) / dt_sec
             await self._on_segment(p, prev)
         else:
+            # 剛加入或被傳送（開賽 / 返場）：沒有連續軌跡，上一次的穿環狀態作廢
             p.vx = p.vy = p.vz = 0.0
+            p.reset_passages()
 
     def _cross_fresh(self, p: SoccerPlayer) -> bool:
         return bool(p.pending_cross) and (self.now_ms() - p.pending_cross_ms) <= CROSS_GRANT_MS
@@ -897,14 +911,19 @@ class SoccerGame(BaseGame):
         return p.z < 0 if cfg["stationZ"] < 0 else p.z > 0
 
     async def _tick_returns(self) -> None:
-        """回到己方半場的隊員解除 needs_return。全員到齊才恢復可攻。"""
+        """回到己方半場的隊員解除 needs_return。全員到齊才恢復可攻。
+
+        每 tick 都重算 armed：還沒回來的隊員墜機、出場、斷線或離場後就不再算，
+        否則整隊會一直鎖住、剩下的時間都不能得分。
+        """
         changed = False
         for p in self._active():
             if p.needs_return and p.last_pos_ms is not None and self._on_own_half(p):
                 p.needs_return = False
                 changed = True
-        if changed:
-            self._sync_armed()
+        before = dict(self.armed)
+        self._sync_armed()
+        if changed or self.armed != before:
             await self.broadcast_scores()
 
     async def claim_pk(self, record: StudentRecord) -> None:
@@ -985,50 +1004,51 @@ class SoccerGame(BaseGame):
             await self._deduct(p.team, "early_takeoff", p)
         return True
 
-    async def _on_segment(self, p: SoccerPlayer, prev: tuple[float, float, float]) -> None:
-        if self.mode != "striker" or p.disabled or p.team not in SOCCER_TEAM_NAMES:
-            return
-        curr = (p.x, p.y, p.z)
-        if self.status != "running":
-            return
-        if (
-            self.phase == "period"
-            and TaipeiRules.reverse_through_own(
-                prev,
-                curr,
-                defend_goal_z=self._teams[p.team]["defendGoalZ"],
-                goal_y=self.field.goal_y,
-                goal_r=self.field.goal_r,
-                half_thick=self.field.goal_tube,
-                shield_r=self.field.shield_r,
-            )
-        ):
-            await self._deduct(p.team, "reverse_block", p)
-        if OwnGoal.shield_into_own(
+    def _ring_pass(
+        self,
+        p: SoccerPlayer,
+        kind: str,
+        prev: tuple[float, float, float],
+        goal_z: float,
+        attack_sign: float,
+    ) -> bool:
+        """這一段軌跡是否完成一次正面穿環（從 attack_sign 的進攻側進、整顆穿出）。"""
+        return advance_ring_passage(
+            p.passage(kind),
             prev,
-            curr,
-            defend_goal_z=self._teams[p.team]["defendGoalZ"],
+            (p.x, p.y, p.z),
+            goal_z=goal_z,
             goal_y=self.field.goal_y,
             goal_r=self.field.goal_r,
+            attack_sign=attack_sign,
             half_thick=self.field.goal_tube,
             shield_r=self.field.shield_r,
+        )
+
+    async def _on_segment(self, p: SoccerPlayer, prev: tuple[float, float, float]) -> None:
+        if (
+            self.mode != "striker"
+            or p.disabled
+            or p.team not in SOCCER_TEAM_NAMES
+            or self.status != "running"
         ):
+            p.reset_passages()
+            return
+        # 三種穿環都要看「從哪一面進」，單一段軌跡分不出來（見 RingPassage）。
+        defend_z = self._teams[p.team]["defendGoalZ"]
+        outbound = -1.0 if defend_z < 0 else 1.0
+        inbound_pass = self._ring_pass(p, "inbound", prev, defend_z, -outbound)
+        if inbound_pass and self.phase == "period":
+            await self._deduct(p.team, "reverse_block", p)
+        if self._ring_pass(p, "outbound", prev, defend_z, outbound):
             await self._announce_own_goal(p)
             return
         if not p.striker:
+            p.passage("attack").reset()
             return
         attack_z = self._teams[p.team]["attackGoalZ"]
         sign = 1.0 if attack_z > 0 else -1.0
-        if not shield_passes_ring(
-            prev,
-            curr,
-            goal_z=attack_z,
-            goal_y=self.field.goal_y,
-            goal_r=self.field.goal_r,
-            attack_sign=sign,
-            shield_r=self.field.shield_r,
-            half_thick=self.field.goal_tube,
-        ):
+        if not self._ring_pass(p, "attack", prev, attack_z, sign):
             return
         if not self.armed.get(p.team, True):
             # 隊上還有人沒回己方半場：這一球不算。不罰球，回齊之後下一球照常計分。

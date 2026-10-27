@@ -50,7 +50,17 @@ export class PortraitChrome {
   }
 
   /** 活動關卡預設收合；只有明確存過「開」才展開。 */
-  static readEntryOpen(storage: MemoryStorage): boolean {
+  /** 封鎖網站資料時，光是讀 window.localStorage 就會丟 SecurityError */
+  static storageOf(view: { localStorage: MemoryStorage }): MemoryStorage | null {
+    try {
+      return view.localStorage;
+    } catch {
+      return null;
+    }
+  }
+
+  static readEntryOpen(storage: MemoryStorage | null): boolean {
+    if (!storage) return false;
     try {
       return storage.getItem(PortraitChrome.STORAGE_KEY) === '1';
     } catch {
@@ -58,7 +68,8 @@ export class PortraitChrome {
     }
   }
 
-  static writeEntryOpen(storage: MemoryStorage, open: boolean): void {
+  static writeEntryOpen(storage: MemoryStorage | null, open: boolean): void {
+    if (!storage) return;
     try {
       storage.setItem(PortraitChrome.STORAGE_KEY, open ? '1' : '0');
     } catch {
@@ -129,7 +140,8 @@ export class PortraitChrome {
 
     const mq = view.matchMedia(PortraitChrome.QUERY);
     let menuOpen = false;
-    let entryOpen = PortraitChrome.readEntryOpen(view.localStorage);
+    const storage = PortraitChrome.storageOf(view);
+    let entryOpen = PortraitChrome.readEntryOpen(storage);
 
     const render = (): void => {
       const portrait = mq.matches;
@@ -152,7 +164,7 @@ export class PortraitChrome {
     entryBtn.addEventListener('click', (event) => {
       event.stopPropagation();
       entryOpen = !entryOpen;
-      PortraitChrome.writeEntryOpen(view.localStorage, entryOpen);
+      PortraitChrome.writeEntryOpen(storage, entryOpen);
       render();
     });
     doc.addEventListener('click', (event) => {

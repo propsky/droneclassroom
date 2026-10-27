@@ -16,9 +16,4 @@ describe('SoccerRulesetForm', () => {
     expect(SoccerRulesetForm.hint()).toContain('扣 1 分');
     expect(SoccerRulesetForm.hint()).not.toContain('三局兩勝');
   });
-
-  it('舊的 3 分鐘改成 2 分鐘', () => {
-    expect(SoccerRulesetForm.durationOnChange('180')).toBe('120');
-    expect(SoccerRulesetForm.durationOnChange('30')).toBe('30');
-  });
 });

@@ -26,7 +26,7 @@ import { setMode } from '../core/program';
 import { bus, toast, sound, stateHud } from '../core/events';
 import { sendToServer, wsState, connectToTeacher } from '../net/ws';
 import { soccerCameraSign } from '../soccer/constants';
-import { shieldPassesRing } from '../soccer/crossing';
+import { advanceRingPassage, createRingPassage, type RingPassage } from '../soccer/crossing';
 import {
   SOCCER_IMPACT_TICK,
   bounceSoccerWalls,
@@ -104,6 +104,8 @@ export const soccerState = {
   myCard: null as 'yellow' | 'red' | null,
   disabled: false,
   crashSent: false,
+  /** 跨 tick 穿環狀態：要從進攻側進入對方環才算（與伺服器 advance_ring_passage 同一套） */
+  goalPassage: createRingPassage() as RingPassage,
   /** 上一 tick 的位置（穿環看整段位移，不只 z） */
   prevX: 0,
   prevY: HOME_POSITION.y,
@@ -220,6 +222,7 @@ export function enterSoccerMatch(): void {
   droneState.isGrounded = true;
   droneState.isFlying = false;
   soccerState.prevZ = 0;
+  soccerState.goalPassage = createRingPassage();
 
   showSoccerMatchHud(true);
   showSoccerFeel(true);
@@ -529,6 +532,7 @@ function applyMySpawn(spawns: SoccerSpawn[]): void {
   soccerState.prevX = mine.x;
   soccerState.prevY = HOME_POSITION.y;
   soccerState.prevZ = mine.z;
+  soccerState.goalPassage = createRingPassage();
 }
 
 /** 倒數鎖控、出場／安全事件 */
@@ -589,7 +593,8 @@ export function tickSoccerMatch(): void {
   }
   clampMatchBounds();
   interpolateOthers();
-  if (soccerState.contactEnabled) resolveDroneContacts();
+  // 倒數時大家都鎖在起飛點：分身從原位內插過來會掃過我的起飛點，推開就會被伺服器判提前升空。
+  if (soccerState.contactEnabled && soccerState.status !== 'countdown') resolveDroneContacts();
   noteCrash();
   detectGoal();
   soccerState.prevX = droneState.position.x;
@@ -663,25 +668,33 @@ function resolveDroneContacts(): void {
 
 /**
  * 前鋒穿對方門 → 上報 server。
- * 護罩掃掠體要沿進攻方向穿過開口（貼近內緣也算）；只打到框、從框外飛過、反向都不算。
- * server 用同一套幾何再算一次，對不上就拒絕（擋假得分）。
+ * 護罩要先從進攻側進入對方環、再整顆穿出（貼近內緣也算）；從門後伸進再退出、
+ * 只打到框、從框外飛過、反向都不算。
+ * server 用同一套幾何（advance_ring_passage）再算一次，對不上就拒絕（擋假得分）。
  * 上報前先補送最新位置，讓伺服器這一段軌跡含穿越。
  */
 function detectGoal(): void {
-  if (soccerState.mode !== 'striker') return;
-  if (soccerState.disabled || !soccerState.myTeam) return;
   const pkShooter =
     soccerState.status === 'pk' && soccerState.pkShooterId === wsState.myId;
-  if (!soccerState.myStriker && !pkShooter) return;
   const live =
     soccerState.status === 'running' ||
     soccerState.status === 'golden' ||
     pkShooter;
-  if (!live) return;
-  const F = activeSoccerField();
   const team = soccerState.myTeam;
+  if (
+    soccerState.mode !== 'striker' ||
+    soccerState.disabled ||
+    !team ||
+    (!soccerState.myStriker && !pkShooter) ||
+    !live
+  ) {
+    soccerState.goalPassage = createRingPassage();
+    return;
+  }
+  const F = activeSoccerField();
   const attackSign = team === 'blue' ? 1 : -1;
-  const passed = shieldPassesRing(
+  const step = advanceRingPassage(
+    soccerState.goalPassage,
     { x: soccerState.prevX, y: soccerState.prevY, z: soccerState.prevZ },
     droneState.position,
     {
@@ -693,11 +706,12 @@ function detectGoal(): void {
       attackSign,
     },
   );
+  soccerState.goalPassage = step.state;
   // PK 每一記獨立，不受「得分後回半場」鎖住；正規局仍看 armed
   const armed =
     soccerState.status === 'pk' ||
     soccerState.armed[team] !== false;
-  if (passed && armed && performance.now() > soccerState.goalCooldownUntil) {
+  if (step.passed && armed && performance.now() > soccerState.goalCooldownUntil) {
     soccerState.goalCooldownUntil = performance.now() + GOAL_COOLDOWN_MS;
     sendSoccerPos();
     sendToServer({ type: 'soccer_goal' });

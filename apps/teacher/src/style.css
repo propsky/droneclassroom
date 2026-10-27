@@ -943,6 +943,11 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
   transition: color 0.18s;
 }
 .soccer-player .pick:hover { color: var(--text-1); }
+/* 扣分：第一次按進入待確認（紅字），3 秒內再按才送出 */
+.pick.deduct.armed {
+  color: var(--danger);
+  font-weight: 700;
+}
 
 /* 比分列：mono 大號數字 + 隊色標（置中資訊條） */
 /* 進球公告：蓋在任何分頁上，停住後淡出 */
@@ -1215,7 +1220,7 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 .invite-none { color: var(--text-3); background: var(--bg-3); }
 .invite-sent { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .invite-accepted { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }
-/* 帳號狀態：班級碼／新帳號待設密碼／既有帳號已加入／已設密碼 */
+/* 帳號狀態：班級碼／新帳號待設密碼／學生自行加入／已設密碼 */
 .acct-code { color: var(--text-3); background: var(--bg-3); }
 .acct-pending_password { color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); }
 .acct-linked { color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); }

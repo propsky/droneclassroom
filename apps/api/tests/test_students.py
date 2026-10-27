@@ -549,23 +549,32 @@ def test_同email不重複建帳_沒email走班級碼_登入不掃多帳號(db_c
     added = _create_students(
         db_client, headers, team_id, [{"name": "名單上的名字", "email": email}]
     )
-    assert added["created"] == []
-    assert added["joined"][0]["id"] == sid
-    assert added["joined"][0]["accountKind"] == "linked"
+    # 已有帳號：老師不能直接掛進班，只寄信請本人用班級碼加入
+    assert added["created"] == [] and added["joined"] == []
+    assert added["pendingJoin"] == [email]
     assert added["noticesSent"][email] is True
-    assert "已被加入" in mailer.sent[-1]["subject"]
+    assert "邀請你加入" in mailer.sent[-1]["subject"]
+    assert team_code in mailer.sent[-1]["text"]
     assert "invite=" not in mailer.sent[-1]["html"]
+    listed_a = db_client.get(f"/api/teams/{team_id}/students", headers=headers).json()
+    assert sid not in {row["id"] for row in listed_a["students"]}
     again = db_client.post(
         "/auth/student/register",
         json={"name": "另一個", "email": email.upper(), "password": "kid-pass-123"},
     )
     assert again.status_code == 409
     me = db_client.get("/auth/teacher/me", headers=headers).json()
-    team_b, _code_b = asyncio.run(_insert_team(me, "另一班"))
+    team_b, code_b = asyncio.run(_insert_team(me, "另一班"))
     added_b = _create_students(
         db_client, headers, team_b, [{"name": "乙", "email": email}]
     )
-    assert added_b["created"] == [] and added_b["joined"][0]["id"] == sid
+    assert added_b["created"] == [] and added_b["pendingJoin"] == [email]
+    # 本人登入後自己用班級碼加入，才成為成員（linked）
+    token = reg.json()["token"]
+    joined = db_client.post(
+        "/auth/student/teams/join", json={"teamCode": code_b}, headers=_bearer(token)
+    )
+    assert joined.status_code == 200, joined.text
     listed = db_client.get(f"/api/teams/{team_b}/students", headers=headers).json()["students"]
     assert listed[0]["accountKind"] == "linked"
     assert listed[0]["id"] == sid
@@ -654,3 +663,102 @@ def test_同email不重複建帳_沒email走班級碼_登入不掃多帳號(db_c
             assert denied.status_code == 401, password
     finally:
         asyncio.run(_drop_duplicate())
+
+
+# ---------- 老師不能把別人的帳號掛進自己班 ----------
+
+
+async def _set_student_status(student_id: int, status: str) -> None:
+    assert DATABASE_URL
+    engine = create_engine(DATABASE_URL)
+    maker = create_sessionmaker(engine)
+    async with maker() as s:
+        row = await s.get(Student, student_id)
+        assert row is not None
+        row.status = status
+        await s.commit()
+    await engine.dispose()
+
+
+@needs_db
+def test_他班老師輸入未設密碼學生的email_不能掛班也不能冒用登入(db_client: TestClient) -> None:
+    mailer = FakeMailer()
+    db_client.app.state.mailer = mailer
+    headers_a, team_a, _code_a = _setup_team(db_client)
+    email = _student_email("victim")
+    victim = _create_students(db_client, headers_a, team_a, [{"name": "小受", "email": email}])
+    victim_id = victim["created"][0]["id"]
+    invite_token = mailer.last_invite_token()  # A 班寄出的設密碼邀請，學生還沒點
+
+    headers_b, team_b, code_b = _setup_team(db_client)  # 另一位老師
+    added = _create_students(db_client, headers_b, team_b, [{"name": "冒名", "email": email}])
+    assert added["joined"] == [] and added["pendingJoin"] == [email]
+    assert "小受" not in str(added)  # 不洩漏對方帳號的名字
+    listed = db_client.get(f"/api/teams/{team_b}/students", headers=headers_b).json()
+    assert victim_id not in {row["id"] for row in listed["students"]}
+    # 用 B 班班級碼 + 任何學生碼都登入不了這個帳號
+    db_client.app.state.auth._attempts.clear()  # noqa: SLF001
+    for code in ("01", "02"):
+        r = db_client.post("/auth/student/login", json={"teamCode": code_b, "studentCode": code})
+        assert r.status_code in (401, 404)
+    # A 班的邀請沒被撤銷，學生仍能設密碼
+    assert db_client.get(f"/auth/student/invite/{invite_token}").status_code == 200
+
+
+@needs_db
+def test_平台停用的帳號_老師加名單不會重新啟用(db_client: TestClient) -> None:
+    headers, team_id, _code = _setup_team(db_client)
+    email = _student_email("off")
+    reg = db_client.post(
+        "/auth/student/register",
+        json={"name": "停用", "email": email, "password": "kid-pass-123"},
+    )
+    sid = reg.json()["me"]["id"]
+    asyncio.run(_set_student_status(sid, "disabled"))
+    r = db_client.post(
+        f"/api/teams/{team_id}/students",
+        json={"students": [{"name": "停用", "email": email}], "sendInvites": False},
+        headers=headers,
+    )
+    assert r.status_code == 409 and "停用" in r.json()["detail"]
+    assert asyncio.run(_student_row(sid)).status == "disabled"
+
+
+@needs_db
+def test_本班建立後移出的學生_老師可以加回(db_client: TestClient) -> None:
+    headers, team_id, _code = _setup_team(db_client)
+    email = _student_email("back")
+    body = _create_students(
+        db_client, headers, team_id, [{"name": "回來", "email": email}], sendInvites=False
+    )
+    sid = body["created"][0]["id"]
+    assert db_client.delete(f"/api/students/{sid}", headers=headers).status_code == 204
+    assert asyncio.run(_student_row(sid)).status == "removed"
+    again = _create_students(
+        db_client, headers, team_id, [{"name": "回來", "email": email}], sendInvites=False
+    )
+    assert [row["id"] for row in again["joined"]] == [sid]
+    assert again["pendingJoin"] == []
+    assert asyncio.run(_student_row(sid)).status == "active"
+
+
+@needs_db
+def test_自行加入的學生_他班老師不能重寄邀請撤掉原班的(db_client: TestClient) -> None:
+    mailer = FakeMailer()
+    db_client.app.state.mailer = mailer
+    headers_a, team_a, code_a = _setup_team(db_client)
+    _create_students(db_client, headers_a, team_a, [{"name": "甲", "email": _student_email("x")}])
+    headers_b, team_b, code_b = _setup_team(db_client)
+    # 用 A 班的未設密碼學生登入（班級碼路徑），自己加入 B 班
+    db_client.app.state.auth._attempts.clear()  # noqa: SLF001
+    token = db_client.post(
+        "/auth/student/login", json={"teamCode": code_a, "studentCode": "01"}
+    ).json()["token"]
+    joined = db_client.post(
+        "/auth/student/teams/join", json={"teamCode": code_b}, headers=_bearer(token)
+    )
+    assert joined.status_code == 200, joined.text
+    sid = db_client.get("/auth/student/me", headers=_bearer(token)).json()["id"]
+    r = db_client.post(f"/api/students/{sid}/reinvite?teamId={team_b}", headers=headers_b)
+    assert r.status_code == 400
+    assert "原班級" in r.json()["detail"]

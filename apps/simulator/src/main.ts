@@ -131,10 +131,16 @@ ClassLevelCommand.bind({
 });
 
 // 教師派送：老師按開始才切進足球／大亂鬥。先綁好再連線。
-StudentDispatch.bind((activity, opts) => {
-  if (activity === 'soccer') enterSoccerMatch();
-  else enterArena({ mode: opts.arenaMode, field: opts.arenaField });
-});
+StudentDispatch.bind(
+  (activity, opts) => {
+    if (activity === 'soccer') enterSoccerMatch();
+    else enterArena({ mode: opts.arenaMode, field: opts.arenaField });
+  },
+  (activity) => {
+    if (activity === 'soccer') exitSoccerMatch();
+    else exitArena();
+  },
+);
 
 // ---- UI / 輸入 / 音效 / 網路 ----
 initHud();

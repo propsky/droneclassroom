@@ -1,0 +1,17 @@
+{
+  "_comment": "穿環判定共用案例：crossing.ts（前端）與 apps/api soccer_rules.py（伺服器）跑同一份，兩邊不得分歧。場地數字是 F9A-B。",
+  "ring": { "goalY": 2.2, "goalR": 0.2, "shieldR": 0.1, "halfThick": 0.075 },
+  "cases": [
+    { "name": "正面一大步直穿", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 1.5], [0, 2.2, 2.3]], "passed": true },
+    { "name": "正面多段小步穿過", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 1.5], [0, 2.2, 1.8], [0, 2.2, 1.9], [0, 2.2, 2.0], [0, 2.2, 2.1], [0, 2.2, 2.2]], "passed": true },
+    { "name": "斜著從正面進", "goalZ": 2.0, "attackSign": 1, "points": [[0.1, 2.25, 1.5], [0, 2.2, 2.3]], "passed": true },
+    { "name": "停在環厚裡再往前", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 1.5], [0, 2.2, 2.0], [0, 2.2, 2.0], [0, 2.2, 2.3]], "passed": true },
+    { "name": "伸進退回後重新正面穿過", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 1.5], [0, 2.2, 1.95], [0, 2.2, 1.6], [0, 2.2, 2.3]], "passed": true },
+    { "name": "從門後伸進環厚再退出去", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 2.4], [0, 2.2, 2.1], [0, 2.2, 2.2], [0, 2.2, 2.4]], "passed": false },
+    { "name": "從門後整顆反向穿回", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 2.4], [0, 2.2, 1.5]], "passed": false },
+    { "name": "正面伸進又退回", "goalZ": 2.0, "attackSign": 1, "points": [[0, 2.2, 1.5], [0, 2.2, 1.95], [0, 2.2, 1.5]], "passed": false },
+    { "name": "從框外旁邊飛過", "goalZ": 2.0, "attackSign": 1, "points": [[0.6, 2.2, 1.5], [0.6, 2.2, 2.5]], "passed": false },
+    { "name": "紅隊攻 -z 正面穿過", "goalZ": -2.0, "attackSign": -1, "points": [[0, 2.2, -1.5], [0, 2.2, -1.9], [0, 2.2, -2.3]], "passed": true },
+    { "name": "紅隊從門後伸進再退出", "goalZ": -2.0, "attackSign": -1, "points": [[0, 2.2, -2.4], [0, 2.2, -2.1], [0, 2.2, -2.2], [0, 2.2, -2.4]], "passed": false }
+  ]
+}

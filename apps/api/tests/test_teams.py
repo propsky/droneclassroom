@@ -162,6 +162,9 @@ def test_班級生命週期_建房關房重開改設定封存_他人不可見(db
             "has_password": False,
             "max_students": 5,
             "locked": True,
+            # 每房足球場地／賽制（沒設定 = None，跟伺服器預設）
+            "soccer_class": None,
+            "soccer_ruleset": None,
         }
         assert len(asyncio.run(_audit("team.locked", team_id))) == 1
         assert _teams_by_id(lst)[team_id]["locked"] is True
@@ -262,3 +265,56 @@ def test_閒置自動關房_只卸載記憶體_班級保留(db_client: TestClien
         assert asyncio.run(_team_row(team_id)).archived_at is None
         # 點開即回來
         assert _rooms_by_code(_open_team(t, team_id, code))[code]["teamId"] == team_id
+
+
+@needs_db
+def test_別的老師拿班級碼_不能選房派送開賽或扣分(db_client: TestClient) -> None:
+    owner = _register(db_client, _email("teamOwn"))["ticket"]
+    other = _register(db_client, _email("teamOther"))["ticket"]
+    with db_client.websocket_connect(f"/teacher?ticket={owner}") as ws_a:
+        a = TeacherWS(ws_a)
+        code = a.create_room({"name": "甲班"})
+        a.room_list(lambda lst: code in _rooms_by_code(lst))
+        room = db_client.app.state.rooms.get(code)
+        with _join(db_client, code, "小明") as (s, resp):
+            assert resp["type"] == "room_joined"
+            sid = room.roster.students[0].id
+            with db_client.websocket_connect(f"/teacher?ticket={other}") as ws_b:
+                b = TeacherWS(ws_b)
+                b.send_json({"type": "room_select", "roomCode": code})
+                b.send_json(
+                    {
+                        "type": "dispatch_add",
+                        "roomCode": code,
+                        "activity": "soccer",
+                        "studentIds": [sid],
+                    }
+                )
+                b.send_json({"type": "soccer_start", "roomCode": code, "durationSec": 30})
+                b.send_json(
+                    {
+                        "type": "soccer_warn",
+                        "roomCode": code,
+                        "team": "blue",
+                        "reason": "manual",
+                        "deduct": True,
+                    }
+                )
+                settle(db_client)
+                lst = _fresh_room_list(b)
+                assert lst["selected"] != code
+                # 甲班什麼都沒變：沒人被派送、沒開賽、沒扣分
+                s.send_json({"type": "ping", "t": 1})
+                kinds = []
+                for _ in range(40):
+                    msg = s.receive_json()
+                    kinds.append(msg["type"])
+                    if msg["type"] == "pong":
+                        break
+                assert "dispatch_hold" not in kinds
+                assert room.soccer.status == "idle"
+                assert room.soccer.deductions == {"blue": 0, "red": 0}
+                # 擁有者照常可以操作
+                a.send_json({"type": "soccer_start", "roomCode": code, "durationSec": 30})
+                settle(db_client)
+                assert room.soccer.status == "countdown"
