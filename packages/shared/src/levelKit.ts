@@ -34,6 +34,7 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     patch: {
       returnHome: true,
       hud: '依序穿過 3 個圈 → 飛回起飛墊',
+      ringOrder: 'sequential',
       rings: [
         { x: 0, y: 2.5, z: -4, color: '#38bdf8', label: '1' },
         { x: 0, y: 2.5, z: -8, color: '#38bdf8', label: '2' },
@@ -49,6 +50,7 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     patch: {
       returnHome: true,
       hud: 'S 形依序穿圈 → 返航降落',
+      ringOrder: 'sequential',
       rings: [
         { x: -3, y: 2.5, z: -4, label: '1' },
         { x: 3, y: 2.5, z: -7, label: '2' },
@@ -74,24 +76,14 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     },
   },
   {
-    id: 'rings-face-1',
-    category: 'rings',
-    name: '旋轉鑽圈',
-    desc: '需機頭對準紅圈方向才算過（faceYaw）',
-    patch: {
-      returnHome: true,
-      hud: '機頭對準紅圈再穿過',
-      rings: [{ x: 0, y: 2.5, z: -6, color: 'red', faceYaw: 0, faceTol: 35, label: '對準' }],
-    },
-  },
-  {
     id: 'rings-line-5',
     category: 'rings',
     name: '直線五圈',
-    desc: '進階直線穿圈，間距 3m',
+    desc: '進階直線穿圈，間距 2.5m',
     patch: {
       returnHome: true,
       hud: '依序穿過 5 個圈 → 返航',
+      ringOrder: 'sequential',
       rings: [0, 1, 2, 3, 4].map((i) => ({
         x: 0,
         y: 3,
@@ -104,18 +96,20 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
   {
     id: 'rings-figure8',
     category: 'rings',
-    name: '8 字路線',
-    desc: '左右交叉 6 圈，練轉向與高度',
+    name: '8 字繞圈',
+    desc: '繞左右兩個圓、在中間交叉，圈面對著路線（依序穿）',
     patch: {
       returnHome: true,
-      hud: '沿 8 字路線穿圈',
+      hud: '8 字繞圈：照編號依序穿 → 返航',
+      ringOrder: 'sequential',
+      // 兩個半徑 3m 的圓（圓心 x=±3、z=-6），在 (0,-6) 交叉；角度＝沿路線飛時的機頭方向
       rings: [
-        { x: -3, y: 2.5, z: -3, label: '1' },
-        { x: 3, y: 2.5, z: -5, label: '2' },
-        { x: -3, y: 2.5, z: -7, label: '3' },
-        { x: 3, y: 2.5, z: -9, label: '4' },
-        { x: -3, y: 2.5, z: -11, label: '5' },
-        { x: 0, y: 2.5, z: -13, label: '6' },
+        { x: -3, y: 2.5, z: -9, yaw: 90, spin: 0, label: '1' },
+        { x: -6, y: 2.5, z: -6, yaw: 180, spin: 0, label: '2' },
+        { x: -3, y: 2.5, z: -3, yaw: -90, spin: 0, label: '3' },
+        { x: 3, y: 2.5, z: -9, yaw: -90, spin: 0, label: '4' },
+        { x: 6, y: 2.5, z: -6, yaw: 180, spin: 0, label: '5' },
+        { x: 3, y: 2.5, z: -3, yaw: 90, spin: 0, label: '6' },
       ],
     },
   },
@@ -137,28 +131,17 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
   },
   // --- 障礙 ---
   {
-    id: 'obs-soft-corners',
-    category: 'obstacles',
-    name: '四角標記柱',
-    desc: '綠色軟障礙，標示場地四角（不擋飛行）',
-    patch: {
-      obstacles: [
-        { type: 'soft-cube', x: 8, y: 1.5, z: 0, size: 1, color: '#4ade80' },
-        { type: 'soft-cube', x: -8, y: 1.5, z: 0, size: 1, color: '#4ade80' },
-        { type: 'soft-cube', x: 0, y: 1.5, z: 8, size: 1, color: '#4ade80' },
-        { type: 'soft-cube', x: 0, y: 1.5, z: -8, size: 1, color: '#4ade80' },
-      ],
-    },
-  },
-  {
     id: 'obs-gate',
     category: 'obstacles',
     name: '門框通道',
-    desc: '兩根實心柱，需從中間穿過',
+    desc: '兩根實心柱，中間淨寬 3m；要從兩柱中間、柱子高度穿過才算',
     patch: {
       obstacles: [
         { type: 'cube', solid: true, x: -2, y: 1.5, z: -6, size: 1, color: '#f87171' },
         { type: 'cube', solid: true, x: 2, y: 1.5, z: -6, size: 1, color: '#f87171' },
+      ],
+      passZones: [
+        { x: 0, z: -6, label: '門框 1', type: 'position', minX: -1.5, maxX: 1.5, minZ: -6.5, maxZ: -5.5, minY: 1, maxY: 2 },
       ],
     },
   },
@@ -166,40 +149,17 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     id: 'obs-slalom',
     category: 'obstacles',
     name: '繞柱障礙',
-    desc: '三根實心柱 S 形排列',
+    desc: '三根實心柱 S 形排列；要從每根柱子外側繞過才算',
     patch: {
       obstacles: [
         { type: 'cube', solid: true, x: -2.5, y: 1.5, z: -4, size: 1, color: '#f87171' },
         { type: 'cube', solid: true, x: 2.5, y: 1.5, z: -7, size: 1, color: '#f87171' },
         { type: 'cube', solid: true, x: -2.5, y: 1.5, z: -10, size: 1, color: '#f87171' },
       ],
-    },
-  },
-  {
-    id: 'obs-wide-gate',
-    category: 'obstacles',
-    name: '寬門框（4m）',
-    desc: '兩柱間距 4m，練精準穿過',
-    patch: {
-      obstacles: [
-        { type: 'cube', solid: true, x: -2, y: 1.5, z: -8, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 2, y: 1.5, z: -8, size: 1, color: '#f87171' },
-      ],
-    },
-  },
-  {
-    id: 'obs-tunnel',
-    category: 'obstacles',
-    name: '左右通道',
-    desc: '兩排實心牆，中間留 4m 通道',
-    patch: {
-      obstacles: [
-        { type: 'cube', solid: true, x: -4, y: 1.5, z: -5, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 4, y: 1.5, z: -5, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: -4, y: 1.5, z: -8, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 4, y: 1.5, z: -8, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: -4, y: 1.5, z: -11, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 4, y: 1.5, z: -11, size: 1, color: '#f87171' },
+      passZones: [
+        { x: -4, z: -4, label: '繞柱 1', type: 'position', minX: -5, maxX: -3, minZ: -4.75, maxZ: -3.25, minY: 0.8, maxY: 2.5 },
+        { x: 4, z: -7, label: '繞柱 2', type: 'position', minX: 3, maxX: 5, minZ: -7.75, maxZ: -6.25, minY: 0.8, maxY: 2.5 },
+        { x: -4, z: -10, label: '繞柱 3', type: 'position', minX: -5, maxX: -3, minZ: -10.75, maxZ: -9.25, minY: 0.8, maxY: 2.5 },
       ],
     },
   },
@@ -214,31 +174,7 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       ],
     },
   },
-  {
-    id: 'obs-landing-pad',
-    category: 'obstacles',
-    name: '降落平台標記',
-    desc: '前方軟墊標記（不擋飛行）',
-    patch: {
-      obstacles: [
-        { type: 'soft-cube', x: 0, y: 0.2, z: -6, size: 3, color: '#fbbf24' },
-      ],
-    },
-  },
   // --- 任務步驟（passZones）---
-  {
-    id: 'task-takeoff-land',
-    category: 'tasks',
-    name: '起飛＋降落',
-    desc: '升到 0.5m 以上再落地（無穿圈）',
-    patch: {
-      hud: '起飛 → 降落',
-      passZones: [
-        { x: 0, z: -2, label: '起飛 ≥ 0.5m', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -2, label: '落地', type: 'altitude', maxY: 0.5 },
-      ],
-    },
-  },
   {
     id: 'task-altitude',
     category: 'tasks',
@@ -330,20 +266,6 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     },
   },
   {
-    id: 'task-hover',
-    category: 'tasks',
-    name: '定高 2m',
-    desc: '起飛後維持 2m 高度 3 秒概念（到區域即過）',
-    patch: {
-      hud: '起飛並維持約 2m 高度',
-      passZones: [
-        { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -2, label: '維持 2m', type: 'altitude', minY: 1.8, maxY: 2.5 },
-        { x: 0, z: -2, label: '降落', type: 'altitude', maxY: 0.5 },
-      ],
-    },
-  },
-  {
     id: 'task-forward-6',
     category: 'tasks',
     name: '前進 6m',
@@ -352,23 +274,8 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       hud: '前進 6m 再退回',
       passZones: [
         { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -6, label: '前進 6m', type: 'position', maxZ: -5.5, minY: 1 },
-        { x: 0, z: 0, label: '退回原點', type: 'position', minZ: -0.5, maxZ: 0.5, minY: 1 },
-        { x: 0, z: -2, label: '降落', type: 'altitude', maxY: 0.5 },
-      ],
-    },
-  },
-  {
-    id: 'task-side-step',
-    category: 'tasks',
-    name: '左右平移',
-    desc: '起飛 → 右移 3m → 左移回原點 → 降落',
-    patch: {
-      hud: '右移 3m → 左移回中',
-      passZones: [
-        { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 3, z: 0, label: '右移 3m', type: 'position', minX: 2.5, minY: 1 },
-        { x: 0, z: 0, label: '左移回中', type: 'position', minX: -0.5, maxX: 0.5, minY: 1 },
+        { x: 0, z: -6, label: '前進 6m', type: 'position', minX: -1, maxX: 1, minZ: -7, maxZ: -5.5, minY: 1 },
+        { x: 0, z: 0, label: '退回原點', type: 'position', minX: -1, maxX: 1, minZ: -0.5, maxZ: 0.5, minY: 1 },
         { x: 0, z: -2, label: '降落', type: 'altitude', maxY: 0.5 },
       ],
     },
@@ -420,6 +327,7 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     patch: {
       returnHome: true,
       hud: '穿過門框 → 穿 3 圈 → 返航',
+      ringOrder: 'sequential',
       intro: '先從紅色門框中間穿過，再依序穿圈。',
       obstacles: [
         { type: 'cube', solid: true, x: -2, y: 1.5, z: -3, size: 1, color: '#f87171' },
@@ -430,21 +338,8 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
         { x: 0, y: 2.5, z: -9, label: '2' },
         { x: 0, y: 2.5, z: -12, label: '3' },
       ],
-    },
-  },
-  {
-    id: 'scene-balloons-3',
-    category: 'scenes',
-    name: '三顆氣球',
-    desc: '簡短戳氣球練習',
-    patch: {
-      freeplay: true,
-      returnHome: false,
-      hud: '戳破 3 顆氣球',
-      balloons: [
-        { x: -2, y: 2, z: -5 },
-        { x: 2, y: 2.5, z: -6 },
-        { x: 0, y: 3, z: -8 },
+      passZones: [
+        { x: 0, z: -3, label: '門框 1', type: 'position', minX: -1.5, maxX: 1.5, minZ: -3.5, maxZ: -2.5, minY: 1, maxY: 2 },
       ],
     },
   },
@@ -568,56 +463,6 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       ],
     },
   },
-  {
-    id: 'rings-hairpin',
-    category: 'rings',
-    name: '髮夾彎',
-    desc: '急轉彎雙圈（競速賽道）',
-    patch: {
-      returnHome: true,
-      hud: '髮夾彎穿圈',
-      rings: [
-        { x: 0, y: 2.5, z: -4, label: '1' },
-        { x: 5, y: 2.5, z: -6, label: '2' },
-        { x: 5, y: 2.5, z: -10, label: '3' },
-        { x: 0, y: 2.5, z: -12, label: '4' },
-      ],
-    },
-  },
-  {
-    id: 'rings-face-course-3',
-    category: 'rings',
-    name: '旋轉鑽圈（三關）',
-    desc: '官方 1-5 風格：每圈需對準機頭',
-    patch: {
-      returnHome: true,
-      hud: '轉向對準紅圈穿過 → 返航',
-      intro: '紅圈要機頭對準才算穿過。先轉向、再往前飛！',
-      rings: [
-        { x: 5, y: 3, z: 0, color: 'red', label: '1', faceYaw: 270, faceTol: 40 },
-        { x: 5, y: 3, z: -5, color: 'red', label: '2', faceYaw: 0, faceTol: 40 },
-        { x: 0, y: 3, z: -5, color: 'red', label: '3', faceYaw: 90, faceTol: 40 },
-      ],
-    },
-  },
-  {
-    id: 'rings-zigzag-tight',
-    category: 'rings',
-    name: '密閉 Z 字',
-    desc: '間距 2.5m 的 6 圈 Z 字（進階操控）',
-    patch: {
-      returnHome: true,
-      hud: 'Z 字密閉穿圈',
-      rings: [
-        { x: -2, y: 2.5, z: -3, label: '1' },
-        { x: 2, y: 2.5, z: -5, label: '2' },
-        { x: -2, y: 2.5, z: -7, label: '3' },
-        { x: 2, y: 2.5, z: -9, label: '4' },
-        { x: -2, y: 2.5, z: -11, label: '5' },
-        { x: 0, y: 2.5, z: -13, label: '6' },
-      ],
-    },
-  },
   // --- 障礙（進階）---
   {
     id: 'obs-maze-l',
@@ -635,30 +480,17 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     },
   },
   {
-    id: 'obs-gate-series-3',
-    category: 'obstacles',
-    name: '三連門框',
-    desc: '三道門框序列（DJI 模擬器障礙賽）',
-    patch: {
-      obstacles: [
-        { type: 'cube', solid: true, x: -2, y: 1.5, z: -4, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 2, y: 1.5, z: -4, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: -2, y: 1.5, z: -8, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 2, y: 1.5, z: -8, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: -2, y: 1.5, z: -12, size: 1, color: '#f87171' },
-        { type: 'cube', solid: true, x: 2, y: 1.5, z: -12, size: 1, color: '#f87171' },
-      ],
-    },
-  },
-  {
     id: 'obs-narrow-2m',
     category: 'obstacles',
     name: '窄門 2m',
-    desc: '僅 2m 寬通道（精準操控）',
+    desc: '淨寬 2m 的窄門；要從兩柱中間、柱子高度穿過才算',
     patch: {
       obstacles: [
         { type: 'cube', solid: true, x: -1.5, y: 1.5, z: -7, size: 1, color: '#f87171' },
         { type: 'cube', solid: true, x: 1.5, y: 1.5, z: -7, size: 1, color: '#f87171' },
+      ],
+      passZones: [
+        { x: 0, z: -7, label: '門框 1', type: 'position', minX: -1, maxX: 1, minZ: -7.5, maxZ: -6.5, minY: 1, maxY: 2 },
       ],
     },
   },
@@ -680,19 +512,6 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       ],
     },
   },
-  {
-    id: 'obs-tello-pad',
-    category: 'obstacles',
-    name: '起降墊標記',
-    desc: 'Tello 任務墊風格：前方降落地點',
-    patch: {
-      obstacles: [
-        { type: 'soft-cube', x: 0, y: 0.15, z: -8, size: 2.5, color: '#fbbf24' },
-        { type: 'soft-cube', x: -1.2, y: 0.15, z: -8, size: 0.4, color: '#f97316' },
-        { type: 'soft-cube', x: 1.2, y: 0.15, z: -8, size: 0.4, color: '#f97316' },
-      ],
-    },
-  },
   // --- 任務（進階）---
   {
     id: 'task-box-perimeter',
@@ -703,42 +522,11 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       hud: '沿方形周界飛行',
       passZones: [
         { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -4, label: '前方角', type: 'position', maxZ: -3.5, minY: 1.2 },
-        { x: 4, z: -4, label: '右角', type: 'position', minX: 3.5, minZ: -4.5, maxZ: -3.5, minY: 1.2 },
-        { x: 4, z: 0, label: '後方角', type: 'position', minX: 3.5, minZ: -0.5, maxZ: 0.5, minY: 1.2 },
+        { x: 0, z: -4, label: '前方角', type: 'position', minX: -1, maxX: 1, minZ: -5, maxZ: -3.5, minY: 1.2 },
+        { x: 4, z: -4, label: '右角', type: 'position', maxX: 5, minX: 3.5, minZ: -4.5, maxZ: -3.5, minY: 1.2 },
+        { x: 4, z: 0, label: '後方角', type: 'position', maxX: 5, minX: 3.5, minZ: -0.5, maxZ: 0.5, minY: 1.2 },
         { x: 0, z: 0, label: '回起點', type: 'position', minX: -0.5, maxX: 0.5, minZ: -0.5, maxZ: 0.5, minY: 1.2 },
         { x: 0, z: -2, label: '降落', type: 'altitude', maxY: 0.5 },
-      ],
-    },
-  },
-  {
-    id: 'task-relay-3',
-    category: 'tasks',
-    name: '三站接力',
-    desc: '依序抵達三個檢查點（賽事接力風）',
-    patch: {
-      hud: '依序抵達 3 個檢查點',
-      passZones: [
-        { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -5, label: '站 1', type: 'position', maxZ: -4.5, minY: 1 },
-        { x: 4, z: -8, label: '站 2', type: 'position', minX: 3.5, maxZ: -7.5, minY: 1 },
-        { x: -4, z: -11, label: '站 3', type: 'position', maxX: -3.5, maxZ: -10.5, minY: 1 },
-        { x: 0, z: -2, label: '降落', type: 'altitude', maxY: 0.5 },
-      ],
-    },
-  },
-  {
-    id: 'task-precision-land',
-    category: 'tasks',
-    name: '精準降落',
-    desc: '飛到前方平台區域並降落',
-    patch: {
-      returnHome: false,
-      hud: '飛到前方平台，並在平台上方降落',
-      passZones: [
-        { x: 0, z: -2, label: '起飛 ≥ 0.5m', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -7, label: '抵達平台區', type: 'position', minX: -1.5, maxX: 1.5, minZ: -8, maxZ: -6, minY: 1 },
-        { x: 0, z: -7, label: '在平台降落 ≤ 0.5m', type: 'altitude', maxY: 0.5, triggerRadius: 1.5 },
       ],
     },
   },
@@ -775,6 +563,11 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
         { type: 'cube', solid: true, x: 2, y: 1.5, z: -12, size: 1, color: '#f87171' },
       ],
       rings: [{ x: 0, y: 2.5, z: -14, color: '#fbbf24', label: '終點' }],
+      passZones: [
+        { x: 0, z: -4, label: '門框 1', type: 'position', minX: -1.5, maxX: 1.5, minZ: -4.5, maxZ: -3.5, minY: 1, maxY: 2 },
+        { x: 0, z: -8, label: '門框 2', type: 'position', minX: -1.5, maxX: 1.5, minZ: -8.5, maxZ: -7.5, minY: 1, maxY: 2 },
+        { x: 0, z: -12, label: '門框 3', type: 'position', minX: -1.5, maxX: 1.5, minZ: -12.5, maxZ: -11.5, minY: 1, maxY: 2 },
+      ],
     },
   },
   {
@@ -784,7 +577,7 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     desc: 'S 形繞柱後接直線穿圈',
     patch: {
       returnHome: true,
-      hud: '繞柱 → 穿圈 → 返航',
+      hud: '從柱子外側 S 形繞過 → 穿圈 → 返航',
       obstacles: [
         { type: 'cube', solid: true, x: -2.5, y: 1.5, z: -4, size: 1, color: '#f87171' },
         { type: 'cube', solid: true, x: 2.5, y: 1.5, z: -6, size: 1, color: '#f87171' },
@@ -793,6 +586,11 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       rings: [
         { x: 0, y: 2.5, z: -10, label: '1' },
         { x: 0, y: 2.5, z: -13, label: '2' },
+      ],
+      passZones: [
+        { x: -4, z: -4, label: '繞柱 1', type: 'position', minX: -5, maxX: -3, minZ: -4.75, maxZ: -3.25, minY: 0.8, maxY: 2.5 },
+        { x: 4, z: -6, label: '繞柱 2', type: 'position', minX: 3, maxX: 5, minZ: -6.75, maxZ: -5.25, minY: 0.8, maxY: 2.5 },
+        { x: -4, z: -8, label: '繞柱 3', type: 'position', minX: -5, maxX: -3, minZ: -8.75, maxZ: -7.25, minY: 0.8, maxY: 2.5 },
       ],
     },
   },
@@ -805,10 +603,10 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       hud: '依序抵達 4 站',
       passZones: [
         { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -5, label: 'CP1', type: 'position', maxZ: -4.5, minY: 1 },
-        { x: 4, z: -8, label: 'CP2', type: 'position', minX: 3.5, maxZ: -7.5, minY: 1 },
-        { x: 0, z: -11, label: 'CP3', type: 'position', maxZ: -10.5, minY: 1 },
-        { x: -4, z: -8, label: 'CP4', type: 'position', maxX: -3.5, maxZ: -7.5, minY: 1 },
+        { x: 0, z: -5, label: 'CP1', type: 'position', minX: -1, maxX: 1, minZ: -6, maxZ: -4.5, minY: 1 },
+        { x: 4, z: -8, label: 'CP2', type: 'position', maxX: 5, minZ: -9, minX: 3.5, maxZ: -7.5, minY: 1 },
+        { x: 0, z: -11, label: 'CP3', type: 'position', minX: -1, maxX: 1, minZ: -12, maxZ: -10.5, minY: 1 },
+        { x: -4, z: -8, label: 'CP4', type: 'position', minX: -5, minZ: -9, maxX: -3.5, maxZ: -7.5, minY: 1 },
         { x: 0, z: -2, label: '降落', type: 'altitude', maxY: 0.5 },
       ],
     },
@@ -823,6 +621,7 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
     patch: {
       returnHome: true,
       hud: '轉向對準紅圈穿過（3 個）→ 飛回原點降落',
+      ringOrder: 'sequential',
       intro:
         '紅圈要「機頭對準」才算穿過。先轉向、再往前飛！\n升到 3m → 依序穿 3 個紅圈 → 飛回起飛墊降落。',
       rings: [
@@ -912,7 +711,8 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       ],
       passZones: [
         { x: 0, z: -2, label: '起飛', type: 'altitude', minY: 0.5 },
-        { x: 0, z: -13, label: '終點檢查', type: 'position', maxZ: -12.5, minY: 1 },
+        { x: 0, z: -3, label: '門框 1', type: 'position', minX: -1.5, maxX: 1.5, minZ: -3.5, maxZ: -2.5, minY: 1, maxY: 2 },
+        { x: 0, z: -13, label: '終點檢查', type: 'position', minX: -1, maxX: 1, minZ: -14, maxZ: -12.5, minY: 1 },
       ],
     },
   },
@@ -985,10 +785,10 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
       drawHeight: 3,
       view: 'topdown',
       hud: '重複 6 次〔前進 4m，右轉 60°〕',
-      guide: [[0, 0], [0, -4], [3.46, -2], [3.46, 2], [0, 4], [-3.46, 2], [-3.46, -2], [0, 0]],
+      guide: [[0, 0], [0, -4], [3.46, -6], [6.93, -4], [6.93, 0], [3.46, 2], [0, 0]],
       passZones: [
         { x: 0, z: -4, label: '角 1', type: 'position', minX: -1.4, maxX: 1.4, minZ: -5.4, maxZ: -2.6, minY: 2 },
-        { x: 3.46, z: -2, label: '角 2', type: 'position', minX: 2, maxX: 4.9, minZ: -3.4, maxZ: -0.6, minY: 2 },
+        { x: 3.46, z: -6, label: '角 2', type: 'position', minX: 2, maxX: 4.9, minZ: -7.4, maxZ: -4.6, minY: 2 },
         { x: 0, z: 0, label: '收尾', type: 'position', minX: -1.4, maxX: 1.4, minZ: -1.4, maxZ: 1.4, minY: 2 },
       ],
     },
@@ -1035,6 +835,13 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
 export const LEVEL_KIT_BOUNDS = 14.5;
 
 export type LevelKitApplyMode = 'append' | 'replace-tasks';
+
+/** 任務、畫畫、競速素材會取代原本的任務步驟；圈、障礙、情境素材疊加上去。編輯器與快速起稿共用。 */
+export function levelKitApplyMode(snippet: Pick<LevelKitSnippet, 'category'>): LevelKitApplyMode {
+  return snippet.category === 'tasks' || snippet.category === 'draw' || snippet.category === 'races'
+    ? 'replace-tasks'
+    : 'append';
+}
 
 function inBounds(x: number, z: number): boolean {
   return x >= -LEVEL_KIT_BOUNDS && x <= LEVEL_KIT_BOUNDS && z >= -LEVEL_KIT_BOUNDS && z <= LEVEL_KIT_BOUNDS;
@@ -1130,7 +937,8 @@ export function applyLevelKitSnippet(
   if (p.balloons?.length) {
     next.balloons = [...(next.balloons ?? []), ...p.balloons];
   }
-  if (p.passZones?.length) {
+  // 取代模式下，素材明寫 passZones: []（例如自由畫布）代表清掉原本的任務
+  if (p.passZones && (p.passZones.length || mode === 'replace-tasks')) {
     const existing = next.passZones ?? [];
     if (mode === 'replace-tasks' || existing.length === 0) {
       next.passZones = [...p.passZones];
@@ -1141,6 +949,7 @@ export function applyLevelKitSnippet(
   if (p.intro && (snippet.forceIntro || !next.intro?.trim())) next.intro = p.intro;
   if (p.hud) next.hud = p.hud;
   if (p.returnHome !== undefined) next.returnHome = p.returnHome;
+  if (p.ringOrder !== undefined) next.ringOrder = p.ringOrder;
   if (p.freeplay !== undefined) next.freeplay = p.freeplay;
   if (p.draw !== undefined) next.draw = p.draw;
   if (p.drawHeight !== undefined) next.drawHeight = p.drawHeight;
@@ -1177,7 +986,10 @@ export function extractLevelKitPatch(
   const { includeTasks = false, includeDraw = false, includeMeta = true } = options;
   const patch: Partial<LevelDef> = {};
 
-  if (level.rings?.length) patch.rings = level.rings.map((r) => ({ ...r }));
+  if (level.rings?.length) {
+    patch.rings = level.rings.map((r) => ({ ...r }));
+    if (level.ringOrder) patch.ringOrder = level.ringOrder;
+  }
   if (level.obstacles?.length) patch.obstacles = level.obstacles.map((o) => ({ ...o }));
   if (level.balloons?.length) patch.balloons = level.balloons.map((b) => ({ ...b }));
 

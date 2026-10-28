@@ -6,7 +6,7 @@
 import type { InputRecordingV2, RecordedAction } from '@creafly/shared';
 import { advanceSimTick, droneState, flags, simNowMs, simTime } from './droneState';
 import { seedRng } from './rng';
-import { bootstrapLevelForReplay, levelState, resetMission } from './level';
+import { bootstrapLevelForReplay, levelState, resetMission, resyncLevelPose } from './level';
 import { autoLand, emergencyStop, goHome, padTakeoff } from './physics';
 import { programState, runProgram, setMode, stopProgram } from './program';
 import { bus } from './events';
@@ -70,6 +70,8 @@ export async function replayRecording(rec: InputRecordingV2): Promise<ReplayResu
   droneState.isFlying = init.isFlying;
   droneState.isGrounded = init.isGrounded;
   droneState.frozen = init.frozen;
+  // 錄製起點的位置／機頭是關卡載入後才套的：重新取樣「上一 tick」，第一個 tick 才不會被當成瞬移或轉動
+  resyncLevelPose();
   flags.mode = rec.mode;
   programState.running = false;
   flags.programRunning = false;

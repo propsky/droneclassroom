@@ -34,6 +34,17 @@ export function ringSpin(ring: { spin?: number } | undefined): number {
   return s != null && s >= 0 ? s : DEFAULT_RING_SPIN;
 }
 
+/**
+ * 圈的擺放角度（度）。沒寫時：旋轉鑽圈（faceYaw）面向要求的機頭方向，
+ * 學生正面穿過；一般圈 0 = 圈面朝前後。
+ */
+export function ringYawDeg(ring: { yaw?: number; faceYaw?: number } | undefined): number {
+  for (const y of [ring?.yaw, ring?.faceYaw]) {
+    if (y != null && Number.isFinite(y)) return y;
+  }
+  return 0;
+}
+
 export function ringBobAmp(ring: { bobAmp?: number } | undefined): number {
   const a = ring?.bobAmp;
   return a != null && a >= 0 ? a : DEFAULT_RING_BOB_AMP;

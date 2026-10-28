@@ -23,8 +23,11 @@ import {
   getLevelKitSnippet,
   inferLevelKitCategory,
   isLevelLayoutEmpty,
+  levelKitApplyMode,
   levelKitByCategory,
   ringDiameter,
+  ringYawDeg,
+  RingGuide,
   sideWorldToCanvas,
   snapClampXZ,
   teacherKitToSnippet,
@@ -61,6 +64,8 @@ import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
 import { openLevelGoalWizard } from './levelGoalWizard';
+import { ItemOrder } from './levelOrder';
+import { ZoneEdit } from './zoneEdit';
 import {
   createPropsController,
   propsPanelHtml,
@@ -198,6 +203,7 @@ export function openLevelEditor(
             <textarea id="le-intro" rows="3"></textarea>
           </div>
           <label class="check-row"><input type="checkbox" id="le-return">需返航降落才算過關</label>
+          <label class="check-row"><input type="checkbox" id="le-ring-order">依序穿圈（照圈上編號，穿錯順序不算）</label>
           <label class="check-row"><input type="checkbox" id="le-freeplay">自由活動（無順序過關）</label>
           <label class="check-row"><input type="checkbox" id="le-draw">畫畫教室模式</label>
 
@@ -733,11 +739,8 @@ export function openLevelEditor(
     if (viewMode === 'top') {
       (level.passZones ?? []).forEach((zone, i) => {
         const isPos = zone.type === 'position' || zone.type === undefined;
-        if (isPos && (zone.minX != null || zone.maxX != null)) {
-          const minX = zone.minX ?? zone.x - 1;
-          const maxX = zone.maxX ?? zone.x + 1;
-          const minZ = zone.minZ ?? zone.z - 1;
-          const maxZ = zone.maxZ ?? zone.z + 1;
+        if (isPos && ZoneEdit.hasBox(zone)) {
+          const { minX, maxX, minZ, maxZ } = ZoneEdit.drawBox(zone);
           const [x1, z1] = project(minX, minZ);
           const [x2, z2] = project(maxX, maxZ);
           ctx.fillStyle = isSelected('zone', i) ? 'rgba(96,165,250,0.15)' : 'rgba(167,139,250,0.12)';
@@ -751,7 +754,7 @@ export function openLevelEditor(
         const [zx, zz] = project(zone.x, zone.z);
         ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.85)';
         ctx.lineWidth = isSelected('zone', i) ? 2.5 : 2;
-        if (!isPos || zone.minX == null) {
+        if (!isPos || !ZoneEdit.hasBox(zone)) {
           ctx.setLineDash([4, 4]);
           ctx.strokeRect(zx - 12, zz - 12, 24, 24);
           ctx.setLineDash([]);
@@ -771,6 +774,24 @@ export function openLevelEditor(
         ctx.lineWidth = sel ? 3 : 2;
         ctx.beginPath();
         ctx.arc(rx, rz, rPx, 0, Math.PI * 2);
+        ctx.stroke();
+        // 擺放角度：粗線是圈面，短線指向穿越方向（機頭朝這邊時正好穿過）
+        const yawDeg = ringYawDeg(ring);
+        const plane = RingGuide.planeDir(yawDeg);
+        const half = ringDiameter(ring) / 2;
+        const [ax, az] = project(ring.x - plane.x * half, ring.z - plane.z * half, ring.y);
+        const [bx, bz] = project(ring.x + plane.x * half, ring.z + plane.z * half, ring.y);
+        const yawRad = (yawDeg * Math.PI) / 180;
+        const [tx, tz] = project(ring.x - Math.sin(yawRad) * 0.9, ring.z - Math.cos(yawRad) * 0.9, ring.y);
+        ctx.lineWidth = sel ? 4 : 3;
+        ctx.beginPath();
+        ctx.moveTo(ax, az);
+        ctx.lineTo(bx, bz);
+        ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(rx, rz);
+        ctx.lineTo(tx, tz);
         ctx.stroke();
         ctx.fillStyle = '#e2e8f0';
         ctx.font = '10px sans-serif';
@@ -808,6 +829,7 @@ export function openLevelEditor(
     q<HTMLInputElement>('#le-hud').value = level.hud ?? '';
     q<HTMLTextAreaElement>('#le-intro').value = level.intro ?? '';
     q<HTMLInputElement>('#le-return').checked = !!level.returnHome;
+    q<HTMLInputElement>('#le-ring-order').checked = level.ringOrder === 'sequential';
     q<HTMLInputElement>('#le-freeplay').checked = !!level.freeplay;
     q<HTMLInputElement>('#le-draw').checked = !!level.draw;
   };
@@ -817,6 +839,9 @@ export function openLevelEditor(
     level.hud = q<HTMLInputElement>('#le-hud').value.trim();
     level.intro = q<HTMLTextAreaElement>('#le-intro').value;
     level.returnHome = q<HTMLInputElement>('#le-return').checked;
+    // 沒勾就不寫欄位：舊關卡沒有 ringOrder，任意順序都算
+    if (q<HTMLInputElement>('#le-ring-order').checked) level.ringOrder = 'sequential';
+    else delete level.ringOrder;
     level.freeplay = q<HTMLInputElement>('#le-freeplay').checked;
     level.draw = q<HTMLInputElement>('#le-draw').checked;
     if (!level.draw) {
@@ -943,11 +968,31 @@ export function openLevelEditor(
   const deleteSelection = (): void => {
     if (!selection) return;
     const { kind, index } = selection;
-    if (kind === 'ring') level.rings = (level.rings ?? []).filter((_, i) => i !== index);
+    if (kind === 'ring') level.rings = ItemOrder.renumberRings((level.rings ?? []).filter((_, i) => i !== index));
     else if (kind === 'obstacle') level.obstacles = (level.obstacles ?? []).filter((_, i) => i !== index);
     else if (kind === 'balloon') level.balloons = (level.balloons ?? []).filter((_, i) => i !== index);
-    else level.passZones = (level.passZones ?? []).filter((_, i) => i !== index);
+    else level.passZones = ItemOrder.renumberZones((level.passZones ?? []).filter((_, i) => i !== index));
     setSelection(null);
+    scheduleSave();
+  };
+
+  /** 圈或任務步驟往前／往後一號。判定與學生端編號都照陣列順序。 */
+  const moveSelection = (delta: -1 | 1): void => {
+    if (!selection) return;
+    const { kind, index } = selection;
+    if (kind === 'ring') {
+      const moved = ItemOrder.move(level.rings ?? [], index, delta);
+      if (!moved) return;
+      level.rings = ItemOrder.renumberRings(moved.list);
+      setSelection({ kind, index: moved.index });
+    } else if (kind === 'zone') {
+      const moved = ItemOrder.move(level.passZones ?? [], index, delta);
+      if (!moved) return;
+      level.passZones = ItemOrder.renumberZones(moved.list);
+      setSelection({ kind, index: moved.index });
+    } else {
+      return;
+    }
     scheduleSave();
   };
 
@@ -1007,7 +1052,7 @@ export function openLevelEditor(
       const z = zones[selection.index];
       if (!z) return;
       const p = snapClampXZ(z.x + dx, z.z + dz, snapStep);
-      zones[selection.index] = { ...z, x: p.x, z: p.z };
+      zones[selection.index] = ZoneEdit.translate(z, p.x, p.z);
       level.passZones = zones;
     }
     propsCtrl.sync();
@@ -1189,7 +1234,7 @@ export function openLevelEditor(
       level.balloons = balloons.map((item, i) => (i === drag.index ? { ...item, x: p.x, z: p.z } : item));
     } else if (drag.kind === 'zone' && zones[drag.index]) {
       const p = snapClampXZ(x, z, snapStep);
-      level.passZones = zones.map((item, i) => (i === drag.index ? { ...item, x: p.x, z: p.z } : item));
+      level.passZones = zones.map((item, i) => (i === drag.index ? ZoneEdit.translate(item, p.x, p.z) : item));
     }
     propsCtrl.sync();
     draw();
@@ -1271,6 +1316,8 @@ export function openLevelEditor(
   });
 
   q<HTMLButtonElement>('#le-del-sel').addEventListener('click', deleteSelection);
+  q<HTMLButtonElement>('#le-order-up').addEventListener('click', () => moveSelection(-1));
+  q<HTMLButtonElement>('#le-order-down').addEventListener('click', () => moveSelection(1));
 
   backdrop.addEventListener('keydown', (e) => {
     if (!(e.target instanceof HTMLElement)) return;
@@ -1298,17 +1345,12 @@ export function openLevelEditor(
   q<HTMLInputElement>('#le-hud').addEventListener('input', scheduleSave);
   q<HTMLTextAreaElement>('#le-intro').addEventListener('input', scheduleSave);
   q<HTMLInputElement>('#le-return').addEventListener('change', scheduleSave);
+  q<HTMLInputElement>('#le-ring-order').addEventListener('change', scheduleSave);
   q<HTMLInputElement>('#le-freeplay').addEventListener('change', scheduleSave);
   q<HTMLInputElement>('#le-draw').addEventListener('change', scheduleSave);
 
   const applySnippet = (snippet: LevelKitSnippet): void => {
-    const mode =
-      snippet.category === 'tasks' ||
-      snippet.category === 'draw' ||
-      snippet.category === 'races'
-        ? 'replace-tasks'
-        : 'append';
-    level = applyLevelKitSnippet(level, snippet, mode);
+    level = applyLevelKitSnippet(level, snippet, levelKitApplyMode(snippet));
     setSelection(null);
     syncFormFromLevel();
     draw();

@@ -28,11 +28,14 @@ import {
   ringBobAmp,
   ringDiameter,
   ringSpin,
+  ringYawDeg,
   ringThickness,
   snapClampXZ,
   zoneMarkerDiameter,
   zoneTriggerRadius,
 } from '@creafly/shared';
+import { RingAngle } from './levelOrder';
+import { ZoneEdit } from './zoneEdit';
 
 export type ObjKind = 'ring' | 'obstacle' | 'balloon' | 'zone';
 
@@ -120,6 +123,10 @@ export function propsPanelHtml(): string {
   return `
             <div class="lvl-props" id="le-props" hidden>
               <h3 class="lvl-props-title" id="le-props-title">選取物件</h3>
+              <div class="lvl-floor-actions" id="le-order-wrap">
+                <button type="button" class="btn btn-ghost btn-sm" id="le-order-up">↑ 往前一號</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="le-order-down">↓ 往後一號</button>
+              </div>
 
               <section class="le-props-section" id="le-sec-transform">
                 <h4 class="le-props-section-title">位置</h4>
@@ -195,6 +202,12 @@ export function propsPanelHtml(): string {
                 <div class="field" id="le-solid-wrap" hidden>
                   <label class="check-row"><input type="checkbox" id="le-solid">實心碰撞（會擋住無人機）</label>
                 </div>
+                <div class="field" id="le-ring-yaw-wrap" hidden>
+                  <label class="field-label" for="le-ring-yaw">擺放角度（度，0 = 圈面朝前方，正值往左轉）</label>
+                  <input id="le-ring-yaw" type="number" step="15" min="-180" max="180" class="mono">
+                  <button type="button" class="btn btn-ghost btn-sm" id="le-ring-route">全部圈依路線轉向</button>
+                  <p class="note">只影響外觀，穿過判定看離圈心多遠。依路線轉向會照飛行順序把每個圈轉成面對路線，並停止自轉。</p>
+                </div>
                 <div class="field" id="le-face-wrap" hidden>
                   <label class="field-label" for="le-face-yaw">機頭朝向 yaw（度，空=不限）</label>
                   <input id="le-face-yaw" type="number" step="15" min="-180" max="180" class="mono" placeholder="不限">
@@ -211,10 +224,10 @@ export function propsPanelHtml(): string {
                     </select>
                   </div>
                   <div class="lvl-props-grid" id="le-zone-position">
-                    <div class="field"><label class="field-label" for="le-zone-minx">minX</label><input id="le-zone-minx" type="number" step="0.5" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-maxx">maxX</label><input id="le-zone-maxx" type="number" step="0.5" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-minz">minZ</label><input id="le-zone-minz" type="number" step="0.5" class="mono"></div>
-                    <div class="field"><label class="field-label" for="le-zone-maxz">maxZ</label><input id="le-zone-maxz" type="number" step="0.5" class="mono"></div>
+                    <div class="field"><label class="field-label" for="le-zone-minx">minX</label><input id="le-zone-minx" type="number" step="0.5" class="mono" placeholder="不限"></div>
+                    <div class="field"><label class="field-label" for="le-zone-maxx">maxX</label><input id="le-zone-maxx" type="number" step="0.5" class="mono" placeholder="不限"></div>
+                    <div class="field"><label class="field-label" for="le-zone-minz">minZ</label><input id="le-zone-minz" type="number" step="0.5" class="mono" placeholder="不限"></div>
+                    <div class="field"><label class="field-label" for="le-zone-maxz">maxZ</label><input id="le-zone-maxz" type="number" step="0.5" class="mono" placeholder="不限"></div>
                     <div class="field"><label class="field-label" for="le-zone-pos-miny">minY</label><input id="le-zone-pos-miny" type="number" step="0.5" min="0" class="mono"></div>
                     <div class="field"><label class="field-label" for="le-zone-pos-maxy">maxY</label><input id="le-zone-pos-maxy" type="number" step="0.5" min="0" class="mono"></div>
                   </div>
@@ -297,7 +310,9 @@ export function createPropsController(host: PropsHost): PropsController {
     setSection(root, '#le-sec-size', true);
     setSection(root, '#le-sec-gameplay', true);
     setSection(root, '#le-sec-motion', kind === 'ring');
-    setSection(root, '#le-sec-physics', kind !== 'zone');
+    // 物理參數（質量、彈性、摩擦、重力）模擬器還沒用到（預留 Havok），碰撞由「實心」決定，先不顯示。
+    // 欄位仍照關卡資料同步，存檔時原樣保留。
+    setSection(root, '#le-sec-physics', false);
 
     q<HTMLElement>(root, '#le-py-wrap').hidden = kind === 'zone';
     q<HTMLElement>(root, '#le-color-wrap').hidden = kind === 'zone';
@@ -310,9 +325,15 @@ export function createPropsController(host: PropsHost): PropsController {
     q<HTMLElement>(root, '#le-zone-trigger-wrap').hidden = kind !== 'zone';
     q<HTMLElement>(root, '#le-solid-wrap').hidden = kind !== 'obstacle';
     q<HTMLElement>(root, '#le-face-wrap').hidden = kind !== 'ring';
+    q<HTMLElement>(root, '#le-ring-yaw-wrap').hidden = kind !== 'ring';
     q<HTMLElement>(root, '#le-zone-wrap').hidden = kind !== 'zone';
     q<HTMLElement>(root, '#le-ring-spin-wrap').hidden = kind !== 'ring';
     q<HTMLElement>(root, '#le-ring-bob-wrap').hidden = kind !== 'ring';
+    // 只有圈與任務步驟有先後順序
+    const count = kind === 'ring' ? (level.rings?.length ?? 0) : kind === 'zone' ? (level.passZones?.length ?? 0) : 0;
+    q<HTMLElement>(root, '#le-order-wrap').hidden = count < 2;
+    q<HTMLButtonElement>(root, '#le-order-up').disabled = index <= 0;
+    q<HTMLButtonElement>(root, '#le-order-down').disabled = index >= count - 1;
 
     if (kind === 'ring') {
       const r = level.rings![index];
@@ -327,6 +348,7 @@ export function createPropsController(host: PropsHost): PropsController {
       q<HTMLInputElement>(root, '#le-ring-thick').value = String(thick);
       q<HTMLElement>(root, '#le-ring-thick-readout').textContent = ` ${thick.toFixed(2)} m`;
       q<HTMLInputElement>(root, '#le-ring-spin').value = String(ringSpin(r));
+      q<HTMLInputElement>(root, '#le-ring-yaw').value = String(ringYawDeg(r));
       const bob = ringBobAmp(r);
       q<HTMLInputElement>(root, '#le-ring-bob').value = String(bob);
       q<HTMLElement>(root, '#le-ring-bob-readout').textContent = ` ${bob.toFixed(2)} m`;
@@ -374,10 +396,11 @@ export function createPropsController(host: PropsHost): PropsController {
       q<HTMLElement>(root, '#le-zone-marker-wrap').hidden = ztype !== 'position';
       if (ztype === 'position') {
         const pz = z as PositionZone;
-        q<HTMLInputElement>(root, '#le-zone-minx').value = String(pz.minX ?? z.x - 1);
-        q<HTMLInputElement>(root, '#le-zone-maxx').value = String(pz.maxX ?? z.x + 1);
-        q<HTMLInputElement>(root, '#le-zone-minz').value = String(pz.minZ ?? z.z - 1);
-        q<HTMLInputElement>(root, '#le-zone-maxz').value = String(pz.maxZ ?? z.z + 1);
+        // 沒設的邊留白＝不限（和判定一致），不補數字，免得一編輯就寫回關卡
+        q<HTMLInputElement>(root, '#le-zone-minx').value = pz.minX != null ? String(pz.minX) : '';
+        q<HTMLInputElement>(root, '#le-zone-maxx').value = pz.maxX != null ? String(pz.maxX) : '';
+        q<HTMLInputElement>(root, '#le-zone-minz').value = pz.minZ != null ? String(pz.minZ) : '';
+        q<HTMLInputElement>(root, '#le-zone-maxz').value = pz.maxZ != null ? String(pz.maxZ) : '';
         q<HTMLInputElement>(root, '#le-zone-pos-miny').value = pz.minY != null ? String(pz.minY) : '';
         q<HTMLInputElement>(root, '#le-zone-pos-maxy').value = pz.maxY != null ? String(pz.maxY) : '';
       } else if (ztype === 'altitude') {
@@ -404,7 +427,8 @@ export function createPropsController(host: PropsHost): PropsController {
     const level = host.getLevel();
     const x = snapClampXZ(Number(q<HTMLInputElement>(root, '#le-px').value) || 0, 0, snapStep).x;
     const z = snapClampXZ(0, Number(q<HTMLInputElement>(root, '#le-pz').value) || 0, snapStep).z;
-    const y = Number(q<HTMLInputElement>(root, '#le-py').value) || 2;
+    // 0 是合法高度（地面），只有空白或不是數字才用預設 2m
+    const y = ZoneEdit.readBound(q<HTMLInputElement>(root, '#le-py').value) ?? 2;
     const color = readColor(root);
 
     if (selection.kind === 'ring') {
@@ -418,6 +442,7 @@ export function createPropsController(host: PropsHost): PropsController {
       const thick = Number(q<HTMLInputElement>(root, '#le-ring-thick').value) || ringThickness(r);
       const spin = Number(q<HTMLInputElement>(root, '#le-ring-spin').value);
       const bobAmp = Number(q<HTMLInputElement>(root, '#le-ring-bob').value);
+      const ringYaw = RingAngle.normalize(Number(q<HTMLInputElement>(root, '#le-ring-yaw').value));
       const next: RingDef = {
         ...r,
         x,
@@ -429,6 +454,7 @@ export function createPropsController(host: PropsHost): PropsController {
         thickness: thick === 0.24 ? undefined : thick,
         spin: spin === DEFAULT_RING_SPIN ? undefined : spin,
         bobAmp: bobAmp === DEFAULT_RING_BOB_AMP ? undefined : bobAmp,
+        yaw: ringYaw === 0 ? undefined : ringYaw,
         faceYaw,
         faceTol: faceYaw != null ? faceTol : undefined,
         physics: readPhysics(root, 'ring', false),
@@ -494,8 +520,8 @@ export function createPropsController(host: PropsHost): PropsController {
           z,
           label,
           triggerRadius,
-          minY: minYRaw === '' ? undefined : Number(minYRaw),
-          maxY: maxYRaw === '' ? undefined : Number(maxYRaw),
+          minY: ZoneEdit.readBound(minYRaw),
+          maxY: ZoneEdit.readBound(maxYRaw),
         };
       } else if (ztype === 'heading') {
         const yawRaw = Number(q<HTMLInputElement>(root, '#le-zone-yaw').value);
@@ -514,18 +540,27 @@ export function createPropsController(host: PropsHost): PropsController {
       } else {
         const minYRaw = q<HTMLInputElement>(root, '#le-zone-pos-miny').value.trim();
         const maxYRaw = q<HTMLInputElement>(root, '#le-zone-pos-maxy').value.trim();
+        // 中心移動時框跟著平移；之後再套用欄位上老師直接改的邊界
+        const moved = ZoneEdit.translate(zn, x, z);
+        const shifted = moved.type === 'position' ? moved : undefined;
+        const typed = (sel: string, was: number | undefined, now: number | undefined): number | undefined => {
+          const v = ZoneEdit.readBound(q<HTMLInputElement>(root, sel).value);
+          return v === was ? now : v;
+        };
+        const pz = zn.type === 'position' ? zn : undefined;
         next = {
           type: 'position',
           x,
           z,
           label,
           markerDiameter,
-          minX: Number(q<HTMLInputElement>(root, '#le-zone-minx').value),
-          maxX: Number(q<HTMLInputElement>(root, '#le-zone-maxx').value),
-          minZ: Number(q<HTMLInputElement>(root, '#le-zone-minz').value),
-          maxZ: Number(q<HTMLInputElement>(root, '#le-zone-maxz').value),
-          minY: minYRaw === '' ? undefined : Number(minYRaw),
-          maxY: maxYRaw === '' ? undefined : Number(maxYRaw),
+          triggerRadius,
+          minX: typed('#le-zone-minx', pz?.minX, shifted?.minX),
+          maxX: typed('#le-zone-maxx', pz?.maxX, shifted?.maxX),
+          minZ: typed('#le-zone-minz', pz?.minZ, shifted?.minZ),
+          maxZ: typed('#le-zone-maxz', pz?.maxZ, shifted?.maxZ),
+          minY: ZoneEdit.readBound(minYRaw),
+          maxY: ZoneEdit.readBound(maxYRaw),
         };
       }
       zones[selection.index] = next;
@@ -538,7 +573,7 @@ export function createPropsController(host: PropsHost): PropsController {
   const bind = (): void => {
     const inputs = [
       '#le-px', '#le-pz', '#le-py', '#le-py-range', '#le-size', '#le-label', '#le-solid',
-      '#le-face-yaw', '#le-face-tol', '#le-ring-diam', '#le-ring-thick', '#le-ring-spin', '#le-ring-bob',
+      '#le-face-yaw', '#le-face-tol', '#le-ring-yaw', '#le-ring-diam', '#le-ring-thick', '#le-ring-spin', '#le-ring-bob',
       '#le-balloon-diam', '#le-color', '#le-color-hex',
       '#le-zone-minx', '#le-zone-maxx', '#le-zone-minz', '#le-zone-maxz',
       '#le-zone-pos-miny', '#le-zone-pos-maxy',
@@ -595,6 +630,23 @@ export function createPropsController(host: PropsHost): PropsController {
       apply();
     });
 
+    // 設了角度的圈還在自轉，角度就沒意義：自轉是預設值時順手停下來
+    q<HTMLInputElement>(root, '#le-ring-yaw').addEventListener('change', () => {
+      const spinEl = q<HTMLInputElement>(root, '#le-ring-spin');
+      if (Number(spinEl.value) === DEFAULT_RING_SPIN) {
+        spinEl.value = '0';
+        apply();
+      }
+    });
+    q<HTMLButtonElement>(root, '#le-ring-route').addEventListener('click', () => {
+      const level = host.getLevel();
+      if (!level.rings?.length) return;
+      level.rings = RingAngle.alongRoute(level.rings);
+      sync();
+      host.redraw();
+      host.scheduleSave();
+    });
+
     q<HTMLInputElement>(root, '#le-ring-bob').addEventListener('input', () => {
       const b = Number(q<HTMLInputElement>(root, '#le-ring-bob').value);
       q<HTMLElement>(root, '#le-ring-bob-readout').textContent = ` ${b.toFixed(2)} m`;
@@ -627,13 +679,20 @@ export function createPropsController(host: PropsHost): PropsController {
       });
     });
 
+    // 換類型：判定條件換成新類型的預設值再重畫欄位，不讀畫面上的舊欄位
     q<HTMLSelectElement>(root, '#le-zone-type').addEventListener('change', () => {
-      const ztype = q<HTMLSelectElement>(root, '#le-zone-type').value;
-      q<HTMLElement>(root, '#le-zone-position').hidden = ztype !== 'position';
-      q<HTMLElement>(root, '#le-zone-altitude').hidden = ztype !== 'altitude';
-      q<HTMLElement>(root, '#le-zone-heading').hidden = ztype !== 'heading';
-      q<HTMLElement>(root, '#le-zone-marker-wrap').hidden = ztype !== 'position';
-      apply();
+      const selection = host.getSelection();
+      const level = host.getLevel();
+      if (selection?.kind !== 'zone') return;
+      const zones = [...(level.passZones ?? [])];
+      const zn = zones[selection.index];
+      if (!zn) return;
+      const ztype = q<HTMLSelectElement>(root, '#le-zone-type').value as PassZoneDef['type'];
+      zones[selection.index] = ZoneEdit.convert(zn, ztype);
+      host.setLevel({ ...level, passZones: zones });
+      sync();
+      host.redraw();
+      host.scheduleSave();
     });
   };
 

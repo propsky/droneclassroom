@@ -17,6 +17,9 @@ import {
   PositionJudge,
   RETURN_PAD_RADIUS_M,
   RingJudge,
+  RingPassJudge,
+  RING_MAX_STEP_M,
+  TaskJudge,
   YawAccumulator,
   type Pose,
 } from './completionJudge';
@@ -222,5 +225,72 @@ describe('老師自建的舊關卡（沒寫 yawMode / ringOrder）照原本的�
     expect(RingJudge.canPass(passed, 2, 'sequential')).toBe(false);
     expect(RingJudge.canPass(passed, 0, 'sequential')).toBe(true);
     expect(RingJudge.canPass([true, false, false], 0, undefined)).toBe(false);
+  });
+});
+
+describe('TaskJudge 整關過關', () => {
+  const t = (done: number, total: number) => ({ done, total });
+
+  it('只有一種任務：做完就過關（官方關卡都是這種）', () => {
+    expect(TaskJudge.allDone([t(3, 3), t(0, 0), t(0, 0)])).toBe(true);
+    expect(TaskJudge.allDone([t(0, 0), t(3, 4), t(0, 0)])).toBe(false);
+  });
+
+  it('圈＋任務點混合：兩種都要做完，只做完一種不算', () => {
+    expect(TaskJudge.allDone([t(2, 2), t(1, 2), t(0, 0)])).toBe(false);
+    expect(TaskJudge.allDone([t(1, 2), t(2, 2), t(0, 0)])).toBe(false);
+    expect(TaskJudge.allDone([t(2, 2), t(2, 2), t(0, 0)])).toBe(true);
+  });
+
+  it('一種任務都沒有（自由畫布）：不會自動過關', () => {
+    expect(TaskJudge.allDone([t(0, 0), t(0, 0), t(0, 0)])).toBe(false);
+    expect(TaskJudge.allDone([])).toBe(false);
+  });
+});
+
+describe('RingPassJudge 穿圈要從圈裡穿過去', () => {
+  const c = { x: 0, y: 2, z: -5 };
+  const R = 1.5;
+  const at = (x: number, y: number, z: number) => ({ x, y, z });
+
+  it('正面穿過圈心：算；倒著穿回來也算', () => {
+    expect(RingPassJudge.crossed(at(0, 2, -4.9), at(0, 2, -5.1), c, 0, R)).toBe(true);
+    expect(RingPassJudge.crossed(at(0, 2, -5.1), at(0, 2, -4.9), c, 0, R)).toBe(true);
+  });
+
+  it('飛到圈前面停住、在圈前晃：不算（舊判定在圈心 1.5m 內就算）', () => {
+    expect(RingPassJudge.crossed(at(0, 2, -3.6), at(0, 2, -3.7), c, 0, R)).toBe(false);
+    expect(RingPassJudge.crossed(at(0.5, 2, -4.2), at(-0.5, 2, -4.2), c, 0, R)).toBe(false);
+  });
+
+  it('從圈外穿過圈面（旁邊、上面）：不算', () => {
+    expect(RingPassJudge.crossed(at(1.6, 2, -4.9), at(1.6, 2, -5.1), c, 0, R)).toBe(false);
+    expect(RingPassJudge.crossed(at(0, 3.6, -4.9), at(0, 3.6, -5.1), c, 0, R)).toBe(false);
+  });
+
+  it('沿著圈面側飛（擦過圈邊）：不算', () => {
+    expect(RingPassJudge.crossed(at(-1, 2, -5), at(1, 2, -5), c, 0, R)).toBe(false);
+  });
+
+  it('圈轉 90°（面向左右）：要沿 X 穿過，沿 Z 飛過去不算', () => {
+    const yaw90 = Math.PI / 2;
+    expect(RingPassJudge.crossed(at(0.1, 2, -5), at(-0.1, 2, -5), c, yaw90, R)).toBe(true);
+    expect(RingPassJudge.crossed(at(0, 2, -4.9), at(0, 2, -5.1), c, yaw90, R)).toBe(false);
+  });
+
+  it('停在圈面上再離開：只算一次', () => {
+    const onPlane = at(0, 2, -5);
+    const a = RingPassJudge.crossed(at(0, 2, -4.9), onPlane, c, 0, R);
+    const b = RingPassJudge.crossed(onPlane, at(0, 2, -5.1), c, 0, R);
+    expect([a, b].filter(Boolean)).toHaveLength(1);
+  });
+
+  it('瞬移（重置、載入）跨過圈面：不算', () => {
+    expect(RingPassJudge.crossed(at(0, 2, 0), at(0, 2, -5 - RING_MAX_STEP_M), c, 0, R)).toBe(false);
+  });
+
+  it('自轉角度用絕對 tick：重播從任何 tick 開始算都一樣', () => {
+    expect(RingPassJudge.yawRadAt(90, 0, 1234)).toBeCloseTo(Math.PI / 2, 12);
+    expect(RingPassJudge.yawRadAt(0, 0.015, 100)).toBeCloseTo(1.5, 12);
   });
 });

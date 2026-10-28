@@ -40,3 +40,14 @@ describe('levelGoalPresets', () => {
     expect(isLevelLayoutEmpty({ ...blank, rings: [{ x: 0, y: 2, z: -3 }] })).toBe(false);
   });
 });
+
+describe('快速起稿：精靈的設定不會被素材片段蓋掉', () => {
+  it('每個精靈的說明、HUD、返航都照精靈寫的', () => {
+    for (const preset of LEVEL_GOAL_PRESETS) {
+      const out = applyLevelGoalPreset(blank, preset.id)!;
+      if (preset.intro) expect(out.intro, preset.id).toBe(preset.intro);
+      if (preset.hud) expect(out.hud, preset.id).toBe(preset.hud);
+      if (preset.returnHome !== undefined) expect(out.returnHome, preset.id).toBe(preset.returnHome);
+    }
+  });
+});

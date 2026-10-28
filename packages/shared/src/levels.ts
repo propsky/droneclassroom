@@ -30,6 +30,11 @@ export interface RingDef {
   thickness?: number;
   /** 每 tick 自轉角速度；缺省 0.015 */
   spin?: number;
+  /**
+   * 擺放角度（度，只影響外觀）。和機頭 yaw 同一套：0 = 圈面朝前後，機頭朝 -Z 正好穿過；
+   * 正值往左轉。有自轉時這是起始角度。穿過判定只看離圈心多遠，不看角度。
+   */
+  yaw?: number;
   /** 上下漂浮幅度 m；0 = 關閉；缺省 0.2 */
   bobAmp?: number;
   /** 旋轉鑽圈關：機頭需對準的 yaw 角（度）才算穿過 */

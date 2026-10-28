@@ -8,6 +8,7 @@ import {
   parseLevelColor,
   ringBobAmp,
   ringSpin,
+  ringYawDeg,
   zoneTriggerRadius,
 } from './levelObjectDefaults';
 
@@ -59,5 +60,14 @@ describe('levelObjectDefaults', () => {
   it('obstacleDefaultColor', () => {
     expect(obstacleDefaultColor(true)).toBe('#f87171');
     expect(obstacleDefaultColor(false)).toBe('#4ade80');
+  });
+});
+
+describe('ringYawDeg', () => {
+  it('沒寫或不是數字 → 0；有寫照用', () => {
+    expect(ringYawDeg(undefined)).toBe(0);
+    expect(ringYawDeg({})).toBe(0);
+    expect(ringYawDeg({ yaw: Number.NaN })).toBe(0);
+    expect(ringYawDeg({ yaw: 90 })).toBe(90);
   });
 });

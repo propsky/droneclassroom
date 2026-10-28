@@ -1,6 +1,6 @@
 // 教學目標精靈 — 依教學情境組合官方素材片段，快速起稿自訂關卡。
 import type { LevelDef } from './levels';
-import { applyLevelKitSnippet, getLevelKitSnippet, type LevelKitApplyMode } from './levelKit';
+import { applyLevelKitSnippet, getLevelKitSnippet, levelKitApplyMode } from './levelKit';
 
 export interface LevelGoalPreset {
   id: string;
@@ -41,16 +41,6 @@ export const LEVEL_GOAL_PRESETS: LevelGoalPreset[] = [
     returnHome: true,
   },
   {
-    id: 'goal-takeoff',
-    name: '起飛與降落',
-    desc: '垂直起飛、定高、精準降落任務',
-    tag: '任務',
-    snippetIds: ['task-takeoff-land'],
-    intro: '先升到 0.5 公尺以上，再降到 0.5 公尺以下。必須先起飛再落地。',
-    titleHint: '起飛降落任務',
-    returnHome: false,
-  },
-  {
     id: 'goal-altitude',
     name: '定高飛行',
     desc: '練習維持 2–3m 高度',
@@ -65,7 +55,7 @@ export const LEVEL_GOAL_PRESETS: LevelGoalPreset[] = [
     name: '戳氣球',
     desc: '收集場上氣球，趣味入門',
     tag: '情境',
-    snippetIds: ['scene-balloons-3'],
+    snippetIds: ['scene-balloons'],
     intro: '飛近氣球把它戳破，全部收集完畢！',
     titleHint: '戳氣球趣玩',
     freeplay: true,
@@ -86,7 +76,7 @@ export const LEVEL_GOAL_PRESETS: LevelGoalPreset[] = [
     name: '門框穿圈',
     desc: '先過門框障礙，再穿三圈',
     tag: '綜合',
-    snippetIds: ['obs-gate', 'rings-line-3'],
+    snippetIds: ['scene-gate-rings'],
     intro: '從門框中間穿過，再完成穿圈路線。',
     hud: '過門框 → 穿 3 圈 → 返航',
     titleHint: '門框穿圈綜合',
@@ -108,7 +98,7 @@ export const LEVEL_GOAL_PRESETS: LevelGoalPreset[] = [
     desc: '門框 + 穿圈短賽道',
     tag: '競速',
     snippetIds: ['race-gate-sprint'],
-    intro: '依序通過檢查點，用最短時間完成賽道。',
+    intro: '從三道門框中間穿過，再穿過終點圈，用最短時間完成賽道。',
     titleHint: '競速衝刺',
     returnHome: false,
   },
@@ -124,15 +114,6 @@ export const LEVEL_GOAL_PRESETS: LevelGoalPreset[] = [
     returnHome: false,
   },
 ];
-
-function snippetApplyMode(snippetId: string): LevelKitApplyMode {
-  const snip = getLevelKitSnippet(snippetId);
-  if (!snip) return 'append';
-  if (snip.category === 'tasks' || snip.category === 'draw' || snip.category === 'races') {
-    return 'replace-tasks';
-  }
-  return 'append';
-}
 
 /** 關卡是否尚無任何佈局（適合顯示精靈提示） */
 export function isLevelLayoutEmpty(level: LevelDef): boolean {
@@ -180,17 +161,18 @@ export function applyLevelGoalPreset(
         }
       : { ...level };
 
+  for (const snippetId of preset.snippetIds) {
+    const snip = getLevelKitSnippet(snippetId);
+    if (!snip) continue;
+    next = applyLevelKitSnippet(next, snip, levelKitApplyMode(snip));
+  }
+
+  // 精靈自己寫的說明與設定最後套，不會被素材片段蓋掉
   if (preset.titleHint && mode === 'replace') next.name = preset.titleHint;
   if (preset.intro) next.intro = preset.intro;
   if (preset.hud) next.hud = preset.hud;
   if (preset.returnHome !== undefined) next.returnHome = preset.returnHome;
   if (preset.freeplay !== undefined) next.freeplay = preset.freeplay;
-
-  for (const snippetId of preset.snippetIds) {
-    const snip = getLevelKitSnippet(snippetId);
-    if (!snip) continue;
-    next = applyLevelKitSnippet(next, snip, snippetApplyMode(snippetId));
-  }
 
   return next;
 }

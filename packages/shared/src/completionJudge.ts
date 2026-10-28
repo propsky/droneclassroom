@@ -3,7 +3,7 @@
 //
 // 旋轉：預設比「從本關開始的有號累積角」，不把角度折回 0–360。
 // 因此 360° ≠ 0°、450° ≠ 90°；轉超過容差、或一路轉過去沒停住，都不算。
-import { detHypot2 } from './detmath';
+import { detCos, detHypot2, detHypot3, detSin } from './detmath';
 import type { HeadingYawMode, PassZoneDef, RingOrder } from './levels';
 import { zoneTriggerRadius } from './levelObjectDefaults';
 import { yawDiffDeg } from './math';
@@ -221,6 +221,48 @@ export class OrderJudge {
   }
 }
 
+interface Point3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/** 一個 tick 最多移動這麼遠（公尺）。超過代表瞬移（重置、載入），不算穿圈。手動極速約 0.15m/tick。 */
+export const RING_MAX_STEP_M = 1;
+/** 離圈面這麼近（公尺）視為在圈面上 */
+const PLANE_EPS_M = 1e-6;
+
+/**
+ * 穿圈的幾何判定：這一 tick 的移動線段穿過圈面，而且穿過點在圈內（離圈心 < 半徑）。
+ * 從旁邊擦過、在圈前面晃、碰到圈邊都不算。正反兩個方向都算；順序由 RingJudge（依序穿圈）管。
+ */
+export class RingPassJudge {
+  /** 圈面法線（水平）。和機頭方向同一套：yaw=0 → (0, -1)，正值往左轉。 */
+  static normal(yawRad: number): { x: number; z: number } {
+    return { x: -detSin(yawRad), z: -detCos(yawRad) };
+  }
+
+  /** 圈此刻的角度（弧度）：擺放角度 + 自轉（每 tick spin 弧度，用絕對模擬 tick，重播算得出同一個值）。 */
+  static yawRadAt(yawDeg: number, spinPerTick: number, simTick: number): number {
+    return (yawDeg * Math.PI) / 180 + spinPerTick * simTick;
+  }
+
+  static crossed(prev: Point3, curr: Point3, center: Point3, yawRad: number, radius: number): boolean {
+    if (detHypot3(curr.x - prev.x, curr.y - prev.y, curr.z - prev.z) > RING_MAX_STEP_M) return false;
+    const n = RingPassJudge.normal(yawRad);
+    const d0 = (prev.x - center.x) * n.x + (prev.z - center.z) * n.z;
+    const d1 = (curr.x - center.x) * n.x + (curr.z - center.z) * n.z;
+    // 圈面上（含沿著圈面飛、三角函數的捨入誤差）算在正面那一側：
+    // 停在圈面上不會被算兩次，沿著圈面擦過也不會因為誤差被算成穿過
+    if (d0 > -PLANE_EPS_M === d1 > -PLANE_EPS_M) return false;
+    const t = d0 / (d0 - d1);
+    const ix = prev.x + (curr.x - prev.x) * t;
+    const iy = prev.y + (curr.y - prev.y) * t;
+    const iz = prev.z + (curr.z - prev.z) * t;
+    return detHypot3(ix - center.x, iy - center.y, iz - center.z) < radius;
+  }
+}
+
 /** 鑽圈：依序，且（若有 faceYaw）機頭朝向要對準。朝向用最短角差，不是累積轉角。 */
 export class RingJudge {
   static inRange(distance: number, radius: number): boolean {
@@ -288,5 +330,23 @@ export class PassZoneJudge {
       );
     }
     return false;
+  }
+}
+
+/** 一種任務的進度。total 為 0 代表這關沒有這種任務。 */
+export interface TaskTally {
+  done: number;
+  total: number;
+}
+
+/**
+ * 整關過關：關卡裡出現的每一種任務（圈、任務點、氣球）都要做完。
+ * 一種任務都沒有的關卡（自由畫布）永遠不會自動過關。
+ * 有勾「需返航降落」時，做完任務後還要降落在起飛墊上（由 core/level.ts 處理）。
+ */
+export class TaskJudge {
+  static allDone(tallies: readonly TaskTally[]): boolean {
+    const present = tallies.filter((t) => t.total > 0);
+    return present.length > 0 && present.every((t) => t.done >= t.total);
   }
 }

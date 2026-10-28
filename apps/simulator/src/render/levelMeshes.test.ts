@@ -6,6 +6,7 @@ import { NullEngine, Scene, StandardMaterial } from '@babylonjs/core';
 import { RingGuide, ringSpin, type LevelDef } from '@creafly/shared';
 import { bus } from '../core/events';
 import { applyLoadLevel, levelState } from '../core/level';
+import { simTime } from '../core/droneState';
 import { LevelVisuals } from './levelMeshes';
 
 const chapter1 = JSON.parse(
@@ -100,8 +101,10 @@ describe('穿圈引導', () => {
     levelState.levels = [...chapter1.levels, custom];
     applyLoadLevel('t-spin');
     const spinning = scene.getTransformNodeByName('ringYaw0')!;
+    simTime.tick = 3;
     visuals.tick(48);
-    expect(spinning.rotation.y).toBeCloseTo(ringSpin({}), 5);
+    expect(spinning.rotation.y).toBeCloseTo(ringSpin({}) * 3, 5);
+    simTime.tick = 0;
     expectColor(matOf(scene, 'ring0'), RingGuide.look('next').color!);
   });
 
@@ -113,4 +116,116 @@ describe('穿圈引導', () => {
     bus.emit('ring-face', { index: 0, aligned: false });
     expectColor(matOf(scene, 'ring0'), RingGuide.look('next').color!);
   });
+
+  it('圈的擺放角度：和機頭 yaw 同一套；有自轉時從這個角度開始轉', () => {
+    const custom: LevelDef = {
+      id: 't-ring-yaw',
+      name: '擺放角度',
+      rings: [
+        { x: 0, y: 2, z: -4, yaw: 90, spin: 0 },
+        { x: 0, y: 2, z: -8, yaw: -45 },
+      ],
+    };
+    levelState.levels = [...chapter1.levels, custom];
+    applyLoadLevel('t-ring-yaw');
+    const fixed = scene.getTransformNodeByName('ringYaw0')!;
+    expect(fixed.rotation.y).toBeCloseTo(Math.PI / 2, 6);
+    visuals.tick(16);
+    expect(fixed.rotation.y).toBeCloseTo(Math.PI / 2, 6);
+    const spinning = scene.getTransformNodeByName('ringYaw1')!;
+    simTime.tick = 2;
+    visuals.tick(32);
+    expect(spinning.rotation.y).toBeCloseTo(-Math.PI / 4 + 2 * ringSpin({}), 6);
+    simTime.tick = 0;
+  });
 });
+
+describe('任務點標出下一步', () => {
+  let scene: Scene;
+
+  beforeAll(() => {
+    scene = new Scene(new NullEngine());
+    new LevelVisuals(scene);
+    levelState.levels = chapter1.levels;
+  });
+
+  function disc(i: number) {
+    const mesh = scene.getMeshByName(`zoneDisc${i}`);
+    if (!mesh) throw new Error(`找不到 zoneDisc${i}`);
+    return { mesh, mat: mesh.material as StandardMaterial };
+  }
+
+  function expectEmissive(mat: StandardMaterial, color: number): void {
+    expect(mat.emissiveColor.r).toBeCloseTo(((color >> 16) & 255) / 255, 2);
+    expect(mat.emissiveColor.g).toBeCloseTo(((color >> 8) & 255) / 255, 2);
+    expect(mat.emissiveColor.b).toBeCloseTo((color & 255) / 255, 2);
+  }
+
+  it('1-2：第一步金色，同在原點的步驟 2、4 只顯示步驟 2', () => {
+    applyLoadLevel('1-2');
+    expectEmissive(disc(0).mat, RingGuide.look('next').color!);
+    expect(disc(1).mesh.isEnabled()).toBe(true);
+    expect(disc(3).mesh.isEnabled()).toBe(false);
+  });
+
+  it('做完前兩步：原點換顯示步驟 4，第 3 步變金色、做完的變灰', () => {
+    applyLoadLevel('1-2');
+    levelState.zoneProgress[0] = true;
+    levelState.zoneProgress[1] = true;
+    bus.emit('zone-passed', { index: 1, done: 2, total: 4 });
+    expectEmissive(disc(0).mat, RingGuide.look('passed').color!);
+    expectEmissive(disc(2).mat, RingGuide.look('next').color!);
+    expect(disc(1).mesh.isEnabled()).toBe(false);
+    expect(disc(3).mesh.isEnabled()).toBe(true);
+    expect(disc(3).mat.alpha).toBe(0.4);
+  });
+
+  it('高度任務點設了觸發半徑：地面畫出觸發範圍；沒設的（任何位置都算）不畫', () => {
+    const custom: LevelDef = {
+      id: 't-trigger',
+      name: '觸發範圍',
+      passZones: [
+        { type: 'altitude', x: 0, z: -2, label: '起飛', minY: 0.5 },
+        { type: 'altitude', x: 0, z: -7, label: '在平台降落', maxY: 0.5, triggerRadius: 1.5 },
+      ],
+    };
+    levelState.levels = [...chapter1.levels, custom];
+    applyLoadLevel('t-trigger');
+    expect(scene.getMeshByName('zoneDisc0')).toBeNull();
+    expect(disc(1).mesh.isEnabled()).toBe(true);
+  });
+});
+
+describe('擺放角度與障礙外觀', () => {
+  let scene: Scene;
+
+  beforeAll(() => {
+    scene = new Scene(new NullEngine());
+    new LevelVisuals(scene);
+  });
+
+  it('1-5 旋轉鑽圈：圈面對著要求的機頭方向（faceYaw），學生正面穿過', () => {
+    levelState.levels = chapter1.levels;
+    applyLoadLevel('1-5');
+    const want = [270, 0, 90];
+    want.forEach((deg, i) => {
+      expect(scene.getTransformNodeByName(`ringYaw${i}`)!.rotation.y).toBeCloseTo((deg * Math.PI) / 180, 6);
+    });
+  });
+
+  it('障礙外觀跟著實際碰撞：標記柱設成參與碰撞就畫成實心', () => {
+    const custom: LevelDef = {
+      id: 't-obs',
+      name: '障礙',
+      obstacles: [
+        { type: 'soft-cube', x: 0, y: 1, z: -4, size: 1, physics: { collidable: true } },
+        { type: 'soft-cube', x: 2, y: 1, z: -4, size: 1 },
+      ],
+    };
+    levelState.levels = [...chapter1.levels, custom];
+    applyLoadLevel('t-obs');
+    expect((scene.getMeshByName('obstacle0')!.material as StandardMaterial).alpha).toBe(0.85);
+    expect((scene.getMeshByName('obstacle1')!.material as StandardMaterial).alpha).toBe(0.6);
+  });
+});
+

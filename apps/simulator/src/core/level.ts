@@ -11,17 +11,21 @@ import {
   balloonPopRadius,
   ringBobAmp,
   ringSpin,
+  ringYawDeg,
   obstacleIsCollidable,
   FaceYawJudge,
   LandingJudge,
   OrderJudge,
   PassZoneJudge,
   RingJudge,
+  RingPassJudge,
+  TaskJudge,
   YawAccumulator,
   type Pose,
+  type TaskTally,
 } from '@creafly/shared';
 import { readPreviewLevel } from '../preview';
-import { droneState, resetDroneState, HOME_POSITION, flags } from './droneState';
+import { droneState, resetDroneState, HOME_POSITION, flags, simTime } from './droneState';
 import { setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
 import { finalizeRecording, recordAction } from './recordingSession';
@@ -90,9 +94,23 @@ function currentYawDeg(): number {
   return YawAccumulator.fromRadians(droneState.yaw);
 }
 
-/** 把「上一 tick 的角」對齊現在，避免重置後第一個 tick 被看成大幅轉動。 */
-function sampleYaw(): void {
+/** 上一 tick 的位置，穿圈要看這一 tick 的移動線段有沒有穿過圈面 */
+const previousPos = { x: 0, y: 0, z: 0 };
+
+/**
+ * 把「上一 tick 的角與位置」對齊現在。每 tick 結束、以及重置／載入（瞬移）後都要取樣，
+ * 避免第一個 tick 被看成大幅轉動，或把瞬移的線段算成穿圈。
+ */
+function samplePose(): void {
   previousYawDeg = currentYawDeg();
+  previousPos.x = droneState.position.x;
+  previousPos.y = droneState.position.y;
+  previousPos.z = droneState.position.z;
+}
+
+/** 重播：套用錄製起點的位置與機頭後重新取樣，和線上錄製開始時的狀態一致。 */
+export function resyncLevelPose(): void {
+  samplePose();
 }
 
 function currentPose(): Pose {
@@ -227,7 +245,7 @@ export function bootstrapLevelForReplay(level: LevelDef): void {
       .map((o) => ({ x: o.x, y: o.y, z: o.z, half: o.size / 2 })),
   );
   resetDroneState();
-  sampleYaw();
+  samplePose();
 }
 
 /** 實際套用關卡資料（授權通過後；老師廣播 bypass 亦走此） */
@@ -268,7 +286,7 @@ export function applyLoadLevel(levelId: string): void {
   );
 
   resetDroneState();
-  sampleYaw();
+  samplePose();
   bus.emit('trail-clear', {});
   bus.emit('level-loaded', { level });
   stateHud(level.hud ?? level.name);
@@ -300,7 +318,7 @@ export function clearLevel(): void {
   lastFaceAligned = null;
   lastFaceRing = -1;
   setSolidObstacles([]);
-  sampleYaw();
+  samplePose();
   // 清飛行軌跡（進大亂鬥 / 足球的唯一共同出口在這裡統一發，呼叫端不必各自補）；
   // 墨水線與參考虛線由 pen.ts / render 端監聽 level-cleared 清除
   bus.emit('trail-clear', {});
@@ -380,7 +398,7 @@ GameSession.onExit('level', exitLevel);
 export function resetMission(): void {
   recordAction({ a: 'reset' });
   resetDroneState();
-  sampleYaw();
+  samplePose();
   levelState.rings.forEach((r) => (r.passed = false));
   levelState.ringsCollected = 0;
   bus.emit('rings-reset', {});
@@ -400,10 +418,11 @@ export function tickLevel(nowMs: number): void {
     checkRings(nowMs);
     checkZones();
     checkBalloons();
+    checkCompletion();
     checkDuration();
   }
   updateFaceGuidance();
-  sampleYaw();
+  samplePose();
 }
 
 function checkRings(nowMs: number): void {
@@ -411,17 +430,18 @@ function checkRings(nowMs: number): void {
   const p = droneState.position;
   s.rings.forEach((ring, i) => {
     if (!RingJudge.canPass(s.rings.map((r) => r.passed), i, s.current?.ringOrder)) return;
-    const ry = ringWorldY(i, ring.y, nowMs, ringBobAmp(ring));
-    const dist = detHypot3(p.x - ring.x, p.y - ry, p.z - ring.z);
-    if (!RingJudge.inRange(dist, ringPassRadius(ring))) return;
+    // 這一 tick 的移動線段要從圈裡穿過圈面才算；在圈前面晃、從旁邊擦過都不算
+    const center = { x: ring.x, y: ringWorldY(i, ring.y, nowMs, ringBobAmp(ring)), z: ring.z };
+    const yawRad = RingPassJudge.yawRadAt(ringYawDeg(ring), ringSpin(ring), simTime.tick);
+    if (!RingPassJudge.crossed(previousPos, p, center, yawRad, ringPassRadius(ring))) return;
     // 旋轉鑽圈：faceYaw 比的是機頭朝向（最短角差），不是累積轉了幾度。
     if (ring.faceYaw !== undefined && ring.faceYaw !== null) {
       const yawDeg = currentYawDeg();
       if (!FaceYawJudge.aligned(yawDeg, ring.faceYaw, FaceYawJudge.tolerance(ring.faceTol))) {
         if (nowMs - ringFaceHintAt > 1500) {
           ringFaceHintAt = nowMs;
-          stateHud('🔄 轉向紅圈、機頭對準再穿過！');
-          toast('🔄 機頭要對準紅圈才算過！先轉向', 'warning');
+          stateHud('🔄 先轉向，機頭對準圈的方向再穿過！');
+          toast('🔄 機頭要對準圈的方向才算過！先轉向', 'warning');
         }
         return;
       }
@@ -432,40 +452,58 @@ function checkRings(nowMs: number): void {
     toast(`✓ 穿過圈 ${i + 1}`, 'success');
     sound('ring');
   });
+}
 
-  // 手動模式：全部圈都過了 →（returnHome 關）引導回家降落，否則直接過關
-  const allDone = s.rings.length > 0 && s.ringsCollected >= s.rings.length;
-  if (!flags.programRunning && allDone && !s.manualComplete) {
-    const level = s.current;
-    if (level?.returnHome) {
-      const overPad = LandingJudge.overPad(p.x, p.z, undefined, HOME_POSITION.x, HOME_POSITION.z);
-      if (overPad && droneState.isGrounded) {
-        manualLevelComplete();
-      } else {
-        s.awaitingReturn = true;
-        const phase = overPad ? 'land' : 'return';
-        if (s.returnPhase !== phase) {
-          s.returnPhase = phase;
-          if (phase === 'return') {
-            stateHud('🏠 全部穿過了！飛回起飛墊（原點）');
-            toast('全部圈圈都穿過了！飛回起飛墊上方', 'success');
-          } else {
-            stateHud('🛬 到墊上方了！降落在起飛墊上');
-            toast('🛬 降下去、降落在起飛墊上就完成！', 'success');
-          }
-          bus.emit('return-home', { phase });
-        }
-      }
-    } else {
-      manualLevelComplete();
-    }
-  }
-  // 重置後把完成狀態清掉
-  if (s.ringsCollected < s.rings.length) {
+/** 各種任務的進度。圈、任務點、氣球都在這裡，整關過關與程式模式共用。 */
+function taskTallies(): TaskTally[] {
+  const s = levelState;
+  return [
+    { done: s.ringsCollected, total: s.rings.length },
+    { done: s.zoneProgress.filter(Boolean).length, total: s.zoneProgress.length },
+    { done: s.balloonsCollected, total: s.balloons.length },
+  ];
+}
+
+/**
+ * 整關過關（手動飛行）：關卡裡出現的任務全部做完 →（returnHome 關）飛回起飛墊降落 → 過關。
+ * 每次嘗試只上報一次。
+ */
+function checkCompletion(): void {
+  const s = levelState;
+  const level = s.current;
+  if (!level) return;
+  if (!TaskJudge.allDone(taskTallies())) {
+    // 重置後（圈清掉）可以重新完成
     s.manualComplete = false;
     s.awaitingReturn = false;
     s.returnPhase = null;
+    return;
   }
+  if (s.manualComplete) return;
+  // 程式模式的穿圈關在程式結束時才判定（checkProgramCompletion），與 legacy 一致
+  if (flags.programRunning && s.rings.length > 0) return;
+  if (!level.returnHome) {
+    manualLevelComplete();
+    return;
+  }
+  const p = droneState.position;
+  const overPad = LandingJudge.overPad(p.x, p.z, undefined, HOME_POSITION.x, HOME_POSITION.z);
+  if (overPad && droneState.isGrounded) {
+    manualLevelComplete();
+    return;
+  }
+  s.awaitingReturn = true;
+  const phase = overPad ? 'land' : 'return';
+  if (s.returnPhase === phase) return;
+  s.returnPhase = phase;
+  if (phase === 'return') {
+    stateHud('🏠 任務完成！飛回起飛墊（原點）');
+    toast('任務都完成了！飛回起飛墊上方', 'success');
+  } else {
+    stateHud('🛬 到墊上方了！降落在起飛墊上');
+    toast('🛬 降下去、降落在起飛墊上就完成！', 'success');
+  }
+  bus.emit('return-home', { phase });
 }
 
 function emitLevelComplete(timeMs: number): void {
@@ -480,16 +518,21 @@ function emitLevelComplete(timeMs: number): void {
   });
 }
 
-function manualLevelComplete(): void {
+/** 標記本次嘗試已過關並上報（手動與程式模式共用，提示音與 toast 由呼叫端決定）。 */
+function markLevelComplete(elapsedMs: number): void {
   const s = levelState;
   s.manualComplete = true;
   s.awaitingReturn = false;
   s.returnPhase = null;
   if (s.current?.returnHome) bus.emit('return-home', { phase: 'done' });
+  emitLevelComplete(elapsedMs);
+}
+
+function manualLevelComplete(): void {
   const elapsed = levelElapsedMs();
   toast(`🎉 過關！用時 ${(elapsed / 1000).toFixed(1)}s`, 'success');
   sound('complete');
-  emitLevelComplete(elapsed);
+  markLevelComplete(elapsed);
 }
 
 function checkZones(): void {
@@ -506,14 +549,6 @@ function checkZones(): void {
     bus.emit('zone-passed', { index: i, done, total: zones.length });
     toast(`✓ ${zone.label || `步驟 ${i + 1}`}`, 'success');
     sound('ring');
-    if (s.zoneProgress.every(Boolean)) {
-      toast('🎉 過關！', 'success');
-      sound('complete');
-      s.manualComplete = true;
-      if (s.current) {
-        emitLevelComplete(levelElapsedMs());
-      }
-    }
   });
 }
 
@@ -535,11 +570,10 @@ function checkBalloons(): void {
       sound('pop');
     }
   });
+  // 只提示；過關由 checkCompletion 統一判定（混合關卡還有別的任務要做）
   if (!s.balloonsDone && s.balloonsCollected >= s.balloons.length) {
     s.balloonsDone = true;
-    toast(`🎉 ${s.balloons.length} 顆氣球全部戳破！太厲害了！`, 'success');
-    sound('complete');
-    if (s.current) emitLevelComplete(levelElapsedMs());
+    toast(`🎈 ${s.balloons.length} 顆氣球全部戳破！太厲害了！`, 'success');
   }
 }
 
@@ -609,18 +643,12 @@ export interface ProgramResult {
 export function checkProgramCompletion(): ProgramResult {
   const s = levelState;
   const allRings = s.rings.length > 0 && s.ringsCollected >= s.rings.length;
-  const allZones =
-    !!s.current?.passZones?.length &&
-    s.zoneProgress.length === s.current.passZones.length &&
-    s.zoneProgress.every(Boolean);
-  const passed = allRings || allZones;
+  // 和手動一樣：出現的任務都要做完。程式模式不要求返航降落（與 legacy 一致）。
+  const passed = TaskJudge.allDone(taskTallies());
   const elapsedMs = levelElapsedMs();
-  // 每次嘗試只上報一次：zone 關在 tick 內已由 checkZones 上報；圈圈關這裡上報後標記完成，
-  // 否則程式結束後下一 tick checkRings（programRunning 已 false）會再上報一次
-  if (passed && s.current && !s.manualComplete) {
-    s.manualComplete = true;
-    emitLevelComplete(elapsedMs);
-  }
+  // 每次嘗試只上報一次：任務點／氣球關在 tick 內可能已由 checkCompletion 上報；
+  // 穿圈關這裡上報後標記完成，程式結束後下一 tick 的 checkCompletion 就不會再報
+  if (passed && s.current && !s.manualComplete) markLevelComplete(elapsedMs);
   return {
     passed,
     allRings,

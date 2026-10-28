@@ -11,18 +11,23 @@ import {
   Material,
   TransformNode,
 } from '@babylonjs/core';
-import type { LevelDef, RingGuideLook } from '@creafly/shared';
+import type { LevelDef, RingGuideLook, RingGuidePhase } from '@creafly/shared';
 import {
   balloonDiameter,
   RingGuide,
+  RingPassJudge,
   ringBobAmp,
   ringDiameter,
   ringSpin,
+  ringYawDeg,
   ringThickness,
   zoneMarkerDiameter,
+  zoneTriggerRadius,
+  obstacleIsCollidable,
 } from '@creafly/shared';
 import { bus } from '../core/events';
 import { levelState, ringWorldY } from '../core/level';
+import { simTime } from '../core/droneState';
 import { SceneLedger } from '../core/sceneLedger';
 import { CREAFLY_COLOR, hex } from './scene';
 
@@ -71,6 +76,19 @@ function parseColor(c: number | string | undefined, fallback: number): number {
   return fallback;
 }
 
+/** 位置任務點地面圈：還沒輪到維持原本的綠色；下一個用圈的金色、做完用圈的灰色 */
+const ZONE_COLOR = 0x4ade80;
+const ZONE_ALPHA: Record<RingGuidePhase, number> = { next: 0.85, upcoming: 0.4, passed: 0.25 };
+
+interface ZoneVisual {
+  disc: Mesh;
+  mat: StandardMaterial;
+  badge: Mesh | null;
+  badgeTex: DynamicTexture | null;
+  badgeKey: string;
+  point: { x: number; z: number };
+}
+
 interface RingVisual {
   node: TransformNode;
   spinNode: TransformNode;
@@ -84,6 +102,8 @@ interface RingVisual {
   baseY: number;
   bobAmp: number;
   spin: number;
+  /** 擺放角度（度），編號牌沿圈面放 */
+  yawDeg: number;
   index: number;
   shownColor: number;
   emissiveScale: number;
@@ -96,7 +116,8 @@ export class LevelVisuals {
   private rings: RingVisual[] = [];
   private obstacles: Mesh[] = [];
   private balloons: Mesh[] = [];
-  private zoneDiscs: (Mesh | null)[] = [];
+  /** 位置任務點的地面圈；高度／轉角任務點沒有地面標記（null） */
+  private zones: (ZoneVisual | null)[] = [];
   private disposables: { dispose(): void }[] = [];
   /** 旋轉鑽圈：目前回報對準的圈。只有「下一個圈」會因此變綠。 */
   private faceIndex = -1;
@@ -109,7 +130,7 @@ export class LevelVisuals {
     bus.on('ring-passed', () => this.refreshGuide());
     bus.on('rings-reset', () => this.refreshGuide());
     bus.on('ring-face', ({ index, aligned }) => this.setRingAligned(index, aligned));
-    bus.on('zone-passed', ({ index }) => this.highlightZone(index));
+    bus.on('zone-passed', () => this.refreshZoneGuide());
     bus.on('balloon-popped', ({ index }) => this.balloons[index]?.setEnabled(false));
   }
 
@@ -119,7 +140,7 @@ export class LevelVisuals {
     this.rings = [];
     this.obstacles = [];
     this.balloons = [];
-    this.zoneDiscs = [];
+    this.zones = [];
     this.faceIndex = -1;
     this.faceAligned = false;
     SceneLedger.set('level', 0);
@@ -142,6 +163,8 @@ export class LevelVisuals {
       // 自轉放在子節點，編號牌留在不轉的 node 上，數字才不會跟著圈轉。
       const spinNode = this.track(new TransformNode(`ringYaw${i}`, scene));
       spinNode.parent = node;
+      // 擺放角度＋自轉：和穿圈判定同一條公式（core/level.ts checkRings），看到的圈面就是判定的圈面
+      spinNode.rotation.y = RingPassJudge.yawRadAt(ringYawDeg(r), ringSpin(r), simTime.tick);
       const diam = ringDiameter(r);
       const thick = ringThickness(r);
       const mesh = this.track(
@@ -158,7 +181,7 @@ export class LevelVisuals {
       mat.emissiveColor = hex(color).scale(0.3);
       mat.specularColor = new Color3(0.5, 0.5, 0.5);
       mesh.material = mat;
-      const badge = this.makeBadge(scene, i, node);
+      const badge = this.makeBadge(scene, `courseNum${i}`, node);
       this.rings.push({
         node,
         spinNode,
@@ -177,6 +200,7 @@ export class LevelVisuals {
         emissiveScale: 0.3,
         pulse: false,
         diameter: diam,
+        yawDeg: ringYawDeg(r),
       });
     });
     this.placeBadges();
@@ -190,7 +214,8 @@ export class LevelVisuals {
       const mat = this.track(new StandardMaterial(`obstacleMat${i}`, scene));
       mat.diffuseColor = hex(color);
       mat.emissiveColor = hex(color).scale(0.2);
-      mat.alpha = o.solid ? 0.85 : 0.6;
+      // 外觀跟著實際碰撞走（physics.collidable 優先），不會出現半透明卻擋路的方塊
+      mat.alpha = obstacleIsCollidable(o) ? 0.85 : 0.6;
       mesh.material = mat;
       this.obstacles.push(mesh);
     });
@@ -222,28 +247,44 @@ export class LevelVisuals {
       this.balloons.push(mesh);
     });
 
-    // ---- passZone 地面標記圈（只有 position 型畫在地上才有意義）----
+    // ---- passZone 地面標記圈＋步驟編號 ----
     (level.passZones ?? []).forEach((zone, i) => {
-      if (zone.type !== 'position') {
-        this.zoneDiscs.push(null);
+      // 位置型畫標記圈；高度／轉角有設觸發半徑時畫出觸發範圍，沒設（任何位置都算）就不畫
+      const trigger = zoneTriggerRadius(zone);
+      const marker = zone.type === 'position' ? zoneMarkerDiameter(zone) : trigger !== null ? trigger * 2 : null;
+      if (marker === null) {
+        this.zones.push(null);
         return;
       }
       const disc = this.track(
         MeshBuilder.CreateTorus(
           `zoneDisc${i}`,
-          { diameter: zoneMarkerDiameter(zone), thickness: 0.6, tessellation: 32 },
+          { diameter: marker, thickness: 0.6, tessellation: 32 },
           scene,
         ),
       );
       disc.scaling.y = 0.03;
       disc.position.set(zone.x || 0, 0.02, zone.z || 0);
       const mat = this.track(new StandardMaterial(`zoneDiscMat${i}`, scene));
-      mat.emissiveColor = hex(0x4ade80);
+      mat.emissiveColor = hex(ZONE_COLOR);
       mat.disableLighting = true;
       mat.alpha = 0.4;
       disc.material = mat;
-      this.zoneDiscs.push(disc);
+      // 編號牌掛在不縮放的節點上（disc 的 y 被壓扁了），放在地面圈旁邊
+      const node = this.track(new TransformNode(`zoneNode${i}`, scene));
+      node.position.set(zone.x || 0, 0, zone.z || 0);
+      const badge = this.makeBadge(scene, `zoneNum${i}`, node);
+      if (badge) badge.mesh.position.set(marker / 2 + 0.45, 0.8, 0);
+      this.zones.push({
+        disc,
+        mat,
+        badge: badge?.mesh ?? null,
+        badgeTex: badge?.tex ?? null,
+        badgeKey: '',
+        point: { x: zone.x || 0, z: zone.z || 0 },
+      });
     });
+    this.refreshZoneGuide();
     SceneLedger.set('level', this.disposables.length);
   }
 
@@ -257,7 +298,11 @@ export class LevelVisuals {
       if (!ring.badge) continue;
       const side = ring.diameter / 2 + 0.55;
       const points = this.rings.map((r) => ({ x: r.node.position.x, z: r.node.position.z }));
-      ring.badge.position.x = side + RingGuide.lateralSpread(ring.index, points);
+      // 沿圈面往外放：圈轉了角度，編號牌也跟著擺到圈的側邊，不會擋在穿越路線上
+      const dir = RingGuide.planeDir(ring.yawDeg);
+      const dist = side + RingGuide.lateralSpread(ring.index, points);
+      ring.badge.position.x = dir.x * dist;
+      ring.badge.position.z = dir.z * dist;
       ring.badge.position.y = 0.35;
     }
   }
@@ -265,14 +310,14 @@ export class LevelVisuals {
   /** 編號牌掛在圈旁邊，永遠面向鏡頭。名稱不以 ring 開頭，避免和 torus 的卸載檢查混在一起。 */
   private makeBadge(
     scene: Scene,
-    index: number,
+    name: string,
     parent: TransformNode,
   ): { mesh: Mesh; tex: DynamicTexture } | null {
     if (!RingBadgeArt.available()) return null;
     try {
       const tex = this.track(
         new DynamicTexture(
-          `courseNumTex${index}`,
+          `${name}Tex`,
           { width: BADGE_PX, height: BADGE_PX },
           scene,
           false,
@@ -280,14 +325,14 @@ export class LevelVisuals {
       );
       tex.hasAlpha = true;
       const mesh = this.track(
-        MeshBuilder.CreatePlane(`courseNum${index}`, { width: BADGE_METERS, height: BADGE_METERS }, scene),
+        MeshBuilder.CreatePlane(name, { width: BADGE_METERS, height: BADGE_METERS }, scene),
       );
       mesh.parent = parent;
       mesh.position.y = 0.35;
       mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
       mesh.renderingGroupId = 1;
       mesh.isPickable = false;
-      const mat = this.track(new StandardMaterial(`courseNumMat${index}`, scene));
+      const mat = this.track(new StandardMaterial(`${name}Mat`, scene));
       mat.diffuseTexture = tex;
       mat.emissiveColor = Color3.White();
       mat.disableLighting = true;
@@ -339,18 +384,40 @@ export class LevelVisuals {
     this.refreshGuide();
   }
 
-  private highlightZone(index: number): void {
-    const disc = this.zoneDiscs[index];
-    if (!disc) return;
-    const mat = disc.material as StandardMaterial;
-    mat.emissiveColor = hex(0x10b981);
-    mat.alpha = 0.8;
+  /**
+   * 任務點和圈一樣標出下一步：下一個金色、做完變灰、還沒輪到維持綠色。
+   * 同一地點有好幾步（八字交叉點、回到原點）只顯示一個，見 RingGuide.shownAtSameSpot。
+   */
+  private refreshZoneGuide(): void {
+    const done = levelState.zoneProgress;
+    const shown = RingGuide.shownAtSameSpot(
+      this.zones.map((z) => z?.point ?? null),
+      done,
+    );
+    this.zones.forEach((z, i) => {
+      if (!z) return;
+      z.disc.setEnabled(shown[i]!);
+      z.badge?.setEnabled(shown[i]!);
+      if (!shown[i]) return;
+      const phase = RingGuide.phase(done, i);
+      const look = RingGuide.look(phase);
+      z.mat.emissiveColor = hex(look.color ?? ZONE_COLOR);
+      z.mat.alpha = ZONE_ALPHA[phase];
+      if (!z.badge || !z.badgeTex) return;
+      z.badge.scaling.setAll(look.badgeScale);
+      const label = RingGuide.label(i);
+      const key = `${label}|${look.badgeFill}|${look.badgeInk}|${look.pulse}`;
+      if (z.badgeKey === key) return;
+      z.badgeKey = key;
+      RingBadgeArt.paint(z.badgeTex.getContext() as CanvasRenderingContext2D, label, look);
+      z.badgeTex.update();
+    });
   }
 
-  /** 每 tick：圈自轉 + 上下漂浮（與 core 判定同一公式）。spin 為 0 的關卡不會轉。 */
+  /** 每 tick：圈自轉 + 上下漂浮（與 core 判定同一公式，用絕對模擬 tick）。spin 為 0 的關卡不會轉。 */
   tick(nowMs: number): void {
     for (const r of this.rings) {
-      r.spinNode.rotation.y += r.spin;
+      r.spinNode.rotation.y = RingPassJudge.yawRadAt(r.yawDeg, r.spin, simTime.tick);
       r.node.position.y = ringWorldY(r.index, r.baseY, nowMs, r.bobAmp);
       if (!r.pulse) continue;
       const wave = 0.82 + 0.18 * Math.sin(nowMs * 0.005);

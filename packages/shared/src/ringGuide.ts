@@ -52,6 +52,67 @@ export class RingGuide {
   }
 
   /**
+   * 好幾個步驟在同一個地點（例如八字交叉點、回到原點）時，那裡只顯示一個標記：
+   * 還有沒做完的 → 編號最小的那個；全部做完 → 最後一個。回傳每一項要不要顯示。
+   */
+  static shownAtSameSpot(
+    points: readonly ({ x: number; z: number } | null)[],
+    done: readonly boolean[],
+    spotM = 0.3,
+  ): boolean[] {
+    const shown = points.map(() => false);
+    const grouped = points.map(() => false);
+    points.forEach((p, i) => {
+      if (!p || grouped[i]) return;
+      const group: number[] = [];
+      points.forEach((q, j) => {
+        if (q && !grouped[j] && Math.abs(q.x - p.x) <= spotM && Math.abs(q.z - p.z) <= spotM) {
+          group.push(j);
+          grouped[j] = true;
+        }
+      });
+      const leader = group.find((j) => !done[j]) ?? group[group.length - 1]!;
+      shown[leader] = true;
+    });
+    return shown;
+  }
+
+  /**
+   * 圈面沿線的水平方向（擺放角度 yawDeg 時，機身右方）。編號牌與編輯器的圈面線都沿這個方向。
+   * yaw=0 → (+1, 0)，與 core/droneState rightVec 同一套。
+   */
+  static planeDir(yawDeg: number): { x: number; z: number } {
+    const r = (yawDeg * Math.PI) / 180;
+    return { x: Math.cos(r), z: -Math.sin(r) };
+  }
+
+  /**
+   * 依飛行順序讓圈面對著路線：第 i 圈朝「前一點 → 下一點」的方向（度，取整數）。
+   * 第一圈的前一點是起飛墊；最後一圈用「前一圈 → 自己」。
+   * 繞圈、蛇行、八字都適用；算出來的是起點，老師可再微調。
+   */
+  static routeYaw(
+    rings: readonly { x: number; z: number }[],
+    index: number,
+    start: { x: number; z: number } = { x: 0, z: 0 },
+  ): number {
+    const self = rings[index];
+    if (!self) return 0;
+    const prev = index > 0 ? rings[index - 1]! : start;
+    const next = rings[index + 1] ?? self;
+    let fx = next.x - prev.x;
+    let fz = next.z - prev.z;
+    if (Math.hypot(fx, fz) < 1e-6) {
+      fx = self.x - prev.x;
+      fz = self.z - prev.z;
+    }
+    if (Math.hypot(fx, fz) < 1e-6) return 0;
+    // 機頭方向 forward = (-sinθ, -cosθ) → θ = atan2(-fx, -fz)
+    const deg = Math.round((Math.atan2(-fx, -fz) * 180) / Math.PI);
+    return deg === -180 ? 180 : deg + 0;
+  }
+
+  /**
    * 三種外觀要能一眼分開。
    * aligned 只作用在下一個圈：旋轉鑽圈對準機頭時改成綠色，沿用既有提示。
    */
