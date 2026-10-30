@@ -16,7 +16,7 @@ import {
   LinesMesh,
   Texture,
 } from '@babylonjs/core';
-import { EDITOR_WORLD, type SceneEnv } from '@creafly/shared';
+import { EDITOR_WORLD, floorRect, floorSizeM, type SceneEnv } from '@creafly/shared';
 import { droneState, HOME_POSITION } from '../core/droneState';
 import { levelState } from '../core/level';
 import { bus } from '../core/events';
@@ -237,8 +237,9 @@ function buildGrid(scene: Scene): void {
 /** 地板貼圖世代：切關後舊的非同步載入不得再把地板打開 */
 let floorGeneration = 0;
 
-/** 關卡場地地板：有圖才顯示，鋪在中央 EDITOR_WORLD 公尺。 */
-export function applyLevelFloor(scene: Scene, url: string | null): void {
+/** 關卡場地地板：有圖才顯示，置中鋪在原點，長邊預設 EDITOR_WORLD 公尺。 */
+/** sizeM：照片長邊的實際長度（LevelDef.floorSize）；照片比例一律保留，長方形場地不壓成正方形。 */
+export function applyLevelFloor(scene: Scene, url: string | null, sizeM?: number): void {
   const gen = ++floorGeneration;
   let mesh = scene.getMeshByName('levelFloor');
   let mat = scene.getMaterialByName('levelFloorMat') as StandardMaterial | null;
@@ -275,6 +276,10 @@ export function applyLevelFloor(scene: Scene, url: string | null): void {
         tex.dispose();
         return;
       }
+      const base = tex.getBaseSize();
+      const { width, depth } = floorRect(base.width, base.height, floorSizeM(sizeM));
+      mesh.scaling.x = width / EDITOR_WORLD;
+      mesh.scaling.z = depth / EDITOR_WORLD;
       mesh.metadata = { ...(mesh.metadata ?? {}), hasFloor: true };
       mesh.isVisible = true;
       if (previous && previous !== tex) previous.dispose();

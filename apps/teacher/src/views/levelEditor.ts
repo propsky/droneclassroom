@@ -6,6 +6,9 @@ import {
   EDITOR_HALF,
   EDITOR_MAX_Y,
   EDITOR_WORLD,
+  FLOOR_SIZE_MIN,
+  floorRect,
+  floorSizeM,
   heightHueColor,
   isoCanvasToWorld,
   isoDepthKey,
@@ -209,8 +212,11 @@ export function openLevelEditor(
 
           <section class="lvl-floor">
             <h3 class="lvl-kit-title">場地底圖</h3>
-            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。場地底圖會鋪在關卡中央 30×30 公尺的地面。</p>
+            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。照片保持原比例鋪在關卡中央，長邊預設 30 公尺。</p>
             <img id="le-floor-thumb" class="lvl-floor-preview" alt="場地底圖預覽" hidden>
+            <label class="lvl-floor-size" id="le-floor-size-row" hidden>照片長邊實際
+              <input id="le-floor-size" type="number" min="${FLOOR_SIZE_MIN}" max="${WORLD}" step="0.5" placeholder="${WORLD}" inputmode="decimal">
+              公尺</label>
             <div class="lvl-floor-actions">
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-pick">上傳場地底圖</button>
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-clear" hidden>移除場地底圖</button>
@@ -432,10 +438,60 @@ export function openLevelEditor(
     ctx.fill();
   };
 
+  /** 圈的編號牌：深底白字，鋪在任何底圖上都看得清楚；依序穿圈時金框。號碼＝學生端圈上的號碼。 */
+  const drawRingBadge = (px: number, py: number, index: number): void => {
+    const text = RingGuide.label(index);
+    ctx.font = 'bold 12px sans-serif';
+    const r = Math.max(10, ctx.measureText(text).width / 2 + 5);
+    ctx.fillStyle = 'rgba(15,23,42,0.9)';
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = level.ringOrder === 'sequential' ? '#fbbf24' : 'rgba(226,232,240,0.75)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#f8fafc';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, px, py + 0.5);
+    ctx.textAlign = 'start';
+    ctx.textBaseline = 'alphabetic';
+  };
+
+  /** 依序穿圈：在地面畫出飛行路線（起飛墊 → 1 → 2 … → 返航），每段中間有箭頭指方向。 */
+  const drawRingRoute = (): void => {
+    const rings = level.rings ?? [];
+    if (level.ringOrder !== 'sequential' || rings.length === 0) return;
+    const home = { x: 0, z: 0 };
+    const stops = [home, ...rings, ...(level.returnHome ? [home] : [])].map((p) => project(p.x, p.z, 0));
+    ctx.strokeStyle = 'rgba(251,191,36,0.95)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    stops.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#fbbf24';
+    for (let i = 1; i < stops.length; i++) {
+      const [ax, ay] = stops[i - 1]!;
+      const [bx, by] = stops[i]!;
+      if (Math.hypot(bx - ax, by - ay) < 24) continue;
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      const a = Math.atan2(by - ay, bx - ax);
+      ctx.beginPath();
+      ctx.moveTo(mx + Math.cos(a) * 7, my + Math.sin(a) * 7);
+      ctx.lineTo(mx + Math.cos(a + 2.5) * 7, my + Math.sin(a + 2.5) * 7);
+      ctx.lineTo(mx + Math.cos(a - 2.5) * 7, my + Math.sin(a - 2.5) * 7);
+      ctx.closePath();
+      ctx.fill();
+    }
+  };
+
   const drawIsoFloor = (): void => {
     const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
     const gridStep = snapStep >= 1 ? 5 : 2.5;
-    const { cx, cy, tileW, tileH } = isoLayout(size, size);
+    const { cx, cy } = isoLayout(size, size);
     const ground = (x: number, z: number): [number, number] => {
       const [px, py] = isoGroundToCanvas(x, z, size, size);
       return [px + ox, py + oy];
@@ -461,22 +517,17 @@ export function openLevelEditor(
     ctx.fillStyle = 'rgba(30,45,65,0.55)';
     ctx.fill();
     if (floorImg && floorImg.naturalWidth > 0) {
-      // 矩形圖沿 2.5D 的 X/Z 斜軸貼上菱形，預設視圖才看得到剛上傳的場地底圖。
+      // 照片沿 2.5D 的 X/Z 斜軸貼上，保持原比例（長方形場地不壓成正方形）。
       ctx.save();
       traceDiamond();
       ctx.clip();
-      const halfW = tileW * 0.5;
-      const halfH = tileH * 0.5;
       const imgW = floorImg.naturalWidth;
       const imgH = floorImg.naturalHeight;
-      const local = new DOMMatrix([
-        (WORLD * halfW) / imgW,
-        (WORLD * halfH) / imgW,
-        -(WORLD * halfW) / imgH,
-        (WORLD * halfH) / imgH,
-        ox + cx,
-        oy + cy - WORLD * halfH,
-      ]);
+      const { width, depth } = floorRect(imgW, imgH, floorSizeM(level.floorSize));
+      const [x0, y0] = ground(-width / 2, -depth / 2);
+      const [xu, yu] = ground(width / 2, -depth / 2);
+      const [xv, yv] = ground(-width / 2, depth / 2);
+      const local = new DOMMatrix([(xu - x0) / imgW, (yu - y0) / imgW, (xv - x0) / imgH, (yv - y0) / imgH, x0, y0]);
       ctx.setTransform(ctx.getTransform().multiply(local));
       ctx.drawImage(floorImg, 0, 0);
       ctx.restore();
@@ -604,7 +655,10 @@ export function openLevelEditor(
     ctx.fillRect(0, 0, w, h);
     const frame = fieldFrame(w, h);
     if (viewMode === 'top' && floorImg && floorImg.naturalWidth > 0) {
-      ctx.drawImage(floorImg, frame.ox, frame.oy, frame.size, frame.size);
+      const { width, depth } = floorRect(floorImg.naturalWidth, floorImg.naturalHeight, floorSizeM(level.floorSize));
+      const [x1, z1] = project(-width / 2, -depth / 2);
+      const [x2, z2] = project(width / 2, depth / 2);
+      ctx.drawImage(floorImg, x1, z1, x2 - x1, z2 - z1);
     }
 
     if (viewMode === 'top') {
@@ -652,6 +706,14 @@ export function openLevelEditor(
       (level.obstacles ?? []).forEach((obs) => drawIsoStem(obs.x, obs.z, obs.y));
       (level.balloons ?? []).forEach((b) => drawIsoStem(b.x, b.z, b.y));
       (level.rings ?? []).forEach((ring) => drawIsoStem(ring.x, ring.z, ring.y));
+    }
+    drawRingRoute();
+    // 2.5D 的圈畫在空中、會偏離底圖上的位置；編號牌釘在圈正下方的地面，順序對得上場地標線
+    if (viewMode === 'iso') {
+      (level.rings ?? []).forEach((ring, i) => {
+        const [gx, gy] = project(ring.x, ring.z, 0);
+        drawRingBadge(gx, gy, i);
+      });
     }
 
     const [hx, hz] = project(0, 0, 0);
@@ -793,9 +855,7 @@ export function openLevelEditor(
         ctx.moveTo(rx, rz);
         ctx.lineTo(tx, tz);
         ctx.stroke();
-        ctx.fillStyle = '#e2e8f0';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(ring.label ?? String(i + 1), rx - 4, rz + 3);
+        if (viewMode !== 'iso') drawRingBadge(rx, rz, i);
         ctx.font = '8px monospace';
         ctx.fillStyle = '#cbd5e1';
         ctx.fillText(`${ring.y}m`, rx - 10, rz - rPx - 4);
@@ -1344,8 +1404,14 @@ export function openLevelEditor(
   q<HTMLInputElement>('#le-name').addEventListener('input', scheduleSave);
   q<HTMLInputElement>('#le-hud').addEventListener('input', scheduleSave);
   q<HTMLTextAreaElement>('#le-intro').addEventListener('input', scheduleSave);
-  q<HTMLInputElement>('#le-return').addEventListener('change', scheduleSave);
-  q<HTMLInputElement>('#le-ring-order').addEventListener('change', scheduleSave);
+  // 這兩個會改地圖上的順序路線（金色虛線、返航段），要馬上重畫，不等存檔
+  const syncRouteOption = (): void => {
+    syncLevelFromForm();
+    draw();
+    scheduleSave();
+  };
+  q<HTMLInputElement>('#le-return').addEventListener('change', syncRouteOption);
+  q<HTMLInputElement>('#le-ring-order').addEventListener('change', syncRouteOption);
   q<HTMLInputElement>('#le-freeplay').addEventListener('change', scheduleSave);
   q<HTMLInputElement>('#le-draw').addEventListener('change', scheduleSave);
 
@@ -1695,6 +1761,8 @@ export function openLevelEditor(
     const clearBtn = q<HTMLButtonElement>('#le-floor-clear');
     const pickBtn = q<HTMLButtonElement>('#le-floor-pick');
     const url = level.floorImage;
+    q<HTMLElement>('#le-floor-size-row').hidden = !url;
+    q<HTMLInputElement>('#le-floor-size').value = level.floorSize != null ? String(floorSizeM(level.floorSize)) : '';
     if (url) {
       thumb.hidden = false;
       thumb.src = floorSrc(url);
@@ -1760,11 +1828,21 @@ export function openLevelEditor(
       })
       .catch((e) => toast(errText(e, '上傳場地底圖'), 'error'));
   });
+  q<HTMLInputElement>('#le-floor-size').addEventListener('change', () => {
+    const input = q<HTMLInputElement>('#le-floor-size');
+    // 空白＝預設 30m，不寫進關卡
+    if (input.value.trim() === '') delete level.floorSize;
+    else level.floorSize = floorSizeM(Number(input.value));
+    input.value = level.floorSize != null ? String(level.floorSize) : '';
+    draw();
+    scheduleSave();
+  });
   q<HTMLButtonElement>('#le-floor-clear').addEventListener('click', () => {
     void flushSave()
       .then(() => deleteLevelFloor(levelPkLocal))
       .then(() => {
         delete level.floorImage;
+        delete level.floorSize;
         loadFloorPreview();
         scheduleSave();
       })

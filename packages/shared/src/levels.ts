@@ -31,8 +31,8 @@ export interface RingDef {
   /** 每 tick 自轉角速度；缺省 0.015 */
   spin?: number;
   /**
-   * 擺放角度（度，只影響外觀）。和機頭 yaw 同一套：0 = 圈面朝前後，機頭朝 -Z 正好穿過；
-   * 正值往左轉。有自轉時這是起始角度。穿過判定只看離圈心多遠，不看角度。
+   * 擺放角度（度）。和機頭 yaw 同一套：0 = 圈面朝前後，機頭朝 -Z 正好穿過；
+   * 正值往左轉。有自轉時這是起始角度。穿過判定要從圈面中間穿過（RingPassJudge），所以角度會影響判定。
    */
   yaw?: number;
   /** 上下漂浮幅度 m；0 = 關閉；缺省 0.2 */
@@ -164,6 +164,8 @@ export interface LevelDef {
    * 圖片本體在伺服器，不放進 JSON。
    */
   floorImage?: string;
+  /** 場地底圖長邊的實際長度（公尺，5～30）。沒寫＝長邊鋪滿 30m；照片比例一律保留。 */
+  floorSize?: number;
   /** 目標圖形參考線（俯視 [x,z] 折線） */
   guide?: [number, number][];
   penColors?: string[];

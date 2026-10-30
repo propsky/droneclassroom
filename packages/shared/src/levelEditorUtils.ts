@@ -29,6 +29,25 @@ export function snapClampXZ(
   };
 }
 
+/** 場地底圖長邊可設的實際長度（公尺）；最長就是整個編輯場地。 */
+export const FLOOR_SIZE_MIN = 5;
+
+/** 底圖長邊的實際長度：沒設或不合理＝鋪滿 30m 場地。 */
+export function floorSizeM(size: unknown): number {
+  if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return EDITOR_WORLD;
+  return Math.max(FLOOR_SIZE_MIN, Math.min(EDITOR_WORLD, size));
+}
+
+/**
+ * 底圖在地面上的大小：保持照片原比例，長邊＝sizeM，置中在原點。
+ * 照片寬對世界 X、高對世界 Z（上方＝-Z 前方）。長方形場地不會被壓成正方形。
+ */
+export function floorRect(imgW: number, imgH: number, sizeM: number = EDITOR_WORLD): { width: number; depth: number } {
+  if (!(imgW > 0) || !(imgH > 0)) return { width: sizeM, depth: sizeM };
+  const long = Math.max(imgW, imgH);
+  return { width: (imgW / long) * sizeM, depth: (imgH / long) * sizeM };
+}
+
 /** 編輯器高度上限（與模擬器教室空間一致） */
 export const EDITOR_MAX_Y = 8;
 

@@ -186,7 +186,7 @@ bus.on('level-loaded', ({ level }) => {
   const floor = level.floorImage;
   const floorUrl =
     floor && floor.startsWith('/api/levels/') ? `${API_BASE}${floor}` : null;
-  applyLevelFloor(world.scene, floorUrl);
+  applyLevelFloor(world.scene, floorUrl, level.floorSize);
 });
 // 離開關卡（進大亂鬥／足球／換關）：收起上一關地板與展場霧，避免貼圖晚到又把舊地板打開
 bus.on('level-cleared', () => {

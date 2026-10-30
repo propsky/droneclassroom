@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampWorld, heightHueColor, isoCanvasToWorld, isoDepthKey, isoGroundToCanvas, isoLayout, isoWorldToCanvas, mapPointerToContent, MAP_ZOOM_MAX, MAP_ZOOM_MIN, refitMapZoom, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas, zoomMapAtPointer } from './levelEditorUtils';
+import { clampWorld, floorRect, floorSizeM, FLOOR_SIZE_MIN, heightHueColor, isoCanvasToWorld, isoDepthKey, isoGroundToCanvas, isoLayout, isoWorldToCanvas, mapPointerToContent, MAP_ZOOM_MAX, MAP_ZOOM_MIN, refitMapZoom, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas, zoomMapAtPointer } from './levelEditorUtils';
 
 describe('levelEditorUtils', () => {
   it('snapWorld 1m 格', () => {
@@ -101,5 +101,30 @@ describe('levelEditorUtils', () => {
     expect(at4.x).toBeCloseTo(2, 1);
     expect(at4.z).toBeCloseTo(-3, 1);
     expect(at2.x).not.toBeCloseTo(at4.x, 0);
+  });
+});
+
+describe('場地底圖比例', () => {
+  it('長方形照片保持原比例：長邊鋪滿 30m，短邊照比例', () => {
+    expect(floorRect(1600, 900)).toEqual({ width: 30, depth: 16.875 });
+    expect(floorRect(900, 1600)).toEqual({ width: 16.875, depth: 30 });
+    expect(floorRect(1000, 1000)).toEqual({ width: 30, depth: 30 });
+  });
+
+  it('可設長邊實際長度，短邊跟著縮', () => {
+    expect(floorRect(2000, 1000, 20)).toEqual({ width: 20, depth: 10 });
+  });
+
+  it('實際長度沒設或超出範圍：沒設＝30m，限制在 5～30m', () => {
+    expect(floorSizeM(undefined)).toBe(30);
+    expect(floorSizeM(0)).toBe(30);
+    expect(floorSizeM(Number.NaN)).toBe(30);
+    expect(floorSizeM(2)).toBe(FLOOR_SIZE_MIN);
+    expect(floorSizeM(50)).toBe(30);
+    expect(floorSizeM(22.5)).toBe(22.5);
+  });
+
+  it('圖片還沒載入（寬高 0）：先當正方形', () => {
+    expect(floorRect(0, 0, 25)).toEqual({ width: 25, depth: 25 });
   });
 });

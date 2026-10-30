@@ -206,7 +206,7 @@ export function propsPanelHtml(): string {
                   <label class="field-label" for="le-ring-yaw">擺放角度（度，0 = 圈面朝前方，正值往左轉）</label>
                   <input id="le-ring-yaw" type="number" step="15" min="-180" max="180" class="mono">
                   <button type="button" class="btn btn-ghost btn-sm" id="le-ring-route">全部圈依路線轉向</button>
-                  <p class="note">只影響外觀，穿過判定看離圈心多遠。依路線轉向會照飛行順序把每個圈轉成面對路線，並停止自轉。</p>
+                  <p class="note">要從圈面中間穿過才算（正反兩面都算），所以角度會影響能不能過。依路線轉向會照飛行順序把每個圈轉成面對路線，並停止自轉。</p>
                 </div>
                 <div class="field" id="le-face-wrap" hidden>
                   <label class="field-label" for="le-face-yaw">機頭朝向 yaw（度，空=不限）</label>

@@ -1586,6 +1586,9 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
   background: var(--bg-3);
 }
 .lvl-floor-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lvl-floor-size { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); }
+.lvl-floor-size[hidden] { display: none; }
+.lvl-floor-size input { width: 5.5em; }
 #le-order-wrap { margin-bottom: var(--sp-3); }
 @media (max-width: 860px) {
   .lvl-studio-body {
