@@ -5,6 +5,7 @@ export * from './teacherDispatch';
 export * from './levelKit';
 export * from './levelGoalPresets';
 export * from './levelEditorUtils';
+export * from './flightArea';
 export * from './levelObjectDefaults';
 export * from './protocol';
 export * from './taipeiSoccer';

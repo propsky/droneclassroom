@@ -289,7 +289,7 @@ export class LevelVisuals {
   }
 
   /**
-   * 編號放在自己那圈的右側。
+   * 編號放在自己那圈的側邊、路線外側（RingGuide.badgeDir）。
    * 若好幾圈幾乎排在同一條直線（1-4），再依順序往右錯開，避免編號疊在同一個洞裡。
    * 位置岔開的關卡（1-5）不錯開，編號才會留在自己的圈旁邊。
    */
@@ -297,9 +297,9 @@ export class LevelVisuals {
     for (const ring of this.rings) {
       if (!ring.badge) continue;
       const side = ring.diameter / 2 + 0.55;
-      const points = this.rings.map((r) => ({ x: r.node.position.x, z: r.node.position.z }));
+      const points = this.rings.map((r) => ({ x: r.node.position.x, z: r.node.position.z, yawDeg: r.yawDeg }));
       // 沿圈面往外放：圈轉了角度，編號牌也跟著擺到圈的側邊，不會擋在穿越路線上
-      const dir = RingGuide.planeDir(ring.yawDeg);
+      const dir = RingGuide.badgeDir(ring.index, points);
       const dist = side + RingGuide.lateralSpread(ring.index, points);
       ring.badge.position.x = dir.x * dist;
       ring.badge.position.z = dir.z * dist;

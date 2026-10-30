@@ -415,6 +415,24 @@ async def publish_teacher_level(
     )
 
 
+@router.delete("/api/teacher/levels/{level_pk}")
+async def delete_teacher_level(
+    level_pk: int, teacher: CurrentTeacher, session: DbSession
+) -> dict[str, Literal[True]]:
+    """刪除自己的草稿。場地圖跟著刪（ON DELETE CASCADE）。
+
+    已發布的關卡可能在班級目錄或學生紀錄裡，不能刪。
+    """
+    lvl = await session.get(Level, level_pk)
+    if lvl is None or lvl.owner_teacher_id != teacher.id or lvl.scope != "teacher":
+        raise HTTPException(status_code=404, detail="關卡不存在")
+    if lvl.status != "draft":
+        raise HTTPException(status_code=409, detail="已發布的關卡不能刪除，只能刪草稿")
+    await session.delete(lvl)
+    await session.commit()
+    return {"ok": True}
+
+
 # ---------- 老師自訂素材庫 ----------
 
 

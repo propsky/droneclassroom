@@ -2,6 +2,7 @@
 // 行為對齊 legacy main.js §4 / §12（checkRingCollisions / checkPassZones / checkBalloons）。
 import type { LevelDef, BalloonDef } from '@creafly/shared';
 import {
+  FlightArea,
   isChapterDef,
   signedYawDiffDeg,
   PREVIEW_LEVEL_ID,
@@ -26,7 +27,7 @@ import {
 } from '@creafly/shared';
 import { readPreviewLevel } from '../preview';
 import { droneState, resetDroneState, HOME_POSITION, flags, simTime } from './droneState';
-import { setSolidObstacles } from './physics';
+import { setFlightBounds, setSolidObstacles } from './physics';
 import { bus, toast, sound, stateHud } from './events';
 import { finalizeRecording, recordAction } from './recordingSession';
 import { releasePauseForSwitch } from './pause';
@@ -244,6 +245,7 @@ export function bootstrapLevelForReplay(level: LevelDef): void {
       .filter((o) => obstacleIsCollidable(o))
       .map((o) => ({ x: o.x, y: o.y, z: o.z, half: o.size / 2 })),
   );
+  setFlightBounds(FlightArea.of(level));
   resetDroneState();
   samplePose();
 }
@@ -284,6 +286,7 @@ export function applyLoadLevel(levelId: string): void {
       .filter((o) => obstacleIsCollidable(o))
       .map((o) => ({ x: o.x, y: o.y, z: o.z, half: o.size / 2 })),
   );
+  setFlightBounds(FlightArea.of(level));
 
   resetDroneState();
   samplePose();
@@ -318,6 +321,7 @@ export function clearLevel(): void {
   lastFaceAligned = null;
   lastFaceRing = -1;
   setSolidObstacles([]);
+  setFlightBounds(null);
   samplePose();
   // 清飛行軌跡（進大亂鬥 / 足球的唯一共同出口在這裡統一發，呼叫端不必各自補）；
   // 墨水線與參考虛線由 pen.ts / render 端監聽 level-cleared 清除

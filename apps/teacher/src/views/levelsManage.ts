@@ -5,6 +5,7 @@ import {
   ApiError,
   assignToCatalog,
   createTeacherLevel,
+  deleteTeacherLevel,
   fetchTeacherLevel,
   fetchTeacherLevels,
   fetchTeamCatalog,
@@ -13,6 +14,7 @@ import {
   publishTeacherLevel,
 } from '../api';
 import { publishAndAddToCatalog } from '../catalogFlow';
+import { clearDraftBackup } from '../levelDraftBackup';
 import { downloadLevelJson, pickAndParseLevelJson } from '../levelIo';
 import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
@@ -155,6 +157,10 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
         const editBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="edit" data-id="${l.id}">編輯</button>`;
         const previewBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="preview" data-id="${l.id}">${ICONS.play}試飛</button>`;
         const exportBtn = `<button type="button" class="btn btn-ghost btn-sm" data-act="export" data-id="${l.id}">匯出</button>`;
+        const deleteBtn =
+          l.status === 'draft'
+            ? `<button type="button" class="btn btn-danger btn-sm" data-act="delete" data-id="${l.id}" data-title="${esc(l.title)}">刪除</button>`
+            : '';
         const inCatalog = catalog.some((c) => c.levelId === l.levelId);
         const addBtn =
           l.status === 'published' && teamId && !inCatalog
@@ -163,7 +169,7 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
         return `<tr>
           <td><span class="mono">${esc(l.levelId)}</span> ${esc(l.title)}</td>
           <td>${statusTag(l.status)}</td>
-          <td class="right lvl-actions">${editBtn}${previewBtn}${exportBtn}${publishBtn}${addBtn}</td>
+          <td class="right lvl-actions">${editBtn}${previewBtn}${exportBtn}${publishBtn}${addBtn}${deleteBtn}</td>
         </tr>`;
       })
       .join('');
@@ -394,6 +400,21 @@ export function mountLevelsManage(host: HTMLElement, opts: LevelsManageOptions):
           toast('已匯出 JSON', 'success');
         })
         .catch((e) => toast(errText(e, '匯出'), 'error'));
+    } else if (act === 'delete') {
+      const id = Number(btn.dataset['id']);
+      if (!confirm(`確定刪除草稿「${btn.dataset['title'] ?? ''}」？刪除後無法復原，場地底圖也會一起刪除。`)) return;
+      btn.disabled = true;
+      void deleteTeacherLevel(id)
+        .then(() => {
+          clearDraftBackup(id);
+          toast('已刪除草稿', 'success');
+          void loadLibrary();
+        })
+        .catch((e) => {
+          btn.disabled = false;
+          const published = e instanceof ApiError && e.status === 409;
+          toast(published ? '已發布的關卡不能刪除，只能刪草稿' : errText(e, '刪除草稿'), 'error');
+        });
     } else if (act === 'add' && teamId) {
       const levelId = btn.dataset['lid']!;
       void assignToCatalog(teamId, {

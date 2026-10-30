@@ -29,8 +29,8 @@ export function snapClampXZ(
   };
 }
 
-/** 場地底圖長邊可設的實際長度（公尺）；最長就是整個編輯場地。 */
-export const FLOOR_SIZE_MIN = 5;
+/** 場地底圖長邊可設的實際長度（公尺）：最短 10m（再小圈和無人機會比場地還顯眼），最長就是整個編輯場地。 */
+export const FLOOR_SIZE_MIN = 10;
 
 /** 底圖長邊的實際長度：沒設或不合理＝鋪滿 30m 場地。 */
 export function floorSizeM(size: unknown): number {

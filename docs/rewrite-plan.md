@@ -124,6 +124,7 @@ HUD/面板以純 TS + DOM 元件實作，但**核心層已透過 event bus 與 U
 - [x] 固定時步物理 + 手動控制（鍵盤 / nipplejs / Gamepad 基本對映）
 - [x] 關卡系統：chapter1 全 7 關（rings / passZones / balloons / returnHome / faceYaw / 障礙 AABB）
   - 過關統一由 `TaskJudge`（completionJudge.ts）判定：關卡裡出現的任務（圈、任務點、氣球）全部做完 →（returnHome）降落起飛墊 → 只上報一次；程式模式不要求返航。圈可設擺放角度 `yaw`（沒寫時旋轉鑽圈面向 faceYaw）。穿圈由 `RingPassJudge` 判定：這一 tick 的移動線段要從圈內穿過圈面（正反方向都算，瞬移不算），圈的自轉角度用絕對模擬 tick 計算，判定、畫面、伺服器重播一致；編輯器可勾依序穿圈、調整圈與步驟順序、依路線轉向。範本：位置任務點一律封閉框；門框與繞柱附通過檢查框；重複範本已刪除（`levelKit.test.ts` 擋重複）
+  - 場地底圖保持照片比例，`floorSize`＝照片長邊實際公尺（10～30），編輯器可兩點量比例、物件可選擇跟著照片縮放。`flightBounds` 飛行範圍：`FlightArea.keepInside` 在 `resolveObstacleCollisions` 每 tick 擋住（手動、程式、伺服器重播一致），學生端畫紅框與半透明圍牆。老師可刪除自己的草稿（`DELETE /api/teacher/levels/{pk}`，已發布的回 409）
 - [x] 相機：第三人稱跟隨 + FPV
 - [x] Blockly 程式模式：Phase 1 積木全數 + cf_* API + 執行/停止（blockly v11 npm 包、media 本地化）
 - [x] HUD：狀態列 / 任務進度 / 過關 / toast / 關卡選單 / 登入

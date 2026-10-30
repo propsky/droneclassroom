@@ -15,6 +15,7 @@ import {
   distVec3,
   type Vec3,
 } from './droneState';
+import { FlightArea, type FlightBounds } from '@creafly/shared';
 import { toast, sound, stateHud } from './events';
 import { SimpleBackend, type PhysicsBackend } from './physicsBackend';
 import { recordAction } from './inputRecorder';
@@ -78,6 +79,18 @@ export function setSolidObstacles(list: SolidObstacle[]): void {
       { x: o.half, y: o.half, z: o.half },
     ),
   );
+}
+
+// 飛行範圍（關卡 flightBounds）：null＝不限。由 level 載入時設定，離開關卡清掉。
+let flightBounds: FlightBounds | null = null;
+let boundsHintAt = 0;
+
+export function setFlightBounds(bounds: FlightBounds | null): void {
+  flightBounds = bounds;
+}
+
+export function currentFlightBounds(): FlightBounds | null {
+  return flightBounds;
 }
 
 /** 目前註冊的實心 AABB 數量（離場後應為 0，或等於新關卡的實心障礙數） */
@@ -199,6 +212,14 @@ export function resolveObstacleCollisions(): void {
   // 這裡只修位置（不動速度 / 起降狀態、不播音效）：推出後的位置永遠不低於地板、不高於天花板。
   if (p.y < HOME_POSITION.y) p.y = HOME_POSITION.y;
   else if (p.y > CEILING_Y) p.y = CEILING_Y;
+  // 飛行範圍：最後才推，障礙推出後也不會跑到框外。手動、程式兩種模式都擋。
+  if (flightBounds && FlightArea.keepInside(p, v, flightBounds, DRONE_RADIUS) && droneState.isFlying) {
+    const now = performance.now();
+    if (now - boundsHintAt > 2000) {
+      boundsHintAt = now;
+      toast('已到場地邊界，往回飛吧', 'warning');
+    }
+  }
 }
 
 // =============================================================================

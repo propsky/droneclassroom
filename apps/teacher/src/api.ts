@@ -315,6 +315,14 @@ export function publishTeacherLevel(id: number): Promise<TeacherLevelBrief> {
   });
 }
 
+/** DELETE /api/teacher/levels/{id} — 刪除自己的草稿（已發布的回 409） */
+export function deleteTeacherLevel(id: number): Promise<{ ok: true }> {
+  return request<{ ok: true }>(`/api/teacher/levels/${id}`, {
+    method: 'DELETE',
+    auth: true,
+  });
+}
+
 /** GET /api/teacher/levels/{id} — 含 definition */
 export function fetchTeacherLevel(id: number): Promise<TeacherLevelDetail> {
   return request<TeacherLevelDetail>(`/api/teacher/levels/${id}`, { auth: true });

@@ -32,23 +32,33 @@ export class RingGuide {
   }
 
   /**
-   * 同一條直線上的圈，編號要往側面錯開（公尺）。
-   * 位置本來就分開的圈回 0，編號留在自己的圈旁邊。
+   * 照飛行順序前後接連排成一列、從這個圈看得到前面圈的洞（1-4 直線穿圈）時，
+   * 編號要往側面錯開（公尺），不然遠處的編號會疊在近處的洞裡。錯開量＝往前數有幾個圈連續排在同一列。
+   * 位置岔開、或只是剛好落在同一條線上但不是接連飛的圈（例如 8 字的 1 和 4）回 0，編號留在自己的圈旁邊。
    */
-  static lateralSpread(index: number, rings: readonly { x: number; z: number }[]): number {
+  static lateralSpread(index: number, rings: readonly { x: number; z: number; yawDeg?: number }[]): number {
     const self = rings[index];
     if (!self) return 0;
-    let stacked = false;
-    for (let i = 0; i < rings.length; i++) {
-      if (i === index) continue;
+    // 圈面法線（穿越方向）：和機頭 forward 同一套 (-sinθ, -cosθ)
+    const normal = (r: { yawDeg?: number }): [number, number] => {
+      const yaw = ((r.yawDeg ?? 0) * Math.PI) / 180;
+      return [-Math.sin(yaw), -Math.cos(yaw)];
+    };
+    // 另一個圈在這個圈的穿越方向上（偏離中線 < 1.2m、前後相隔 > 2m）
+    const inLine = (n: [number, number], dx: number, dz: number): boolean =>
+      Math.abs(dx * n[1] - dz * n[0]) < 1.2 && Math.abs(dx * n[0] + dz * n[1]) > 2;
+    let run = 0;
+    for (let i = index - 1; i >= 0; i--) {
       const other = rings[i];
-      if (!other) continue;
-      const dx = Math.abs(other.x - self.x);
-      const dz = Math.abs(other.z - self.z);
-      if (dx < 1.2 && dz > 2) stacked = true;
+      if (!other) break;
+      const dx = other.x - self.x;
+      const dz = other.z - self.z;
+      // 兩個圈都要面向這條線，才會隔著洞看到對方的編號
+      if (!inLine(normal(self), dx, dz) || !inLine(normal(other), dx, dz)) break;
+      run++;
     }
     // 3m：近處的圈在畫面上大約佔這個寬度，後面的編號才不會被它擋住。
-    return stacked ? index * 3 : 0;
+    return run * 3;
   }
 
   /**
@@ -84,6 +94,20 @@ export class RingGuide {
   static planeDir(yawDeg: number): { x: number; z: number } {
     const r = (yawDeg * Math.PI) / 180;
     return { x: Math.cos(r), z: -Math.sin(r) };
+  }
+
+  /**
+   * 編號牌放在圈的哪一側：沿圈面，朝整條路線中心的反方向（放在路線外側，不擋穿越路線、
+   * 也不會和對面圈的編號擠在中間）。在中心線上分不出內外的（直線穿圈）維持 planeDir 原方向。
+   */
+  static badgeDir(index: number, rings: readonly { x: number; z: number; yawDeg?: number }[]): { x: number; z: number } {
+    const self = rings[index];
+    if (!self) return { x: 1, z: 0 };
+    const dir = RingGuide.planeDir(self.yawDeg ?? 0);
+    const cx = rings.reduce((sum, r) => sum + r.x, 0) / rings.length;
+    const cz = rings.reduce((sum, r) => sum + r.z, 0) / rings.length;
+    const outward = (self.x - cx) * dir.x + (self.z - cz) * dir.z;
+    return outward < -1e-6 ? { x: -dir.x, z: -dir.z } : dir;
   }
 
   /**

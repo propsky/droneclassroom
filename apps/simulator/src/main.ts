@@ -39,6 +39,7 @@ import { DroneVisual } from './render/drone';
 import { LevelVisuals } from './render/levelMeshes';
 import { InkVisual } from './render/ink';
 import { GuideVisual } from './render/guide';
+import { FlightFenceVisual } from './render/flightFence';
 import { CameraRig } from './render/cameras';
 import { initHud, updateHudFrame } from './ui/hud';
 import { initOnboarding } from './ui/onboarding';
@@ -108,6 +109,8 @@ const levelVisuals = new LevelVisuals(world.scene);
 // 畫畫教室：墨水線與參考線（訂閱 event bus，載入 draw 關卡時自動生效）
 new InkVisual(world.scene);
 new GuideVisual(world.scene);
+// 飛行範圍：地面紅框＋半透明圍牆（關卡有 flightBounds 才畫）
+new FlightFenceVisual(world.scene);
 // 大亂鬥：他人分身 / 名牌 / 氣球 / 光環（訂閱 arena-entered / arena-exited 自動建與清）
 const arenaClones = new ArenaCloneVisuals(world.scene, droneVisual);
 // 大亂鬥 playground 場地：glb 場景 + Havok 網格碰撞（訂閱 arena-field-changed 自動載卸）

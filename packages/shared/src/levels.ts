@@ -138,6 +138,14 @@ export interface TopdownCamDef {
   lookAt: [number, number, number];
 }
 
+/** 飛行範圍（地面 X/Z 的框）。 */
+export interface FlightBounds {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+}
+
 export interface LevelDef {
   /** "章-關"，如 "1-0" */
   id: string;
@@ -164,8 +172,10 @@ export interface LevelDef {
    * 圖片本體在伺服器，不放進 JSON。
    */
   floorImage?: string;
-  /** 場地底圖長邊的實際長度（公尺，5～30）。沒寫＝長邊鋪滿 30m；照片比例一律保留。 */
+  /** 場地底圖長邊的實際長度（公尺，10～30）。沒寫＝長邊鋪滿 30m；照片比例一律保留。 */
   floorSize?: number;
+  /** 飛行範圍：無人機飛不出這個框（地面 X/Z，公尺）。沒寫＝不限。判定見 FlightArea。 */
+  flightBounds?: FlightBounds;
   /** 目標圖形參考線（俯視 [x,z] 折線） */
   guide?: [number, number][];
   penColors?: string[];

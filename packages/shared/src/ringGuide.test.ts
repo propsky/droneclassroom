@@ -41,6 +41,69 @@ describe('RingGuide', () => {
     expect(RingGuide.lateralSpread(2, split)).toBe(0);
   });
 
+  it('8 字：只是剛好落在同一條線上、不是接連飛的圈不錯開，編號留在自己的圈旁邊', () => {
+    // levelKit rings-figure8：1 和 3、4 和 6 的 x 相同；1 和 4、3 和 6 的 z 相同
+    const figure8 = [
+      { x: -3, z: -9, yawDeg: 90 },
+      { x: -6, z: -6, yawDeg: 180 },
+      { x: -3, z: -3, yawDeg: -90 },
+      { x: 3, z: -9, yawDeg: -90 },
+      { x: 6, z: -6, yawDeg: 180 },
+      { x: 3, z: -3, yawDeg: 90 },
+    ];
+    figure8.forEach((_, i) => expect(RingGuide.lateralSpread(i, figure8)).toBe(0));
+  });
+
+  it('1-5：轉彎處的圈面朝不同方向，彼此看不到對方的洞，編號都不錯開', () => {
+    const turn = [
+      { x: 5, z: 0, yawDeg: 270 },
+      { x: 5, z: -5, yawDeg: 0 },
+      { x: 0, z: -5, yawDeg: 90 },
+    ];
+    turn.forEach((_, i) => expect(RingGuide.lateralSpread(i, turn)).toBe(0));
+  });
+
+  it('編號牌放在路線外側：8 字左右兩圈的編號都朝外，不會擠在中間', () => {
+    const figure8 = [
+      { x: -3, z: -9, yawDeg: 90 },
+      { x: -6, z: -6, yawDeg: 180 },
+      { x: -3, z: -3, yawDeg: -90 },
+      { x: 3, z: -9, yawDeg: -90 },
+      { x: 6, z: -6, yawDeg: 180 },
+      { x: 3, z: -3, yawDeg: 90 },
+    ];
+    // 中心 (0, -6)：上排往 -Z、下排往 +Z、左右兩端往外
+    const d = figure8.map((_, i) => RingGuide.badgeDir(i, figure8));
+    expect(d[0]!.z).toBeLessThan(-0.99);
+    expect(d[3]!.z).toBeLessThan(-0.99);
+    expect(d[2]!.z).toBeGreaterThan(0.99);
+    expect(d[5]!.z).toBeGreaterThan(0.99);
+    expect(d[1]!.x).toBeLessThan(-0.99);
+    expect(d[4]!.x).toBeGreaterThan(0.99);
+  });
+
+  it('直線穿圈分不出內外：編號維持在原本那一側', () => {
+    const line = [
+      { x: 0, z: -5 },
+      { x: 0, z: -10 },
+      { x: 0, z: -15 },
+    ];
+    line.forEach((_, i) => expect(RingGuide.badgeDir(i, line)).toEqual(RingGuide.planeDir(0)));
+  });
+
+  it('前面先繞別處、後面才接一段直線：錯開量照這段直線算，不會被推到十幾公尺外', () => {
+    const rings = [
+      { x: 5, z: 0 },
+      { x: -5, z: 0 },
+      { x: 0, z: -3 },
+      { x: 0, z: -8 },
+      { x: 0, z: -13 },
+    ];
+    expect(RingGuide.lateralSpread(2, rings)).toBe(0);
+    expect(RingGuide.lateralSpread(3, rings)).toBe(3);
+    expect(RingGuide.lateralSpread(4, rings)).toBe(6);
+  });
+
   it('只有下一個圈會亮、會脈衝；對準時機頭提示改綠', () => {
     const next = RingGuide.look('next');
     const aligned = RingGuide.look('next', true);

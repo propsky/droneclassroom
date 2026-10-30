@@ -171,3 +171,49 @@ def test_自訂關卡加入班級目錄(db_client: TestClient) -> None:
     r = db_client.get(f"/api/teams/{team_id}/catalog", headers=headers)
     assert r.status_code == 200
     assert any(e["levelId"] == level_id for e in r.json()["entries"])
+
+
+# ---------- 刪除草稿 ----------
+
+FLOOR_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+
+@needs_db
+def test_刪除草稿_場地圖一起刪_列表與讀取都消失(db_client: TestClient) -> None:
+    headers = _bearer(_register(db_client, _email("delDraft"))["ticket"])
+    lvl = db_client.post(
+        "/api/teacher/levels", headers=headers, json={"title": "要刪的草稿"}
+    ).json()
+    r = db_client.post(
+        f"/api/teacher/levels/{lvl['id']}/floor",
+        headers=headers,
+        files={"file": ("floor.png", FLOOR_PNG, "image/png")},
+    )
+    assert r.status_code == 200, r.text
+
+    r = db_client.delete(f"/api/teacher/levels/{lvl['id']}", headers=headers)
+    assert r.status_code == 200, r.text
+    levels = db_client.get("/api/teacher/levels", headers=headers).json()["levels"]
+    assert not any(x["id"] == lvl["id"] for x in levels)
+    assert db_client.get(f"/api/teacher/levels/{lvl['id']}", headers=headers).status_code == 404
+    assert db_client.get(f"/api/levels/{lvl['levelId']}/floor").status_code == 404
+
+
+@needs_db
+def test_已發布的關卡不能刪(db_client: TestClient) -> None:
+    headers = _bearer(_register(db_client, _email("delPub"))["ticket"])
+    lvl = db_client.post("/api/teacher/levels", headers=headers, json={"title": "已發布"}).json()
+    r = db_client.post(f"/api/teacher/levels/{lvl['id']}/publish", headers=headers)
+    assert r.status_code == 200
+    r = db_client.delete(f"/api/teacher/levels/{lvl['id']}", headers=headers)
+    assert r.status_code == 409
+    assert db_client.get(f"/api/teacher/levels/{lvl['id']}", headers=headers).status_code == 200
+
+
+@needs_db
+def test_不能刪別的老師的草稿(db_client: TestClient) -> None:
+    owner = _bearer(_register(db_client, _email("delOwner"))["ticket"])
+    other = _bearer(_register(db_client, _email("delOther"))["ticket"])
+    lvl = db_client.post("/api/teacher/levels", headers=owner, json={"title": "別人的"}).json()
+    assert db_client.delete(f"/api/teacher/levels/{lvl['id']}", headers=other).status_code == 404
+    assert db_client.get(f"/api/teacher/levels/{lvl['id']}", headers=owner).status_code == 200

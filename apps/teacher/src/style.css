@@ -1589,6 +1589,12 @@ select optgroup { color: var(--text-1); background: var(--bg-1); }
 .lvl-floor-size { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); }
 .lvl-floor-size[hidden] { display: none; }
 .lvl-floor-size input { width: 5.5em; }
+.lvl-bounds-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); }
+.lvl-bounds-grid[hidden] { display: none; }
+.lvl-bounds-grid label { display: flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
+.lvl-bounds-grid input { width: 100%; min-width: 0; }
+.lvl-bounds-warn { color: var(--warn); }
+#le-floor-calib.active { border-color: var(--brand); color: var(--brand); }
 #le-order-wrap { margin-bottom: var(--sp-3); }
 @media (max-width: 860px) {
   .lvl-studio-body {

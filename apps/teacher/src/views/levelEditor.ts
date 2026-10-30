@@ -9,6 +9,8 @@ import {
   FLOOR_SIZE_MIN,
   floorRect,
   floorSizeM,
+  FlightArea,
+  type FlightBounds,
   heightHueColor,
   isoCanvasToWorld,
   isoDepthKey,
@@ -67,6 +69,7 @@ import { ICONS } from '../icons';
 import { openPreviewModal } from '../preview';
 import { toast } from '../toast';
 import { openLevelGoalWizard } from './levelGoalWizard';
+import { FloorScale } from './floorScale';
 import { ItemOrder } from './levelOrder';
 import { ZoneEdit } from './zoneEdit';
 import {
@@ -217,11 +220,29 @@ export function openLevelEditor(
             <label class="lvl-floor-size" id="le-floor-size-row" hidden>照片長邊實際
               <input id="le-floor-size" type="number" min="${FLOOR_SIZE_MIN}" max="${WORLD}" step="0.5" placeholder="${WORLD}" inputmode="decimal">
               公尺</label>
+            <p class="note lvl-kit-hint" id="le-floor-dims" hidden></p>
             <div class="lvl-floor-actions">
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-pick">上傳場地底圖</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-calib" hidden title="在照片上點兩個已知實際距離的點（例如圓的直徑），自動算出正確比例">用兩點量比例</button>
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-clear" hidden>移除場地底圖</button>
             </div>
             <input id="le-floor-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+          </section>
+
+          <section class="lvl-floor">
+            <h3 class="lvl-kit-title">飛行範圍</h3>
+            <label class="check-row"><input type="checkbox" id="le-bounds">限制在範圍內（飛不出去）</label>
+            <div class="lvl-bounds-grid" id="le-bounds-fields" hidden>
+              <label>左 X <input id="le-b-minx" type="number" step="0.5" class="mono"></label>
+              <label>右 X <input id="le-b-maxx" type="number" step="0.5" class="mono"></label>
+              <label>前 Z <input id="le-b-minz" type="number" step="0.5" class="mono"></label>
+              <label>後 Z <input id="le-b-maxz" type="number" step="0.5" class="mono"></label>
+            </div>
+            <div class="lvl-floor-actions">
+              <button type="button" class="btn btn-ghost btn-sm" id="le-bounds-fit" hidden>對齊場地底圖</button>
+            </div>
+            <p class="note lvl-kit-hint">地圖上的紅框就是邊界，學生飛到框邊會停住；起飛墊一定在框內。</p>
+            <p class="note lvl-bounds-warn" id="le-bounds-warn" hidden></p>
           </section>
 
           <div class="lvl-editor-toolbar" id="le-toolbar">
@@ -327,6 +348,8 @@ export function openLevelEditor(
   let dirty = false;
   let syncingProps = false;
   let floorImg: HTMLImageElement | null = null;
+  /** 兩點量比例進行中：a＝已點的第一點（地面座標，不吸附格線）。null＝沒在量。 */
+  let calib: { a: { x: number; z: number } | null } | null = null;
   let resizeObserver: ResizeObserver | null = null;
   const prevBodyOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
@@ -486,6 +509,125 @@ export function openLevelEditor(
       ctx.closePath();
       ctx.fill();
     }
+  };
+
+  /** 照片在地面上的範圍（還沒載入完回 null）。 */
+  const photoRect = (): { width: number; depth: number } | null =>
+    floorImg && floorImg.naturalWidth > 0
+      ? floorRect(floorImg.naturalWidth, floorImg.naturalHeight, floorSizeM(level.floorSize))
+      : null;
+
+  const half = (v: number): number => Math.round(v * 2) / 2;
+
+  /** 剛勾「限制範圍」時的預設框：有底圖就對齊照片，否則包住場上所有物件再留 2m。 */
+  const defaultBounds = (): FlightBounds => {
+    const photo = photoRect();
+    if (photo) {
+      return { minX: half(-photo.width / 2), maxX: half(photo.width / 2), minZ: half(-photo.depth / 2), maxZ: half(photo.depth / 2) };
+    }
+    const pts = [
+      ...(level.rings ?? []),
+      ...(level.balloons ?? []),
+      ...(level.passZones ?? []),
+      ...(level.obstacles ?? []),
+    ];
+    const xs = pts.map((p) => p.x);
+    const zs = pts.map((p) => p.z);
+    return {
+      minX: half(Math.min(-5, ...xs) - 2),
+      maxX: half(Math.max(5, ...xs) + 2),
+      minZ: half(Math.min(-5, ...zs) - 2),
+      maxZ: half(Math.max(5, ...zs) + 2),
+    };
+  };
+
+  /** 飛行範圍面板：勾選、四邊數值、框外物件警告。 */
+  const syncBoundsChrome = (): void => {
+    const b = FlightArea.of(level);
+    q<HTMLInputElement>('#le-bounds').checked = !!b;
+    q<HTMLElement>('#le-bounds-fields').hidden = !b;
+    q<HTMLButtonElement>('#le-bounds-fit').hidden = !b || !photoRect();
+    if (b) {
+      const active = document.activeElement;
+      const put = (id: string, v: number): void => {
+        const el = q<HTMLInputElement>(id);
+        if (el !== active) el.value = String(v);
+      };
+      put('#le-b-minx', b.minX);
+      put('#le-b-maxx', b.maxX);
+      put('#le-b-minz', b.minZ);
+      put('#le-b-maxz', b.maxZ);
+    }
+    const outside = b
+      ? [...(level.rings ?? []), ...(level.balloons ?? []), ...(level.passZones ?? [])].filter(
+          (p) => !FlightArea.contains(b, p.x, p.z),
+        ).length
+      : 0;
+    const warn = q<HTMLElement>('#le-bounds-warn');
+    warn.hidden = outside === 0;
+    warn.textContent = `有 ${outside} 個圈／氣球／任務點在範圍外，學生飛不到，請移進紅框或放大範圍。`;
+  };
+
+  /** 飛行範圍紅框（地面，俯視與 2.5D 共用）。 */
+  const drawFlightBounds = (): void => {
+    const b = FlightArea.of(level);
+    if (!b) return;
+    const pts = [
+      project(b.minX, b.minZ, 0),
+      project(b.maxX, b.minZ, 0),
+      project(b.maxX, b.maxZ, 0),
+      project(b.minX, b.maxZ, 0),
+    ];
+    ctx.strokeStyle = 'rgba(239,68,68,0.95)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 6]);
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const [lx, ly] = pts[0]!;
+    ctx.fillStyle = '#f87171';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('飛行範圍', lx + 6, ly + 14);
+  };
+
+  /** 量比例：已點的第一點畫十字。 */
+  const drawCalibMark = (): void => {
+    const a = calib?.a;
+    if (!a) return;
+    const [px, py] = project(a.x, a.z, 0);
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(px - 9, py);
+    ctx.lineTo(px + 9, py);
+    ctx.moveTo(px, py - 9);
+    ctx.lineTo(px, py + 9);
+    ctx.stroke();
+  };
+
+  /** 俯視比例尺（左下角，跟著縮放）：一眼看出 1m、5m 在圖上多長。 */
+  const drawScaleBar = (h: number): void => {
+    if (viewMode !== 'top') return;
+    const pxPerM = ((project(1, 0)[0] - project(0, 0)[0]) || 1) * mapView.zoom;
+    const meters = [1, 2, 5, 10].find((m) => m * pxPerM >= 60) ?? 10;
+    const len = meters * pxPerM;
+    const x0 = 14;
+    const y0 = h - 16;
+    ctx.fillStyle = 'rgba(15,23,42,0.85)';
+    ctx.fillRect(x0 - 6, y0 - 20, len + 48, 30);
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0 - 5);
+    ctx.lineTo(x0, y0);
+    ctx.lineTo(x0 + len, y0);
+    ctx.lineTo(x0 + len, y0 - 5);
+    ctx.stroke();
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(`${meters} m`, x0 + len + 6, y0 + 1);
   };
 
   const drawIsoFloor = (): void => {
@@ -707,6 +849,7 @@ export function openLevelEditor(
       (level.balloons ?? []).forEach((b) => drawIsoStem(b.x, b.z, b.y));
       (level.rings ?? []).forEach((ring) => drawIsoStem(ring.x, ring.z, ring.y));
     }
+    drawFlightBounds();
     drawRingRoute();
     // 2.5D 的圈畫在空中、會偏離底圖上的位置；編號牌釘在圈正下方的地面，順序對得上場地標線
     if (viewMode === 'iso') {
@@ -868,6 +1011,7 @@ export function openLevelEditor(
       isoQueue.sort((a, b) => a.depth - b.depth);
       isoQueue.forEach((item) => item.draw());
     }
+    drawCalibMark();
   };
 
   const draw = (): void => {
@@ -880,8 +1024,10 @@ export function openLevelEditor(
     if (viewMode === 'side') drawSideView(w, h);
     else drawPlanView();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    drawScaleBar(h);
     syncZoomReadout();
     updateEmptyBanner();
+    syncBoundsChrome();
   };
 
   const syncFormFromLevel = (): void => {
@@ -1302,6 +1448,10 @@ export function openLevelEditor(
 
   canvas.addEventListener('mousedown', (e) => {
     const [px, py] = canvasPos(e);
+    if (calib) {
+      calibClick(px, py);
+      return;
+    }
     const hit = hitAt(px, py);
     if (hit) {
       setSelection(hit);
@@ -1384,6 +1534,11 @@ export function openLevelEditor(
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     const step = snapStep || 0.5;
+    if (e.key === 'Escape' && calib) {
+      e.preventDefault();
+      endCalib();
+      return;
+    }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       deleteSelection();
@@ -1762,7 +1917,14 @@ export function openLevelEditor(
     const pickBtn = q<HTMLButtonElement>('#le-floor-pick');
     const url = level.floorImage;
     q<HTMLElement>('#le-floor-size-row').hidden = !url;
+    q<HTMLButtonElement>('#le-floor-calib').hidden = !url;
     q<HTMLInputElement>('#le-floor-size').value = level.floorSize != null ? String(floorSizeM(level.floorSize)) : '';
+    const photo = url ? photoRect() : null;
+    const dims = q<HTMLElement>('#le-floor-dims');
+    dims.hidden = !photo;
+    if (photo) {
+      dims.textContent = `照片範圍：寬 ${photo.width.toFixed(1)} m × 深 ${photo.depth.toFixed(1)} m（無人機約 1 m 寬、圈直徑預設 3 m）。比例不準可用「用兩點量比例」校正。`;
+    }
     if (url) {
       thumb.hidden = false;
       thumb.src = floorSrc(url);
@@ -1789,6 +1951,7 @@ export function openLevelEditor(
     img.onload = () => {
       if (level.floorImage !== url) return;
       floorImg = img;
+      syncFloorChrome();
       draw();
     };
     img.onerror = () => {
@@ -1828,12 +1991,118 @@ export function openLevelEditor(
       })
       .catch((e) => toast(errText(e, '上傳場地底圖'), 'error'));
   });
+  /**
+   * 換照片比例。raw 沒給＝回預設 30m。場上有物件時問老師要不要跟著照片縮放：
+   * 物件原本對準照片上的標線，跟著縮放才不會錯位。
+   */
+  const applyFloorSize = (raw: number | undefined): void => {
+    const before = floorSizeM(level.floorSize);
+    const after = raw === undefined ? WORLD : floorSizeM(raw);
+    if (raw !== undefined && raw < FLOOR_SIZE_MIN) {
+      toast(`照片長邊最小 ${FLOOR_SIZE_MIN} 公尺（再小場地會比圈和無人機還小），已設為 ${FLOOR_SIZE_MIN} 公尺`, 'info');
+    } else if (raw !== undefined && raw > WORLD) {
+      toast(`場地最大 ${WORLD} 公尺，已設為 ${WORLD} 公尺`, 'info');
+    }
+    if (
+      after !== before &&
+      FloorScale.hasLayout(level) &&
+      confirm('要讓圈、障礙、任務點、飛行範圍跟著照片一起縮放位置嗎？\n（圈的大小與高度不變。按「取消」則物件留在原地。）')
+    ) {
+      level = FloorScale.layout(level, after / before);
+      propsCtrl.sync();
+    }
+    // 30m＝預設，不寫進關卡
+    if (after === WORLD) delete level.floorSize;
+    else level.floorSize = after;
+    syncFloorChrome();
+    draw();
+    scheduleSave();
+  };
+
   q<HTMLInputElement>('#le-floor-size').addEventListener('change', () => {
-    const input = q<HTMLInputElement>('#le-floor-size');
-    // 空白＝預設 30m，不寫進關卡
-    if (input.value.trim() === '') delete level.floorSize;
-    else level.floorSize = floorSizeM(Number(input.value));
-    input.value = level.floorSize != null ? String(level.floorSize) : '';
+    const raw = q<HTMLInputElement>('#le-floor-size').value.trim();
+    const n = Number(raw);
+    applyFloorSize(raw === '' || !Number.isFinite(n) ? undefined : n);
+  });
+
+  const endCalib = (): void => {
+    calib = null;
+    q<HTMLButtonElement>('#le-floor-calib').classList.remove('active');
+    canvas.style.cursor = '';
+    syncViewHint();
+    draw();
+  };
+
+  /** 量比例：點兩點 → 問實際距離 → 換算照片長邊。不吸附格線，量得比較準。 */
+  const calibClick = (px: number, py: number): void => {
+    if (!calib) return;
+    if (viewMode === 'side') {
+      toast('請在俯視或 2.5D 量比例', 'info');
+      return;
+    }
+    const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
+    const p =
+      viewMode === 'iso'
+        ? isoCanvasToWorld(px - ox, py - oy, size, size, 0, 0)
+        : topCanvasToWorld(px - ox, py - oy, size, size, 0);
+    if (!calib.a) {
+      calib.a = p;
+      q<HTMLElement>('#le-view-hint').textContent = '量比例：再點第二個點（Esc 取消）';
+      draw();
+      return;
+    }
+    const measured = Math.hypot(p.x - calib.a.x, p.z - calib.a.z);
+    endCalib();
+    const answer = prompt(`這兩點在目前比例下相距 ${measured.toFixed(1)} 公尺。\n實際相距幾公尺？`);
+    if (answer === null) return;
+    const next = FloorScale.calibrate(floorSizeM(level.floorSize), measured, Number(answer));
+    if (next === null) {
+      toast('兩點太近或距離不正確，請重新量', 'info');
+      return;
+    }
+    applyFloorSize(next);
+    toast(`已校正：照片長邊 ${floorSizeM(level.floorSize)} 公尺`, 'success');
+  };
+
+  q<HTMLButtonElement>('#le-floor-calib').addEventListener('click', () => {
+    if (calib) {
+      endCalib();
+      return;
+    }
+    if (!photoRect()) {
+      toast('場地底圖還在載入，請稍候', 'info');
+      return;
+    }
+    calib = { a: null };
+    q<HTMLButtonElement>('#le-floor-calib').classList.add('active');
+    canvas.style.cursor = 'crosshair';
+    q<HTMLElement>('#le-view-hint').textContent =
+      '量比例：在照片上點第一個點（選實際距離已知的兩點，例如圓的直徑、場地邊長；Esc 取消）';
+  });
+
+  // 飛行範圍
+  q<HTMLInputElement>('#le-bounds').addEventListener('change', () => {
+    if (q<HTMLInputElement>('#le-bounds').checked) level.flightBounds = defaultBounds();
+    else delete level.flightBounds;
+    draw();
+    scheduleSave();
+  });
+  (['#le-b-minx', '#le-b-maxx', '#le-b-minz', '#le-b-maxz'] as const).forEach((id) => {
+    q<HTMLInputElement>(id).addEventListener('change', () => {
+      const read = (sel: string): number => Number(q<HTMLInputElement>(sel).value);
+      const next = FlightArea.of({
+        flightBounds: { minX: read('#le-b-minx'), maxX: read('#le-b-maxx'), minZ: read('#le-b-minz'), maxZ: read('#le-b-maxz') },
+      });
+      if (next) level.flightBounds = next;
+      q<HTMLInputElement>(id).blur();
+      draw();
+      scheduleSave();
+    });
+  });
+  q<HTMLButtonElement>('#le-bounds-fit').addEventListener('click', () => {
+    const photo = photoRect();
+    if (!photo) return;
+    level.flightBounds = FlightArea.of({ flightBounds: defaultBounds() }) ?? undefined;
     draw();
     scheduleSave();
   });
