@@ -16,6 +16,7 @@ import { arenaState } from '../multiplayer/arena';
 import { activeSoccerField } from '../soccer/field';
 import { SOCCER_CAM_MIN_Y } from '../soccer/enclosureView';
 import type { SightSolid } from './cameraSight';
+import { CourseScale } from './courseScale';
 import { FixedCamLift } from './fixedCamLift';
 import { PilotView, type CameraPose, type CameraViewMode } from './pilotView';
 
@@ -196,9 +197,9 @@ export class CameraRig {
     }
     this.fixedCamLift = 0;
 
-    // 第三人稱跟隨：offset (0,4,12) 依 yaw 旋轉。焦點被氣球或柱子擋住時沿 x 挪開。
+    // 第三人稱跟隨：offset 依 yaw 旋轉（有場地底圖的真實比例關卡拉近，見 CourseScale）。焦點被氣球或柱子擋住時沿 x 挪開。
     const followed = PilotView.dodgeFocus(
-      PilotView.thirdPerson({ x: pos.x, y: pos.y, z: pos.z }, yaw),
+      PilotView.thirdPerson({ x: pos.x, y: pos.y, z: pos.z }, yaw, CourseScale.follow(level)),
       this.courseSolids,
     );
     const target = new Vector3(followed.eye.x, followed.eye.y, followed.eye.z);

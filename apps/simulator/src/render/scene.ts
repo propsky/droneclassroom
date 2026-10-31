@@ -293,6 +293,15 @@ export function applyLevelFloor(scene: Scene, url: string | null, sizeM?: number
   mat.diffuseTexture = tex;
 }
 
+/** 起飛墊透明度：真實比例關卡（有場地底圖）改半透明，露出照片上畫的起降區；降落範圍不變。 */
+export const HOME_PAD_REAL_ALPHA = 0.35;
+
+export function applyHomePadLook(scene: Scene, realScale: boolean): void {
+  const mat = scene.getMaterialByName('padMat') as StandardMaterial | null;
+  if (!mat) return;
+  mat.alpha = realScale ? HOME_PAD_REAL_ALPHA : 1;
+}
+
 /** F-02：依關卡或 URL 切換展場 / 一般霧效與天空後備色 */
 export function applySceneEnv(scene: Scene, env: SceneEnv): void {
   if (env === 'exhibition') {

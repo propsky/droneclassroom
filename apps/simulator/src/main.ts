@@ -32,7 +32,7 @@ import { tickFlightPhysics, tickRecordedLevel } from './core/simTick';
 import { GameSession } from './core/session';
 import { getStudentToken } from './net/studentAuth';
 import { API_BASE } from './net/backend';
-import { createSceneWorld, applySceneEnv, applyLevelFloor } from './render/scene';
+import { createSceneWorld, applySceneEnv, applyLevelFloor, applyHomePadLook } from './render/scene';
 import { SceneEnvChoice } from './ui/sceneEnvChoice';
 import { initSceneEnvControl } from './ui/sceneEnvControl';
 import { DroneVisual } from './render/drone';
@@ -40,6 +40,7 @@ import { LevelVisuals } from './render/levelMeshes';
 import { InkVisual } from './render/ink';
 import { GuideVisual } from './render/guide';
 import { FlightFenceVisual } from './render/flightFence';
+import { CourseScale } from './render/courseScale';
 import { CameraRig } from './render/cameras';
 import { initHud, updateHudFrame } from './ui/hud';
 import { initOnboarding } from './ui/onboarding';
@@ -190,10 +191,15 @@ bus.on('level-loaded', ({ level }) => {
   const floorUrl =
     floor && floor.startsWith('/api/levels/') ? `${API_BASE}${floor}` : null;
   applyLevelFloor(world.scene, floorUrl, level.floorSize);
+  // 有場地底圖＝真實比例：機身縮到實際大小，才看得出場地多大
+  droneVisual.setScaleFactor(CourseScale.droneScale(level));
+  applyHomePadLook(world.scene, CourseScale.isReal(level));
 });
 // 離開關卡（進大亂鬥／足球／換關）：收起上一關地板與展場霧，避免貼圖晚到又把舊地板打開
 bus.on('level-cleared', () => {
   applyLevelFloor(world.scene, null);
+  droneVisual.setScaleFactor(1);
+  applyHomePadLook(world.scene, false);
   showSceneEnv(chosenSceneEnv());
 });
 initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）

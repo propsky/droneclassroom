@@ -80,11 +80,20 @@ export class PilotView {
     return soccer ? '🎥 跟隨視角' : '🎥 第三人稱';
   }
 
-  static thirdPerson(pos: SightPoint, yaw: number): CameraPose {
+  /** 第三人稱：機身後方 offset.distance、上方 offset.height（預設卡通機身的 12m / 4m）。 */
+  static thirdPerson(
+    pos: SightPoint,
+    yaw: number,
+    offset: { distance: number; height: number } = { distance: 12, height: 4 },
+  ): CameraPose {
     const sin = Math.sin(yaw);
     const cos = Math.cos(yaw);
     return {
-      eye: { x: pos.x + 12 * sin, y: pos.y + 4, z: pos.z + 12 * cos },
+      eye: {
+        x: pos.x + offset.distance * sin,
+        y: pos.y + offset.height,
+        z: pos.z + offset.distance * cos,
+      },
       target: { x: pos.x, y: pos.y, z: pos.z },
     };
   }

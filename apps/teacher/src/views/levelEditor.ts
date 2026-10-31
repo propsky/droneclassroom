@@ -1923,7 +1923,7 @@ export function openLevelEditor(
     const dims = q<HTMLElement>('#le-floor-dims');
     dims.hidden = !photo;
     if (photo) {
-      dims.textContent = `照片範圍：寬 ${photo.width.toFixed(1)} m × 深 ${photo.depth.toFixed(1)} m（無人機約 1 m 寬、圈直徑預設 3 m）。比例不準可用「用兩點量比例」校正。`;
+      dims.textContent = `照片範圍：寬 ${photo.width.toFixed(1)} m × 深 ${photo.depth.toFixed(1)} m（試飛時無人機約 1.2 m 寬、圈直徑預設 3 m）。比例不準可用「用兩點量比例」校正。`;
     }
     if (url) {
       thumb.hidden = false;
