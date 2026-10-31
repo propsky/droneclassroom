@@ -26,7 +26,7 @@ export const SOCCER_FPV_INSET = 0.3;
 /** 足球第三人稱跟隨：機尾距離與抬高（護罩很小，退後才看得到槳） */
 export const SOCCER_FOLLOW_DISTANCE = 2.6;
 export const SOCCER_FOLLOW_HEIGHT = 0.9;
-/** 全場視角從端線往場內收（m），站在端牆內側 */
+/** 舊全場鏡位從端線往場內收（m）。現行全場改站到端線外，這組只留給回歸測試。 */
 export const SOCCER_TEAM_END_INSET = 0.75;
 
 /** 外殼朝場內那一面的座標（+ 端為正值） */

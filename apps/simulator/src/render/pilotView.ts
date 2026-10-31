@@ -8,7 +8,7 @@
 //    規範沒有寫眼高，也沒有寫 P 點到標線的固定公尺。
 //
 // 眼高 1.65 m、最少退距 1.5 m、取景用 4:3，都是這裡的選擇，用來把整塊飛行區放進 60° 視角。
-// 足球全場視角改站到近端門的側邊：舊鏡位在端線中線、門框正後方，視線會穿過近端門管。
+// 足球全場視角站在近端門後方、略偏一側並抬高：舊鏡位在門洞正後方，練習場會從門洞看出去。
 import type { LevelDef } from '@creafly/shared';
 import { balloonDiameter, ringBobAmp, ringDiameter, ringThickness } from '@creafly/shared';
 import { forwardVec, HOME_POSITION } from '../core/droneState';
@@ -137,10 +137,13 @@ export class PilotView {
     };
   }
 
-  /** 全場視角：仍站在己方端牆內側，但偏到門框外側，視線不再穿過近端門。 */
+  /**
+   * 全場視角：退到近端門後方、略高、偏離門軸。
+   * 練習場（F9A-B）門離底線只有 1 m，若站在端牆內側的門洞正後方，環會鋪滿 60° 視角。
+   */
   static soccerTeam(field: ActiveSoccerField, sign: PilotEnd): CameraPose {
     return PilotView.cached(`team:${PilotView.fieldKey(field)}:${sign}`, () =>
-      PilotView.pickSoccerTeam(field, sign).pose,
+      PilotView.placedSoccerTeam(field, sign),
     );
   }
 
@@ -174,13 +177,16 @@ export class PilotView {
   static soccerExam(field: ActiveSoccerField, sign: PilotEnd): CameraPose {
     return PilotView.cached(`sexam:${PilotView.fieldKey(field)}:${sign}`, () => {
       const side = sign > 0 ? 'posZ' : 'negZ';
-      return PilotView.examOutside(
+      const searched = PilotView.examOutside(
         PilotView.soccerBox(field),
         side,
         (eye) => PilotView.soccerSolids(field, eye),
         Math.max(0.4, field.halfX - 0.28),
         PilotView.soccerWatchPoints(field, sign),
       );
+      // 大場站在中線外側就看得到整場。小場那組會貼到近端角落，近端門環佔住上半部。
+      if (!PilotView.soccerExamDominated(searched, field, sign)) return searched;
+      return PilotView.placedSoccerExam(field, sign);
     });
   }
 
@@ -475,31 +481,82 @@ export class PilotView {
     return vy <= tanHalf && vx <= tanHalf * PilotView.FRAME_ASPECT;
   }
 
-  private static pickSoccerTeam(field: ActiveSoccerField, sign: PilotEnd): PosePick {
-    const box = PilotView.soccerBox(field);
-    const points = PilotView.keyPoints(box);
-    points.push({ x: 0, y: field.goalY, z: field.goalZ }, { x: 0, y: field.goalY, z: -field.goalZ });
-    const z = sign * (field.halfZ - SOCCER_TEAM_END_INSET);
-    const yMax = clampSoccerCameraY(field.top - 0.2, field.top);
-    const yMin = Math.max(SOCCER_CAM_MIN_Y + 0.4, Math.min(2.2, yMax));
-    const xMax = Math.max(0.4, field.halfX - 0.45);
-    let best: PosePick | null = null;
-    for (const xAbs of PilotView.steps(0, xMax, 0.35)) {
-      for (const x of xAbs === 0 ? [0] : [xAbs, -xAbs]) {
-        for (const y of PilotView.steps(yMin, yMax, 0.35)) {
-          const pose: CameraPose = {
-            eye: { x, y, z },
-            target: { x: 0, y: Math.min(field.top * 0.34, 1.8), z: -sign * field.halfZ * 0.2 },
-          };
-          const solids = PilotView.soccerSolids(field, pose.eye);
-          const blocked = PilotView.blockedSamples(pose, points, solids);
-          const pick = { pose, blocked };
-          if (blocked.length === 0) return pick;
-          if (!best || blocked.length < best.blocked.length) best = pick;
-        }
-      }
-    }
-    return best ?? { pose: PilotView.legacySoccerTeam(field, sign), blocked: ['找不到鏡位'] };
+  /** 近端門環外緣半徑（管的外側）。視線穿進這個圓盤，畫面就會被門框起來。 */
+  static goalOuterRadius(field: ActiveSoccerField): number {
+    return field.goalR + field.goalTube * 2;
+  }
+
+  /**
+   * 視線看向目標時，有沒有穿過近端門的外緣圓盤，以及環在鏡頭前的張角。
+   * 圓盤在視線的後方（t 不在 0–1）不算穿過。
+   */
+  static nearGoalFraming(
+    pose: CameraPose,
+    field: ActiveSoccerField,
+    sign: PilotEnd,
+  ): { throughDisk: boolean; radial: number; diamDeg: number } {
+    const outer = PilotView.goalOuterRadius(field);
+    const gz = sign * field.goalZ;
+    const dist = Math.hypot(pose.eye.x, pose.eye.y - field.goalY, pose.eye.z - gz);
+    const diamDeg = (2 * Math.atan2(outer, Math.max(dist, 1e-4)) * 180) / Math.PI;
+    const dz = pose.target.z - pose.eye.z;
+    if (Math.abs(dz) < 1e-6) return { throughDisk: false, radial: Infinity, diamDeg };
+    const t = (gz - pose.eye.z) / dz;
+    if (t <= 0.02 || t >= 0.98) return { throughDisk: false, radial: Infinity, diamDeg };
+    const x = pose.eye.x + (pose.target.x - pose.eye.x) * t;
+    const y = pose.eye.y + (pose.target.y - pose.eye.y) * t;
+    const radial = Math.hypot(x, y - field.goalY);
+    return { throughDisk: radial < outer, radial, diamDeg };
+  }
+
+  /** 起飛點、己方半場地面、中圈、遠門心。全場與考證都要看得到這些，才飛得出去。 */
+  static soccerPitchPoints(field: ActiveSoccerField, sign: PilotEnd): SightPoint[] {
+    return [
+      { x: 0, y: 0.15, z: sign * field.startZ },
+      { x: 0, y: 0.2, z: sign * field.halfZ * 0.45 },
+      { x: 0, y: 0.2, z: 0 },
+      { x: 0, y: field.goalY, z: -sign * field.goalZ },
+    ];
+  }
+
+  /**
+   * 考證鏡位是不是壞畫面：貼近端邊線、起飛區出框，或近端門環張角太大。
+   * 大場中線上的站位不會觸發。
+   */
+  static soccerExamDominated(pose: CameraPose, field: ActiveSoccerField, sign: PilotEnd): boolean {
+    const framing = PilotView.nearGoalFraming(pose, field, sign);
+    if (framing.throughDisk || framing.diamDeg > 28) return true;
+    if (Math.abs(pose.eye.x) > field.halfX * 0.72) return true;
+    const takeoff = PilotView.soccerPitchPoints(field, sign)[0]!;
+    return !PilotView.inFrame(pose, takeoff);
+  }
+
+  /**
+   * 全場：短邊外側、略高於端牆中橫梁，橫向約半個半寬。
+   * 視線略往下，起飛墊和遠門同時落在 60° 裡，近端門環只在畫面上方。
+   */
+  private static placedSoccerTeam(field: ActiveSoccerField, sign: PilotEnd): CameraPose {
+    const outer = PilotView.goalOuterRadius(field);
+    const x = Math.min(field.halfX - 0.35, Math.max(outer + 0.25, field.halfX * 0.5));
+    const y = Math.min(field.top * 0.62, Math.max(field.top * 0.5 + 0.18, PilotView.EYE_HEIGHT_M));
+    return {
+      eye: { x, y, z: sign * (field.halfZ + field.halfZ * 0.47) },
+      target: { x: 0, y: field.top * 0.1, z: -sign * field.halfZ * 0.13 },
+    };
+  }
+
+  /**
+   * 小場考證：比全場再偏外、再高一點，看向遠門那一側。
+   * 眼高要過端牆中橫梁，否則橫梁會切在球場中間；仍不貼到邊線。
+   */
+  private static placedSoccerExam(field: ActiveSoccerField, sign: PilotEnd): CameraPose {
+    const outer = PilotView.goalOuterRadius(field);
+    const x = Math.min(field.halfX * 0.68, outer + 0.7);
+    const y = Math.min(field.top - 0.7, field.top * 0.5 + 0.45);
+    return {
+      eye: { x, y, z: sign * (field.halfZ + field.halfZ * 0.55) },
+      target: { x: 0, y: field.top * 0.15, z: -sign * field.halfZ * 0.22 },
+    };
   }
 
   private static pickExam(
