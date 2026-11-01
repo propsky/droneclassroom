@@ -172,8 +172,10 @@ export interface LevelDef {
    * 圖片本體在伺服器，不放進 JSON。
    */
   floorImage?: string;
-  /** 場地底圖長邊的實際長度（公尺，10～30）。沒寫＝長邊鋪滿 30m；照片比例一律保留。 */
+  /** 場地底圖長邊的實際長度（公尺，10～60）。沒寫＝30m；照片比例一律保留。 */
   floorSize?: number;
+  /** 照片中心在地面上的位置（公尺）。沒寫＝置中在起飛墊。只影響畫面，不影響判定。 */
+  floorOffset?: { x: number; z: number };
   /** 飛行範圍：無人機飛不出這個框（地面 X/Z，公尺）。沒寫＝不限。判定見 FlightArea。 */
   flightBounds?: FlightBounds;
   /** 目標圖形參考線（俯視 [x,z] 折線） */

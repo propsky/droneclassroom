@@ -22,6 +22,24 @@ describe('兩點量比例', () => {
   });
 });
 
+describe('拉角落縮放照片', () => {
+  const c = { x: 2, z: -1 };
+  const corner = { x: 17, z: 7 }; // 30m × 16m 照片的右下角
+
+  it('拉到兩倍遠：長邊兩倍', () => {
+    expect(FloorScale.resizeByCorner(c, corner, 30, { x: 32, z: 15 })).toBe(60);
+  });
+
+  it('往中心推：縮小，偏離對角線也照投影算', () => {
+    expect(FloorScale.resizeByCorner(c, corner, 30, { x: 8.7, z: 4.5 })).toBe(15);
+  });
+
+  it('夾在 10～60 公尺', () => {
+    expect(FloorScale.resizeByCorner(c, corner, 30, { x: 2, z: -1 })).toBe(10);
+    expect(FloorScale.resizeByCorner(c, corner, 30, { x: 62, z: 31 })).toBe(60);
+  });
+});
+
 describe('物件跟著照片縮放', () => {
   const level: LevelDef = {
     id: 't',
@@ -57,8 +75,22 @@ describe('物件跟著照片縮放', () => {
     expect(half.passZones?.[1]).toMatchObject({ type: 'altitude', x: 2, z: 2, minY: 2 });
   });
 
-  it('放大超出 30m 場地的收回場地邊', () => {
-    expect(FloorScale.layout(level, 2).rings?.[0]).toMatchObject({ x: 12, z: -15 });
+  it('放大超出 60m 場地的收回場地邊', () => {
+    expect(FloorScale.layout(level, 4).rings?.[0]).toMatchObject({ x: 24, z: -30 });
+  });
+
+  it('照片移過位置：以照片中心縮放，物件仍對得上照片', () => {
+    const half = FloorScale.layout(level, 0.5, { x: 2, z: -2 });
+    expect(half.rings?.[0]).toMatchObject({ x: 4, z: -6 });
+    expect(half.flightBounds).toEqual({ minX: -5, maxX: 7, minZ: -8, maxZ: 2 });
+  });
+
+  it('跟著照片平移：判定框與飛行範圍一起移，高度不變', () => {
+    const moved = FloorScale.shift(level, 3, -1);
+    expect(moved.rings?.[0]).toMatchObject({ x: 9, y: 2.5, z: -11 });
+    expect(moved.passZones?.[0]).toMatchObject({ x: 3, z: -7, minX: 1, maxX: 5, maxZ: -6 });
+    expect(moved.guide?.[1]).toEqual([13, -11]);
+    expect(moved.flightBounds).toEqual({ minX: -9, maxX: 15, minZ: -15, maxZ: 5 });
   });
 
   it('沒有物件就不必問', () => {

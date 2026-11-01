@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clampWorld, floorRect, floorSizeM, FLOOR_SIZE_MIN, heightHueColor, isoCanvasToWorld, isoDepthKey, isoGroundToCanvas, isoLayout, isoWorldToCanvas, mapPointerToContent, MAP_ZOOM_MAX, MAP_ZOOM_MIN, refitMapZoom, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas, zoomMapAtPointer } from './levelEditorUtils';
+import { clampWorld, floorCenter, floorRect, floorSizeM, FLOOR_SIZE_MIN, heightHueColor, isoCanvasToWorld, isoDepthKey, isoGroundToCanvas, isoLayout, isoWorldToCanvas, mapPointerToContent, MAP_ZOOM_MAX, MAP_ZOOM_MIN, refitMapZoom, ringDiameter, ringPassRadius, snapClampXZ, snapWorld, topWorldToCanvas, zoomMapAtPointer } from './levelEditorUtils';
 
 describe('levelEditorUtils', () => {
   it('snapWorld 1m 格', () => {
@@ -8,8 +8,9 @@ describe('levelEditorUtils', () => {
   });
 
   it('clampWorld 限制場地', () => {
-    expect(clampWorld(20)).toBe(15);
-    expect(clampWorld(-20)).toBe(-15);
+    expect(clampWorld(20)).toBe(20);
+    expect(clampWorld(40)).toBe(30);
+    expect(clampWorld(-40)).toBe(-30);
   });
 
   it('snapClampXZ 組合', () => {
@@ -115,13 +116,21 @@ describe('場地底圖比例', () => {
     expect(floorRect(2000, 1000, 20)).toEqual({ width: 20, depth: 10 });
   });
 
-  it('實際長度沒設或超出範圍：沒設＝30m，限制在 5～30m', () => {
+  it('實際長度沒設或超出範圍：沒設＝30m（舊關卡不變），限制在 10～60m', () => {
     expect(floorSizeM(undefined)).toBe(30);
     expect(floorSizeM(0)).toBe(30);
     expect(floorSizeM(Number.NaN)).toBe(30);
     expect(floorSizeM(2)).toBe(FLOOR_SIZE_MIN);
-    expect(floorSizeM(50)).toBe(30);
+    expect(floorSizeM(50)).toBe(50);
+    expect(floorSizeM(80)).toBe(60);
     expect(floorSizeM(22.5)).toBe(22.5);
+  });
+
+  it('照片位置：沒設置中在原點，壞值當 0，超出場地收回', () => {
+    expect(floorCenter(undefined)).toEqual({ x: 0, z: 0 });
+    expect(floorCenter({ x: 3.5, z: -2 })).toEqual({ x: 3.5, z: -2 });
+    expect(floorCenter({ x: Number.NaN, z: 'a' })).toEqual({ x: 0, z: 0 });
+    expect(floorCenter({ x: 99, z: -99 })).toEqual({ x: 30, z: -30 });
   });
 
   it('圖片還沒載入（寬高 0）：先當正方形', () => {

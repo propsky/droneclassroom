@@ -1,5 +1,6 @@
 // 關卡編輯器共用：座標吸附、範圍限制、視角投影（零 runtime 依賴）。
-export const EDITOR_WORLD = 30;
+// 60m：放得下一般考照場、戶外練習場。官方關卡都在 ±15m 內，座標不受影響。
+export const EDITOR_WORLD = 60;
 export const EDITOR_HALF = EDITOR_WORLD / 2;
 
 /** 任務圈預設尺寸（與 apps/simulator render/levelMeshes 一致） */
@@ -31,18 +32,28 @@ export function snapClampXZ(
 
 /** 場地底圖長邊可設的實際長度（公尺）：最短 10m（再小圈和無人機會比場地還顯眼），最長就是整個編輯場地。 */
 export const FLOOR_SIZE_MIN = 10;
+export const FLOOR_SIZE_MAX = EDITOR_WORLD;
+/** 沒設 floorSize 的照片長邊（舊關卡都是這個大小，不能跟著 EDITOR_WORLD 變）。 */
+export const FLOOR_SIZE_DEFAULT = 30;
 
-/** 底圖長邊的實際長度：沒設或不合理＝鋪滿 30m 場地。 */
+/** 底圖長邊的實際長度：沒設或不合理＝30m。 */
 export function floorSizeM(size: unknown): number {
-  if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return EDITOR_WORLD;
-  return Math.max(FLOOR_SIZE_MIN, Math.min(EDITOR_WORLD, size));
+  if (typeof size !== 'number' || !Number.isFinite(size) || size <= 0) return FLOOR_SIZE_DEFAULT;
+  return Math.max(FLOOR_SIZE_MIN, Math.min(FLOOR_SIZE_MAX, size));
+}
+
+/** 照片中心在地面上的位置（LevelDef.floorOffset，公尺）：老師拖照片讓 H 對到起飛墊。沒設＝置中在原點。 */
+export function floorCenter(offset: unknown): { x: number; z: number } {
+  const o = offset as { x?: unknown; z?: unknown } | null | undefined;
+  const v = (n: unknown): number => (typeof n === 'number' && Number.isFinite(n) ? clampWorld(n) : 0);
+  return { x: v(o?.x), z: v(o?.z) };
 }
 
 /**
- * 底圖在地面上的大小：保持照片原比例，長邊＝sizeM，置中在原點。
+ * 底圖在地面上的大小：保持照片原比例，長邊＝sizeM（位置見 floorCenter）。
  * 照片寬對世界 X、高對世界 Z（上方＝-Z 前方）。長方形場地不會被壓成正方形。
  */
-export function floorRect(imgW: number, imgH: number, sizeM: number = EDITOR_WORLD): { width: number; depth: number } {
+export function floorRect(imgW: number, imgH: number, sizeM: number = FLOOR_SIZE_DEFAULT): { width: number; depth: number } {
   if (!(imgW > 0) || !(imgH > 0)) return { width: sizeM, depth: sizeM };
   const long = Math.max(imgW, imgH);
   return { width: (imgW / long) * sizeM, depth: (imgH / long) * sizeM };
@@ -182,7 +193,8 @@ export interface MapViewTransform {
 }
 
 export const MAP_ZOOM_MIN = 0.5;
-export const MAP_ZOOM_MAX = 4;
+// 場地 60m：放到 8 倍時畫面約 7.5m，對標線夠細
+export const MAP_ZOOM_MAX = 8;
 const MAP_ZOOM_FACTOR = 1.12;
 
 export function clampMapZoom(zoom: number): number {

@@ -14,12 +14,12 @@ describe('飛行範圍設定', () => {
     expect(FlightArea.of({ flightBounds: box })).toEqual(box);
   });
 
-  it('左右寫反會自動對調；超出 30m 場地會收進場地內', () => {
+  it('左右寫反會自動對調；超出 60m 場地會收進場地內', () => {
     expect(FlightArea.of({ flightBounds: { minX: 5, maxX: -5, minZ: -40, maxZ: 40 } })).toEqual({
       minX: -5,
       maxX: 5,
-      minZ: -15,
-      maxZ: 15,
+      minZ: -30,
+      maxZ: 30,
     });
   });
 

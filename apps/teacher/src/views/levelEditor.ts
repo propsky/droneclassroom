@@ -6,7 +6,12 @@ import {
   EDITOR_HALF,
   EDITOR_MAX_Y,
   EDITOR_WORLD,
+  FLOOR_SIZE_DEFAULT,
+  FLOOR_SIZE_MAX,
   FLOOR_SIZE_MIN,
+  clampMapZoom,
+  clampWorld,
+  floorCenter,
   floorRect,
   floorSizeM,
   FlightArea,
@@ -215,17 +220,19 @@ export function openLevelEditor(
 
           <section class="lvl-floor">
             <h3 class="lvl-kit-title">場地底圖</h3>
-            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。照片保持原比例鋪在關卡中央，長邊預設 30 公尺。</p>
+            <p class="note lvl-kit-hint">上傳 JPG、PNG 或 WebP，最大 2 MB。照片保持原比例鋪在起飛墊中央，長邊預設 ${FLOOR_SIZE_DEFAULT} 公尺、最大 ${FLOOR_SIZE_MAX} 公尺。</p>
             <img id="le-floor-thumb" class="lvl-floor-preview" alt="場地底圖預覽" hidden>
             <label class="lvl-floor-size" id="le-floor-size-row" hidden>照片長邊實際
-              <input id="le-floor-size" type="number" min="${FLOOR_SIZE_MIN}" max="${WORLD}" step="0.5" placeholder="${WORLD}" inputmode="decimal">
+              <input id="le-floor-size" type="number" min="${FLOOR_SIZE_MIN}" max="${FLOOR_SIZE_MAX}" step="0.5" placeholder="${FLOOR_SIZE_DEFAULT}" inputmode="decimal">
               公尺</label>
             <p class="note lvl-kit-hint" id="le-floor-dims" hidden></p>
             <div class="lvl-floor-actions">
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-pick">上傳場地底圖</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="le-floor-move" hidden title="在地圖上拖曳照片，讓照片上的 H 對準起飛墊；拉四個角等比例放大縮小">調整底圖位置與大小</button>
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-calib" hidden title="在照片上點兩個已知實際距離的點（例如圓的直徑），自動算出正確比例">用兩點量比例</button>
               <button type="button" class="btn btn-ghost btn-sm" id="le-floor-clear" hidden>移除場地底圖</button>
             </div>
+            <label class="check-row" id="le-floor-carry-row" hidden><input type="checkbox" id="le-floor-carry" checked>場上的圈、障礙、任務點跟著照片一起移動與縮放</label>
             <input id="le-floor-file" type="file" accept="image/jpeg,image/png,image/webp" hidden>
           </section>
 
@@ -350,6 +357,14 @@ export function openLevelEditor(
   let floorImg: HTMLImageElement | null = null;
   /** 兩點量比例進行中：a＝已點的第一點（地面座標，不吸附格線）。null＝沒在量。 */
   let calib: { a: { x: number; z: number } | null } | null = null;
+  /** 調整底圖模式：拖照片移動、拉角落等比例縮放（取代選取與放置）。 */
+  let floorEdit = false;
+  /** 正在拖的照片：start＝按下時的關卡（從這份算，來回拖不會累積誤差），corner＝拉的那個角。 */
+  let floorDrag: {
+    start: LevelDef;
+    from: { x: number; z: number };
+    corner: { x: number; z: number } | null;
+  } | null = null;
   let resizeObserver: ResizeObserver | null = null;
   const prevBodyOverflow = document.body.style.overflow;
   document.body.style.overflow = 'hidden';
@@ -433,7 +448,9 @@ export function openLevelEditor(
 
   const syncViewHint = (): void => {
     const el = q<HTMLElement>('#le-view-hint');
-    if (viewMode === 'iso') {
+    if (floorEdit) {
+      el.textContent = '調整底圖：拖曳照片移動（讓 H 對準起飛墊）· 拉四角等比例縮放 · 方向鍵微調 0.1m · Esc 結束';
+    } else if (viewMode === 'iso') {
       el.textContent = '2.5D：拖曳沿地面移動 X/Z · 滾輪放大縮小 · 藍柱=高度';
     } else if (viewMode === 'side') {
       el.textContent = '側視：拖曳調 Y · 滾輪放大縮小 · 放置請切換俯視或 2.5D';
@@ -511,11 +528,22 @@ export function openLevelEditor(
     }
   };
 
-  /** 照片在地面上的範圍（還沒載入完回 null）。 */
-  const photoRect = (): { width: number; depth: number } | null =>
+  /** 照片在地面上的範圍：中心 x/z 與寬深（還沒載入完回 null）。 */
+  const photoRect = (): { x: number; z: number; width: number; depth: number } | null =>
     floorImg && floorImg.naturalWidth > 0
-      ? floorRect(floorImg.naturalWidth, floorImg.naturalHeight, floorSizeM(level.floorSize))
+      ? {
+          ...floorCenter(level.floorOffset),
+          ...floorRect(floorImg.naturalWidth, floorImg.naturalHeight, floorSizeM(level.floorSize)),
+        }
       : null;
+
+  const photoCorners = (photo: { x: number; z: number; width: number; depth: number }): { x: number; z: number }[] =>
+    [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ].map(([sx, sz]) => ({ x: photo.x + (sx! * photo.width) / 2, z: photo.z + (sz! * photo.depth) / 2 }));
 
   const half = (v: number): number => Math.round(v * 2) / 2;
 
@@ -523,7 +551,12 @@ export function openLevelEditor(
   const defaultBounds = (): FlightBounds => {
     const photo = photoRect();
     if (photo) {
-      return { minX: half(-photo.width / 2), maxX: half(photo.width / 2), minZ: half(-photo.depth / 2), maxZ: half(photo.depth / 2) };
+      return {
+        minX: half(photo.x - photo.width / 2),
+        maxX: half(photo.x + photo.width / 2),
+        minZ: half(photo.z - photo.depth / 2),
+        maxZ: half(photo.z + photo.depth / 2),
+      };
     }
     const pts = [
       ...(level.rings ?? []),
@@ -607,6 +640,29 @@ export function openLevelEditor(
     ctx.stroke();
   };
 
+  /** 調整底圖模式：照片外框與四角把手（把手大小不隨縮放變）。 */
+  const drawFloorHandles = (): void => {
+    const photo = floorEdit ? photoRect() : null;
+    if (!photo) return;
+    const pts = photoCorners(photo).map((c) => project(c.x, c.z, 0));
+    ctx.save();
+    ctx.setLineDash([8 / mapView.zoom, 6 / mapView.zoom]);
+    ctx.strokeStyle = '#22d3ee';
+    ctx.lineWidth = 2 / mapView.zoom;
+    ctx.beginPath();
+    pts.forEach(([px, py], i) => (i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)));
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const r = 7 / mapView.zoom;
+    for (const [px, py] of pts) {
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(px - r, py - r, r * 2, r * 2);
+      ctx.strokeRect(px - r, py - r, r * 2, r * 2);
+    }
+    ctx.restore();
+  };
+
   /** 俯視比例尺（左下角，跟著縮放）：一眼看出 1m、5m 在圖上多長。 */
   const drawScaleBar = (h: number): void => {
     if (viewMode !== 'top') return;
@@ -665,10 +721,10 @@ export function openLevelEditor(
       ctx.clip();
       const imgW = floorImg.naturalWidth;
       const imgH = floorImg.naturalHeight;
-      const { width, depth } = floorRect(imgW, imgH, floorSizeM(level.floorSize));
-      const [x0, y0] = ground(-width / 2, -depth / 2);
-      const [xu, yu] = ground(width / 2, -depth / 2);
-      const [xv, yv] = ground(-width / 2, depth / 2);
+      const { x, z, width, depth } = photoRect()!;
+      const [x0, y0] = ground(x - width / 2, z - depth / 2);
+      const [xu, yu] = ground(x + width / 2, z - depth / 2);
+      const [xv, yv] = ground(x - width / 2, z + depth / 2);
       const local = new DOMMatrix([(xu - x0) / imgW, (yu - y0) / imgW, (xv - x0) / imgH, (yv - y0) / imgH, x0, y0]);
       ctx.setTransform(ctx.getTransform().multiply(local));
       ctx.drawImage(floorImg, 0, 0);
@@ -796,10 +852,10 @@ export function openLevelEditor(
     ctx.fillStyle = viewMode === 'iso' ? '#152030' : '#1a2332';
     ctx.fillRect(0, 0, w, h);
     const frame = fieldFrame(w, h);
-    if (viewMode === 'top' && floorImg && floorImg.naturalWidth > 0) {
-      const { width, depth } = floorRect(floorImg.naturalWidth, floorImg.naturalHeight, floorSizeM(level.floorSize));
-      const [x1, z1] = project(-width / 2, -depth / 2);
-      const [x2, z2] = project(width / 2, depth / 2);
+    const photo = photoRect();
+    if (viewMode === 'top' && floorImg && photo) {
+      const [x1, z1] = project(photo.x - photo.width / 2, photo.z - photo.depth / 2);
+      const [x2, z2] = project(photo.x + photo.width / 2, photo.z + photo.depth / 2);
       ctx.drawImage(floorImg, x1, z1, x2 - x1, z2 - z1);
     }
 
@@ -1012,6 +1068,7 @@ export function openLevelEditor(
       isoQueue.forEach((item) => item.draw());
     }
     drawCalibMark();
+    drawFloorHandles();
   };
 
   const draw = (): void => {
@@ -1096,6 +1153,7 @@ export function openLevelEditor(
     syncPlaceHeightReadout();
     syncViewHint();
     syncActionButtons();
+    fitViewToLevel();
     loadFloorPreview();
     loadMyKits();
     backdrop.focus();
@@ -1163,6 +1221,21 @@ export function openLevelEditor(
       canvas.height = pxH;
     }
     draw();
+  };
+
+  /**
+   * 開關卡時取景：地圖可放到 60m，但多數關卡只用中間 ±15m，
+   * 依照片與物件的範圍放大，讓原本的關卡看起來跟以前一樣大。
+   */
+  const fitViewToLevel = (): void => {
+    const c = floorCenter(level.floorOffset);
+    const photoReach = level.floorImage ? floorSizeM(level.floorSize) / 2 + Math.max(Math.abs(c.x), Math.abs(c.z)) : 0;
+    const objectReach = [...(level.rings ?? []), ...(level.obstacles ?? []), ...(level.balloons ?? []), ...(level.passZones ?? [])]
+      .reduce((m, o) => Math.max(m, Math.abs(o.x) + 2, Math.abs(o.z) + 2), 0);
+    const reach = Math.max(15, photoReach, objectReach);
+    const zoom = clampMapZoom(Math.max(1, HALF / reach));
+    const [ox, oy] = project(0, 0, 0);
+    mapView = { zoom, panX: ox * (1 - zoom), panY: oy * (1 - zoom) };
   };
 
   const setSelection = (sel: Selection | null): void => {
@@ -1408,8 +1481,80 @@ export function openLevelEditor(
     return mapPointerToContent(sx, sy, mapView);
   };
 
+  /** 地面上的點（y=0、不吸附格線）：量比例與拖照片用，比較準。 */
+  const groundAt = (px: number, py: number): { x: number; z: number } => {
+    const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
+    return viewMode === 'iso'
+      ? isoCanvasToWorld(px - ox, py - oy, size, size, 0, 0)
+      : topCanvasToWorld(px - ox, py - oy, size, size, 0);
+  };
+
+  const round1 = (v: number): number => Math.round(v * 10) / 10;
+
+  /** 游標下是照片的哪個角（拉角縮放）；不在角上回 null。 */
+  const photoCornerAt = (px: number, py: number): { x: number; z: number } | null => {
+    const photo = photoRect();
+    if (!photo) return null;
+    const reach = 12 / mapView.zoom;
+    return (
+      photoCorners(photo).find((c) => {
+        const [cx, cy] = project(c.x, c.z, 0);
+        return Math.hypot(cx - px, cy - py) <= reach;
+      }) ?? null
+    );
+  };
+
+  const photoContains = (p: { x: number; z: number }): boolean => {
+    const photo = photoRect();
+    return !!photo && Math.abs(p.x - photo.x) <= photo.width / 2 && Math.abs(p.z - photo.z) <= photo.depth / 2;
+  };
+
+  const carryObjects = (): boolean => q<HTMLInputElement>('#le-floor-carry').checked;
+
+  /** 照片移動 dx/dz（從 start 算）；勾了「跟著照片」就連物件一起移。 */
+  const shiftedFloor = (start: LevelDef, dx: number, dz: number): LevelDef => {
+    const c0 = floorCenter(start.floorOffset);
+    const base = carryObjects() ? FloorScale.shift(start, dx, dz) : { ...start };
+    return { ...base, floorOffset: { x: round1(clampWorld(c0.x + dx)), z: round1(clampWorld(c0.z + dz)) } };
+  };
+
+  /** 拖完或微調完：回到預設值的欄位不寫進關卡，存檔。 */
+  const settleFloor = (): void => {
+    const c = floorCenter(level.floorOffset);
+    if (c.x === 0 && c.z === 0) delete level.floorOffset;
+    if (level.floorSize === FLOOR_SIZE_DEFAULT) delete level.floorSize;
+    syncFloorChrome();
+    draw();
+    scheduleSave();
+  };
+
+  const dragFloor = (px: number, py: number): void => {
+    if (!floorDrag) return;
+    const { start, from, corner } = floorDrag;
+    const p = groundAt(px, py);
+    if (corner) {
+      const before = floorSizeM(start.floorSize);
+      const c0 = floorCenter(start.floorOffset);
+      const size = FloorScale.resizeByCorner(c0, corner, before, p);
+      const base = carryObjects() ? FloorScale.layout(start, size / before, c0) : { ...start };
+      level = { ...base, floorSize: size };
+    } else {
+      level = shiftedFloor(start, round1(p.x - from.x), round1(p.z - from.z));
+    }
+    propsCtrl.sync();
+    syncFloorChrome();
+    draw();
+  };
+
   canvas.addEventListener('mousemove', (e) => {
     const [px, py] = canvasPos(e);
+    if (floorEdit) {
+      const g = groundAt(px, py);
+      syncInspectorIdle(g.x, g.z);
+      if (floorDrag) dragFloor(px, py);
+      else canvas.style.cursor = photoCornerAt(px, py) ? 'nwse-resize' : photoContains(g) ? 'move' : '';
+      return;
+    }
     const planeY =
       dragSel && dragSel.kind !== 'zone' ? objectPlaneY(dragSel) : placeHeightY;
     const { x, z } = unproject(px, py, planeY);
@@ -1450,6 +1595,16 @@ export function openLevelEditor(
     const [px, py] = canvasPos(e);
     if (calib) {
       calibClick(px, py);
+      return;
+    }
+    if (floorEdit) {
+      if (viewMode === 'side') {
+        toast('請在俯視或 2.5D 調整底圖', 'info');
+        return;
+      }
+      const corner = photoCornerAt(px, py);
+      const from = groundAt(px, py);
+      if (corner || photoContains(from)) floorDrag = { start: level, from, corner };
       return;
     }
     const hit = hitAt(px, py);
@@ -1502,6 +1657,10 @@ export function openLevelEditor(
   });
 
   const endDrag = (): void => {
+    if (floorDrag) {
+      floorDrag = null;
+      settleFloor();
+    }
     if (dragSel) {
       dragSel = null;
       scheduleSave();
@@ -1537,6 +1696,25 @@ export function openLevelEditor(
     if (e.key === 'Escape' && calib) {
       e.preventDefault();
       endCalib();
+      return;
+    }
+    if (floorEdit) {
+      const nudge: Record<string, [number, number]> = {
+        ArrowLeft: [-0.1, 0],
+        ArrowRight: [0.1, 0],
+        ArrowUp: [0, -0.1],
+        ArrowDown: [0, 0.1],
+      };
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        endFloorEdit();
+      } else if (nudge[e.key]) {
+        e.preventDefault();
+        const [dx, dz] = nudge[e.key]!;
+        level = shiftedFloor(level, dx, dz);
+        propsCtrl.sync();
+        settleFloor();
+      }
       return;
     }
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1918,6 +2096,8 @@ export function openLevelEditor(
     const url = level.floorImage;
     q<HTMLElement>('#le-floor-size-row').hidden = !url;
     q<HTMLButtonElement>('#le-floor-calib').hidden = !url;
+    q<HTMLButtonElement>('#le-floor-move').hidden = !url;
+    q<HTMLElement>('#le-floor-carry-row').hidden = !url;
     q<HTMLInputElement>('#le-floor-size').value = level.floorSize != null ? String(floorSizeM(level.floorSize)) : '';
     const photo = url ? photoRect() : null;
     const dims = q<HTMLElement>('#le-floor-dims');
@@ -1992,27 +2172,27 @@ export function openLevelEditor(
       .catch((e) => toast(errText(e, '上傳場地底圖'), 'error'));
   });
   /**
-   * 換照片比例。raw 沒給＝回預設 30m。場上有物件時問老師要不要跟著照片縮放：
+   * 換照片比例。raw 沒給＝回預設 30m（照片以自己的中心縮放）。場上有物件時問老師要不要跟著照片縮放：
    * 物件原本對準照片上的標線，跟著縮放才不會錯位。
    */
   const applyFloorSize = (raw: number | undefined): void => {
     const before = floorSizeM(level.floorSize);
-    const after = raw === undefined ? WORLD : floorSizeM(raw);
+    const after = raw === undefined ? FLOOR_SIZE_DEFAULT : floorSizeM(raw);
     if (raw !== undefined && raw < FLOOR_SIZE_MIN) {
       toast(`照片長邊最小 ${FLOOR_SIZE_MIN} 公尺（再小場地會比圈和無人機還小），已設為 ${FLOOR_SIZE_MIN} 公尺`, 'info');
-    } else if (raw !== undefined && raw > WORLD) {
-      toast(`場地最大 ${WORLD} 公尺，已設為 ${WORLD} 公尺`, 'info');
+    } else if (raw !== undefined && raw > FLOOR_SIZE_MAX) {
+      toast(`場地最大 ${FLOOR_SIZE_MAX} 公尺，已設為 ${FLOOR_SIZE_MAX} 公尺`, 'info');
     }
     if (
       after !== before &&
       FloorScale.hasLayout(level) &&
       confirm('要讓圈、障礙、任務點、飛行範圍跟著照片一起縮放位置嗎？\n（圈的大小與高度不變。按「取消」則物件留在原地。）')
     ) {
-      level = FloorScale.layout(level, after / before);
+      level = FloorScale.layout(level, after / before, floorCenter(level.floorOffset));
       propsCtrl.sync();
     }
     // 30m＝預設，不寫進關卡
-    if (after === WORLD) delete level.floorSize;
+    if (after === FLOOR_SIZE_DEFAULT) delete level.floorSize;
     else level.floorSize = after;
     syncFloorChrome();
     draw();
@@ -2040,11 +2220,7 @@ export function openLevelEditor(
       toast('請在俯視或 2.5D 量比例', 'info');
       return;
     }
-    const { ox, oy, size } = fieldFrame(canvas.width, canvas.height);
-    const p =
-      viewMode === 'iso'
-        ? isoCanvasToWorld(px - ox, py - oy, size, size, 0, 0)
-        : topCanvasToWorld(px - ox, py - oy, size, size, 0);
+    const p = groundAt(px, py);
     if (!calib.a) {
       calib.a = p;
       q<HTMLElement>('#le-view-hint').textContent = '量比例：再點第二個點（Esc 取消）';
@@ -2073,11 +2249,38 @@ export function openLevelEditor(
       toast('場地底圖還在載入，請稍候', 'info');
       return;
     }
+    if (floorEdit) endFloorEdit();
     calib = { a: null };
     q<HTMLButtonElement>('#le-floor-calib').classList.add('active');
     canvas.style.cursor = 'crosshair';
     q<HTMLElement>('#le-view-hint').textContent =
       '量比例：在照片上點第一個點（選實際距離已知的兩點，例如圓的直徑、場地邊長；Esc 取消）';
+  });
+
+  const endFloorEdit = (): void => {
+    floorEdit = false;
+    floorDrag = null;
+    q<HTMLButtonElement>('#le-floor-move').classList.remove('active');
+    canvas.style.cursor = '';
+    syncViewHint();
+    draw();
+  };
+
+  q<HTMLButtonElement>('#le-floor-move').addEventListener('click', () => {
+    if (floorEdit) {
+      endFloorEdit();
+      return;
+    }
+    if (!photoRect()) {
+      toast('場地底圖還在載入，請稍候', 'info');
+      return;
+    }
+    if (calib) endCalib();
+    floorEdit = true;
+    setSelection(null);
+    q<HTMLButtonElement>('#le-floor-move').classList.add('active');
+    syncViewHint();
+    draw();
   });
 
   // 飛行範圍
@@ -2112,6 +2315,8 @@ export function openLevelEditor(
       .then(() => {
         delete level.floorImage;
         delete level.floorSize;
+        delete level.floorOffset;
+        if (floorEdit) endFloorEdit();
         loadFloorPreview();
         scheduleSave();
       })

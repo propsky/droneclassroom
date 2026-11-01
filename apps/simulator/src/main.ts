@@ -190,7 +190,7 @@ bus.on('level-loaded', ({ level }) => {
   const floor = level.floorImage;
   const floorUrl =
     floor && floor.startsWith('/api/levels/') ? `${API_BASE}${floor}` : null;
-  applyLevelFloor(world.scene, floorUrl, level.floorSize);
+  applyLevelFloor(world.scene, floorUrl, level.floorSize, level.floorOffset);
   // 有場地底圖＝真實比例：機身縮到實際大小，才看得出場地多大
   droneVisual.setScaleFactor(CourseScale.droneScale(level));
   applyHomePadLook(world.scene, CourseScale.isReal(level));
