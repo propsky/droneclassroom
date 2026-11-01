@@ -25,6 +25,8 @@ import {
   mapPointerToContent,
   refitMapZoom,
   zoomMapAtPointer,
+  zoneMarkerDiameter,
+  zoneTriggerRadius,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
   applyLevelGoalPreset,
@@ -997,34 +999,71 @@ export function openLevelEditor(
       else drawBalloon();
     });
 
-    if (viewMode === 'top') {
-      (level.passZones ?? []).forEach((zone, i) => {
-        const isPos = zone.type === 'position' || zone.type === undefined;
-        if (isPos && ZoneEdit.hasBox(zone)) {
-          const { minX, maxX, minZ, maxZ } = ZoneEdit.drawBox(zone);
-          const [x1, z1] = project(minX, minZ);
-          const [x2, z2] = project(maxX, maxZ);
-          ctx.fillStyle = isSelected('zone', i) ? 'rgba(96,165,250,0.15)' : 'rgba(167,139,250,0.12)';
-          ctx.fillRect(x1, z1, x2 - x1, z2 - z1);
-          ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.65)';
-          ctx.lineWidth = isSelected('zone', i) ? 2.5 : 1.5;
-          ctx.setLineDash([4, 4]);
-          ctx.strokeRect(x1, z1, x2 - x1, z2 - z1);
-          ctx.setLineDash([]);
-        }
-        const [zx, zz] = project(zone.x, zone.z);
-        ctx.strokeStyle = isSelected('zone', i) ? '#60a5fa' : 'rgba(167,139,250,0.85)';
-        ctx.lineWidth = isSelected('zone', i) ? 2.5 : 2;
-        if (!isPos || !ZoneEdit.hasBox(zone)) {
-          ctx.setLineDash([4, 4]);
-          ctx.strokeRect(zx - 12, zz - 12, 24, 24);
-          ctx.setLineDash([]);
-        }
-        ctx.fillStyle = '#c4b5fd';
-        ctx.font = '9px sans-serif';
-        ctx.fillText(zone.label?.slice(0, 4) ?? String(i + 1), zx - 3, zz + 3);
-      });
-    }
+    // 任務點：俯視與 2.5D 都畫在地面上（2.5D 先畫，圈和障礙會疊在上面）
+    (level.passZones ?? []).forEach((zone, i) => {
+      const sel = isSelected('zone', i);
+      const isPos = zone.type === 'position' || zone.type === undefined;
+      const tracePoly = (pts: [number, number][]): void => {
+        ctx.beginPath();
+        pts.forEach(([x, z], k) => {
+          const [px, py] = project(x, z, 0);
+          if (k === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+      };
+      const trigger = zoneTriggerRadius(zone);
+      let area: [number, number][] | null = null;
+      if (isPos && ZoneEdit.hasBox(zone)) {
+        const { minX, maxX, minZ, maxZ } = ZoneEdit.drawBox(zone);
+        area = [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]];
+      } else if (isPos || trigger !== null) {
+        const r = isPos ? zoneMarkerDiameter(zone) / 2 : trigger!;
+        area = Array.from({ length: 28 }, (_, k): [number, number] => {
+          const a = (k / 28) * Math.PI * 2;
+          return [zone.x + Math.cos(a) * r, zone.z + Math.sin(a) * r];
+        });
+      }
+      if (area) {
+        tracePoly(area);
+        ctx.fillStyle = sel ? 'rgba(96,165,250,0.28)' : 'rgba(167,139,250,0.24)';
+        ctx.fill();
+        ctx.strokeStyle = sel ? '#60a5fa' : '#a78bfa';
+        ctx.lineWidth = sel ? 3 : 2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      // 步驟編號牌（任務一定照順序做）＋名字
+      const [zx, zz] = project(zone.x, zone.z, 0);
+      const num = String(i + 1);
+      ctx.font = 'bold 13px sans-serif';
+      const r = Math.max(11, ctx.measureText(num).width / 2 + 6);
+      ctx.beginPath();
+      ctx.arc(zx, zz, r, 0, Math.PI * 2);
+      ctx.fillStyle = sel ? '#2563eb' : '#7c3aed';
+      ctx.fill();
+      ctx.strokeStyle = '#f5f3ff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(num, zx, zz + 0.5);
+      const name = zone.label?.trim();
+      if (name && name !== `步驟 ${i + 1}`) {
+        ctx.font = 'bold 11px sans-serif';
+        const tw = ctx.measureText(name).width;
+        const lx = zx + r + 4;
+        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+        ctx.fillRect(lx, zz - 9, tw + 10, 18);
+        ctx.fillStyle = '#ede9fe';
+        ctx.textAlign = 'start';
+        ctx.fillText(name, lx + 5, zz + 0.5);
+      }
+      ctx.textAlign = 'start';
+      ctx.textBaseline = 'alphabetic';
+    });
 
     (level.rings ?? []).forEach((ring, i) => {
       const drawRing = (): void => {
@@ -1388,7 +1427,7 @@ export function openLevelEditor(
       tryList('ring', level.rings ?? []) ??
       tryList('obstacle', level.obstacles ?? []) ??
       tryList('balloon', level.balloons ?? []) ??
-      (viewMode === 'top' ? tryList('zone', level.passZones ?? []) : null)
+      tryList('zone', level.passZones ?? [])
     );
   };
 

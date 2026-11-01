@@ -10,6 +10,8 @@ import {
   DynamicTexture,
   Material,
   TransformNode,
+  Vector3,
+  type LinesMesh,
 } from '@babylonjs/core';
 import type { LevelDef, RingGuideLook, RingGuidePhase } from '@creafly/shared';
 import {
@@ -76,13 +78,25 @@ function parseColor(c: number | string | undefined, fallback: number): number {
   return fallback;
 }
 
-/** 位置任務點地面圈：還沒輪到維持原本的綠色；下一個用圈的金色、做完用圈的灰色 */
+/**
+ * 任務點：地面實心色塊＋外框＋光柱。鋪在考照場照片上也看得到。
+ * 還沒輪到維持綠色；下一個用圈的金色、做完用圈的灰色。
+ */
 const ZONE_COLOR = 0x4ade80;
-const ZONE_ALPHA: Record<RingGuidePhase, number> = { next: 0.85, upcoming: 0.4, passed: 0.25 };
+const ZONE_ALPHA: Record<RingGuidePhase, number> = { next: 0.55, upcoming: 0.35, passed: 0.15 };
+/** 光柱：遠處就看得到要往哪裡飛；做完的不畫 */
+const ZONE_PILLAR_ALPHA: Record<RingGuidePhase, number> = { next: 0.3, upcoming: 0.12, passed: 0 };
+const ZONE_PILLAR_HEIGHT = 3;
+/** 編號牌高度：高過機身，從後方鏡頭也不會被無人機擋住 */
+const ZONE_BADGE_Y = 2.2;
 
 interface ZoneVisual {
+  root: TransformNode;
   disc: Mesh;
   mat: StandardMaterial;
+  edge: LinesMesh;
+  pillar: Mesh;
+  pillarMat: StandardMaterial;
   badge: Mesh | null;
   badgeTex: DynamicTexture | null;
   badgeKey: string;
@@ -256,32 +270,77 @@ export class LevelVisuals {
         this.zones.push(null);
         return;
       }
+      const x = zone.x || 0;
+      const z = zone.z || 0;
+      const root = this.track(new TransformNode(`zoneNode${i}`, scene));
+      root.position.set(x, 0, z);
+      // 位置任務點四邊都有設：直接畫出判定框（學生看到的就是要飛進去的範圍）；其他畫圓
+      const box =
+        zone.type === 'position' &&
+        zone.minX != null && zone.maxX != null && zone.minZ != null && zone.maxZ != null &&
+        zone.maxX > zone.minX && zone.maxZ > zone.minZ
+          ? { minX: zone.minX, maxX: zone.maxX, minZ: zone.minZ, maxZ: zone.maxZ }
+          : null;
       const disc = this.track(
-        MeshBuilder.CreateTorus(
-          `zoneDisc${i}`,
-          { diameter: marker, thickness: 0.6, tessellation: 32 },
-          scene,
-        ),
+        box
+          ? MeshBuilder.CreateGround(`zoneDisc${i}`, { width: box.maxX - box.minX, height: box.maxZ - box.minZ }, scene)
+          : MeshBuilder.CreateDisc(`zoneDisc${i}`, { radius: marker / 2, tessellation: 40 }, scene),
       );
-      disc.scaling.y = 0.03;
-      disc.position.set(zone.x || 0, 0.02, zone.z || 0);
+      if (!box) disc.rotation.x = Math.PI / 2;
+      disc.parent = root;
+      disc.position.set(box ? (box.minX + box.maxX) / 2 - x : 0, 0.03, box ? (box.minZ + box.maxZ) / 2 - z : 0);
+      disc.isPickable = false;
       const mat = this.track(new StandardMaterial(`zoneDiscMat${i}`, scene));
       mat.emissiveColor = hex(ZONE_COLOR);
       mat.disableLighting = true;
-      mat.alpha = 0.4;
+      mat.backFaceCulling = false;
+      mat.alpha = ZONE_ALPHA.upcoming;
       disc.material = mat;
-      // 編號牌掛在不縮放的節點上（disc 的 y 被壓扁了），放在地面圈旁邊
-      const node = this.track(new TransformNode(`zoneNode${i}`, scene));
-      node.position.set(zone.x || 0, 0, zone.z || 0);
-      const badge = this.makeBadge(scene, `zoneNum${i}`, node);
-      if (badge) badge.mesh.position.set(marker / 2 + 0.45, 0.8, 0);
+      // 外框：不透明的線，色塊淡的時候也分得出邊界
+      const outline = box
+        ? [
+            new Vector3(box.minX - x, 0.05, box.minZ - z),
+            new Vector3(box.maxX - x, 0.05, box.minZ - z),
+            new Vector3(box.maxX - x, 0.05, box.maxZ - z),
+            new Vector3(box.minX - x, 0.05, box.maxZ - z),
+            new Vector3(box.minX - x, 0.05, box.minZ - z),
+          ]
+        : Array.from({ length: 41 }, (_, k) => {
+            const a = (k / 40) * Math.PI * 2;
+            return new Vector3((Math.cos(a) * marker) / 2, 0.05, (Math.sin(a) * marker) / 2);
+          });
+      const edge = this.track(MeshBuilder.CreateLines(`zoneEdge${i}`, { points: outline }, scene));
+      edge.parent = root;
+      edge.isPickable = false;
+      const pillar = this.track(
+        MeshBuilder.CreateCylinder(
+          `zonePillar${i}`,
+          { diameter: Math.min(1.2, marker * 0.6), height: ZONE_PILLAR_HEIGHT, tessellation: 20, cap: Mesh.NO_CAP },
+          scene,
+        ),
+      );
+      pillar.parent = root;
+      pillar.position.y = ZONE_PILLAR_HEIGHT / 2;
+      pillar.isPickable = false;
+      const pillarMat = this.track(new StandardMaterial(`zonePillarMat${i}`, scene));
+      pillarMat.emissiveColor = hex(ZONE_COLOR);
+      pillarMat.disableLighting = true;
+      pillarMat.backFaceCulling = false;
+      pillarMat.alpha = ZONE_PILLAR_ALPHA.upcoming;
+      pillar.material = pillarMat;
+      const badge = this.makeBadge(scene, `zoneNum${i}`, root);
+      if (badge) badge.mesh.position.set(0, ZONE_BADGE_Y, 0);
       this.zones.push({
+        root,
         disc,
         mat,
+        edge,
+        pillar,
+        pillarMat,
         badge: badge?.mesh ?? null,
         badgeTex: badge?.tex ?? null,
         badgeKey: '',
-        point: { x: zone.x || 0, z: zone.z || 0 },
+        point: { x, z },
       });
     });
     this.refreshZoneGuide();
@@ -396,13 +455,18 @@ export class LevelVisuals {
     );
     this.zones.forEach((z, i) => {
       if (!z) return;
-      z.disc.setEnabled(shown[i]!);
-      z.badge?.setEnabled(shown[i]!);
+      z.root.setEnabled(shown[i]!);
       if (!shown[i]) return;
       const phase = RingGuide.phase(done, i);
       const look = RingGuide.look(phase);
-      z.mat.emissiveColor = hex(look.color ?? ZONE_COLOR);
+      const color = hex(look.color ?? ZONE_COLOR);
+      z.mat.emissiveColor = color;
       z.mat.alpha = ZONE_ALPHA[phase];
+      z.edge.color = color;
+      z.edge.alpha = phase === 'passed' ? 0.4 : 1;
+      z.pillarMat.emissiveColor = color;
+      z.pillarMat.alpha = ZONE_PILLAR_ALPHA[phase];
+      z.pillar.setEnabled(ZONE_PILLAR_ALPHA[phase] > 0);
       if (!z.badge || !z.badgeTex) return;
       z.badge.scaling.setAll(look.badgeScale);
       const label = RingGuide.label(i);

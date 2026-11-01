@@ -177,7 +177,7 @@ describe('任務點標出下一步', () => {
     expectEmissive(disc(2).mat, RingGuide.look('next').color!);
     expect(disc(1).mesh.isEnabled()).toBe(false);
     expect(disc(3).mesh.isEnabled()).toBe(true);
-    expect(disc(3).mat.alpha).toBe(0.4);
+    expect(disc(3).mat.alpha).toBe(0.35);
   });
 
   it('高度任務點設了觸發半徑：地面畫出觸發範圍；沒設的（任何位置都算）不畫', () => {
@@ -193,6 +193,24 @@ describe('任務點標出下一步', () => {
     applyLoadLevel('t-trigger');
     expect(scene.getMeshByName('zoneDisc0')).toBeNull();
     expect(disc(1).mesh.isEnabled()).toBe(true);
+  });
+
+  it('位置任務點四邊都有設：地面畫的就是判定框；做完的光柱收掉', () => {
+    const custom: LevelDef = {
+      id: 't-box',
+      name: '判定框',
+      passZones: [{ type: 'position', x: 4, z: -6, label: '步驟 1', minX: 2, maxX: 7, minZ: -8, maxZ: -5 }],
+    };
+    levelState.levels = [...chapter1.levels, custom];
+    applyLoadLevel('t-box');
+    const box = disc(0).mesh;
+    box.computeWorldMatrix(true);
+    const { minimumWorld, maximumWorld } = box.getBoundingInfo().boundingBox;
+    expect([minimumWorld.x, maximumWorld.x, minimumWorld.z, maximumWorld.z].map((v) => Math.round(v * 100) / 100)).toEqual([2, 7, -8, -5]);
+    expect(scene.getMeshByName('zonePillar0')?.isEnabled()).toBe(true);
+    levelState.zoneProgress[0] = true;
+    bus.emit('zone-passed', { index: 0, done: 1, total: 1 });
+    expect(scene.getMeshByName('zonePillar0')?.isEnabled()).toBe(false);
   });
 });
 
