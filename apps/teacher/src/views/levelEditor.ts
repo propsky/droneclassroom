@@ -2001,9 +2001,19 @@ export function openLevelEditor(
     });
   });
 
+  // 試飛前一定先存檔：等這次存完才開，不會試到舊的關卡
+  let previewing = false;
   q<HTMLButtonElement>('#le-preview').addEventListener('click', () => {
+    if (previewing) return;
+    previewing = true;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveHint.textContent = '儲存中…';
     syncLevelFromForm();
-    void flushSave().then(() => openPreviewModal(level));
+    void flushSave()
+      .then(() => openPreviewModal(level))
+      .finally(() => {
+        previewing = false;
+      });
   });
 
   q<HTMLButtonElement>('#le-export').addEventListener('click', () => {
@@ -2172,8 +2182,9 @@ export function openLevelEditor(
       .catch((e) => toast(errText(e, '上傳場地底圖'), 'error'));
   });
   /**
-   * 換照片比例。raw 沒給＝回預設 30m（照片以自己的中心縮放）。場上有物件時問老師要不要跟著照片縮放：
-   * 物件原本對準照片上的標線，跟著縮放才不會錯位。
+   * 換照片比例。raw 沒給＝回預設 30m（照片以自己的中心縮放）。
+   * 勾了「跟著照片」就讓物件一起縮放：物件原本對準照片上的標線，跟著縮放才不會錯位。
+   * 不跳確認框：改完數字直接點「試飛」時，確認框會吃掉那次點擊。
    */
   const applyFloorSize = (raw: number | undefined): void => {
     const before = floorSizeM(level.floorSize);
@@ -2183,11 +2194,7 @@ export function openLevelEditor(
     } else if (raw !== undefined && raw > FLOOR_SIZE_MAX) {
       toast(`場地最大 ${FLOOR_SIZE_MAX} 公尺，已設為 ${FLOOR_SIZE_MAX} 公尺`, 'info');
     }
-    if (
-      after !== before &&
-      FloorScale.hasLayout(level) &&
-      confirm('要讓圈、障礙、任務點、飛行範圍跟著照片一起縮放位置嗎？\n（圈的大小與高度不變。按「取消」則物件留在原地。）')
-    ) {
+    if (after !== before && FloorScale.hasLayout(level) && carryObjects()) {
       level = FloorScale.layout(level, after / before, floorCenter(level.floorOffset));
       propsCtrl.sync();
     }

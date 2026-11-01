@@ -80,9 +80,11 @@ export default defineConfig(({ mode }) => {
           // clientsClaim 只在「啟用」當下生效：首次安裝後立刻接管本頁（runtime cache 才能開始收 HDRI 等資產）
           skipWaiting: false,
           clientsClaim: true,
-          // SPA 導覽離線時回 index.html；老師後台、管理員面板與後端路徑不接管
+          // SPA 導覽離線時回 index.html；老師後台、管理員面板與後端路徑不接管。
+          // 老師試飛（?preview=1）也不接管：後台一直開著時新版 SW 永遠在等待，試飛會卡在舊版；
+          // 走網路拿最新 index.html，新的 chunk 不在舊預快取裡，也會直接走網路。
           navigateFallback: 'index.html',
-          navigateFallbackDenylist: [/^\/teacher/, /^\/admin/, /^\/api\//, /^\/auth/, /^\/ws/],
+          navigateFallbackDenylist: [/^\/teacher/, /^\/admin/, /^\/api\//, /^\/auth/, /^\/ws/, /[?&]preview=1(&|$)/],
           runtimeCaching: [
             // 後端 API / 登入 / 老師後台：一律不快取（同網域路徑）。
             // WebSocket 握手不經 Service Worker，/ws 天生不受影響。
