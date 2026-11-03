@@ -29,7 +29,8 @@ describe('RingGuide', () => {
     ];
     expect(RingGuide.lateralSpread(0, line)).toBe(0);
     expect(RingGuide.lateralSpread(1, line)).toBe(3);
-    expect(RingGuide.lateralSpread(2, line)).toBe(6);
+    // 左右輪流：第 3 圈改往另一側，不會一路往同一側推出場外
+    expect(RingGuide.lateralSpread(2, line)).toBe(-3);
 
     const split = [
       { x: 5, z: 0 },
@@ -101,7 +102,7 @@ describe('RingGuide', () => {
     ];
     expect(RingGuide.lateralSpread(2, rings)).toBe(0);
     expect(RingGuide.lateralSpread(3, rings)).toBe(3);
-    expect(RingGuide.lateralSpread(4, rings)).toBe(6);
+    expect(RingGuide.lateralSpread(4, rings)).toBe(-3);
   });
 
   it('只有下一個圈會亮、會脈衝；對準時機頭提示改綠', () => {

@@ -52,7 +52,7 @@ describe('臺北賽制老師操作', () => {
 
   it('沒有賽制切換，時間預設 2 分鐘，開賽不送 ruleset', () => {
     const dash = mount();
-    dash.setRooms([room({ code: 'MAIN', createdAt: 1, soccerRuleset: 'f9a' })], 'MAIN');
+    dash.setRooms([room({ code: 'MAIN', createdAt: 1 })], 'MAIN');
     expect(document.querySelector('#soccer-rules')).toBeNull();
     const dur = document.querySelector<HTMLSelectElement>('#soccer-dur')!;
     expect(dur.value).toBe('120');
@@ -63,7 +63,7 @@ describe('臺北賽制老師操作', () => {
 
   it('扣分按鈕要按兩次才送 soccer_warn，結算寫出扣分與先進球', () => {
     const dash = mount();
-    dash.setRooms([room({ code: 'MAIN', createdAt: 1, soccerRuleset: 'taipei' })], 'MAIN');
+    dash.setRooms([room({ code: 'MAIN', createdAt: 1 })], 'MAIN');
     const state: SoccerStateMsg = {
       type: 'soccer_state',
       status: 'running',
@@ -78,12 +78,6 @@ describe('臺北賽制老師操作', () => {
       ],
       match: {
         phase: 'period',
-        period: 1,
-        sets: { blue: 0, red: 0 },
-        pkScores: { blue: 0, red: 0 },
-        pkTurn: null,
-        pkRound: 0,
-        ruleset: 'taipei',
         deductions: { blue: 0, red: 0 },
         firstGoal: 'blue',
       },

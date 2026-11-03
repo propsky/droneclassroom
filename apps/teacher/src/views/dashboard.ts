@@ -588,7 +588,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   /** 傳到這個關卡會不會結束目前賽局。送進正在打的那一場不會結束。 */
   const switchEndsGame = (levelId: string): boolean =>
     (['countdown', 'running'].includes(gameState.arena) && ClassLevelSend.stopsArena(levelId)) ||
-    (['countdown', 'running', 'break', 'golden', 'pk'].includes(gameState.soccer) &&
+    (['countdown', 'running'].includes(gameState.soccer) &&
       ClassLevelSend.stopsSoccer(levelId));
   const levelLabel = (levelId: string): string => ClassLevelSend.find(levelId)?.title ?? levelId;
 
@@ -789,14 +789,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     red: root.querySelector<HTMLElement>('#soccer-red')!,
   };
   // 比分列的最新狀態（goal_ok 只帶比分 → 其餘沿用上一筆）；mode 缺省 'striker'（legacy 相容）
-  const emptyMatch = (): SoccerMatchMeta => ({
-    phase: 'idle',
-    period: 0,
-    sets: { blue: 0, red: 0 },
-    pkScores: { blue: 0, red: 0 },
-    pkTurn: null,
-    pkRound: 0,
-  });
+  const emptyMatch = (): SoccerMatchMeta => ({ phase: 'idle' });
   const soccer: {
     scores: Record<SoccerTeam, number>;
     armed: Record<SoccerTeam, boolean>;
@@ -812,11 +805,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     mode: 'striker',
     match: emptyMatch(),
   };
-  const shownScores = (): Record<SoccerTeam, number> =>
-    soccer.status === 'pk' ? soccer.match.pkScores : soccer.scores;
   /** 比分列（藍/紅隊色標 + mono 大號數字；statusText 例 '2:30' / '等待開始'） */
   const drawScore = (statusText: string): void => {
-    const sc = shownScores();
+    const sc = soccer.scores;
     soccerScoreEl.innerHTML =
       `<span class="score-side blue">藍隊</span>` +
       `<span class="score-num">${sc.blue} : ${sc.red}</span>` +
@@ -825,17 +816,9 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   };
   const phasePrefix = (): string => {
     const m = soccer.match;
-    if (m.ruleset === 'taipei') {
-      if (m.phase === 'landing') return '降落倒數';
-      const d = m.deductions;
-      return d ? `臺北賽制 扣分 ${d.blue}:${d.red}` : '臺北賽制';
-    }
-    const sets = `局數 ${m.sets.blue}:${m.sets.red}`;
-    if (soccer.status === 'break') return `局間休息 ${sets}`;
-    if (soccer.status === 'golden') return `黃金進球 ${sets}`;
-    if (soccer.status === 'pk') return `PK 第${m.pkRound || 1}輪 ${m.pkTurn === 'red' ? '紅' : '藍'}方`;
-    if (soccer.status === 'running' && soccer.mode === 'striker') return `第${m.period || 1}局 ${sets}`;
-    return '';
+    if (m.phase === 'landing') return '降落倒數';
+    const d = m.deductions;
+    return d ? `臺北賽制 扣分 ${d.blue}:${d.red}` : '臺北賽制';
   };
   const soccerClock = makeCountdown((text) => {
     const prefix = phasePrefix();
@@ -945,14 +928,13 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const renderSoccerScore = (): void => {
     const { armed, status, endTime } = soccer;
     gameState.soccer = status;
-    const live = status === 'running' || status === 'countdown' || status === 'break' || status === 'golden' || status === 'pk';
-    const timed = status === 'running' || status === 'break' || status === 'golden' || status === 'pk';
+    const live = status === 'running' || status === 'countdown';
+    const timed = status === 'running';
     setTabLive('soccer', live);
-    soccerStopBtn.hidden = !live; // 停止鈕在卡頭，賽事進行（含休息／黃金／PK）才顯示
+    soccerStopBtn.hidden = !live; // 停止鈕在卡頭，賽事進行中才顯示
     soccerStartBtn.disabled = live; // 開始鈕 disabled 不隱藏（版面不跳）
     soccerPill.hidden = !live && status !== 'done';
     soccerPill.classList.toggle('live', live);
-    const taipei = true;
     soccerPillLabel.textContent =
       status === 'running'
         ? soccer.match.phase === 'landing'
@@ -960,29 +942,18 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           : '進行中'
         : status === 'countdown'
           ? '即將開始'
-          : status === 'break'
-            ? '局間休息'
-            : status === 'golden'
-              ? '黃金進球'
-              : status === 'pk'
-                ? 'PK'
-                : status === 'done'
-                  ? '已結束'
-                  : '';
+          : status === 'done'
+            ? '已結束'
+            : '';
     if (!timed) soccerPillClock.textContent = status === 'countdown' ? '3-2-1…' : '';
     soccerClock.stop();
     if (timed && endTime) {
       soccerClock.run(endTime);
     } else if (status === 'done') {
-      if (taipei) {
-        const d = soccer.match.deductions ?? { blue: 0, red: 0 };
-        const netB = soccer.scores.blue - d.blue;
-        const netR = soccer.scores.red - d.red;
-        drawScore(`結束 淨分 ${netB}:${netR}`);
-      } else {
-        const sets = soccer.mode === 'striker' ? `局數 ${soccer.match.sets.blue}:${soccer.match.sets.red}` : '';
-        drawScore(sets ? `結束 ${sets}` : '結束');
-      }
+      const d = soccer.match.deductions ?? { blue: 0, red: 0 };
+      const netB = soccer.scores.blue - d.blue;
+      const netR = soccer.scores.red - d.red;
+      drawScore(`結束 淨分 ${netB}:${netR}`);
     } else if (status === 'countdown') {
       drawScore('3-2-1…');
     } else {
@@ -992,17 +963,16 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
     const armedText = (ok: boolean): string =>
       ok ? '<span class="armed-ok">可得分</span>' : '<span class="armed-no">攻擊手須回半場</span>';
     const ded = soccer.match.deductions;
-    const taipeiLine =
-      taipei && ded
-        ? `扣分：藍隊 ${ded.blue} ｜ 紅隊 ${ded.red}` +
-          (soccer.match.firstGoal === 'blue' || soccer.match.firstGoal === 'red'
-            ? ` ｜ 先進球 ${soccer.match.firstGoal === 'blue' ? '藍隊' : '紅隊'}`
-            : '')
-        : '';
+    const taipeiLine = ded
+      ? `扣分：藍隊 ${ded.blue} ｜ 紅隊 ${ded.red}` +
+        (soccer.match.firstGoal === 'blue' || soccer.match.firstGoal === 'red'
+          ? ` ｜ 先進球 ${soccer.match.firstGoal === 'blue' ? '藍隊' : '紅隊'}`
+          : '')
+      : '';
     soccerArmedEl.innerHTML =
-      taipei && soccer.match.phase === 'landing'
+      soccer.match.phase === 'landing'
         ? '時間到：10 秒內降落到地面。還沒落地的人各扣 1 分。'
-        : (status === 'running' || status === 'golden') && soccer.mode === 'striker'
+        : status === 'running' && soccer.mode === 'striker'
           ? `得分狀態：藍隊 ${armedText(armed.blue)} ｜ 紅隊 ${armedText(armed.red)}${taipeiLine ? ` ｜ ${taipeiLine}` : ''}`
           : taipeiLine;
   };
@@ -1010,17 +980,12 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
   const soccerResultOf = (msg: {
     winner: SoccerResultInput['winner'];
     scores: SoccerResultInput['goals'];
-    reason: string;
     match?: SoccerMatchMeta;
   }): SoccerResultInput => ({
-    ruleset: msg.match?.ruleset === 'f9a' ? 'f9a' : 'taipei',
     winner: msg.winner,
     goals: msg.scores,
     deductions: msg.match?.deductions,
     firstGoal: msg.match?.firstGoal,
-    sets: msg.match?.sets,
-    pkScores: msg.match?.pkScores,
-    reason: msg.reason,
   });
 
   // ---- 班級 / 房間管理：班級列（切房 / 開班級的房 / 新增班級）＋ 名冊卡頭（房碼 / 鎖房 / 設定 / 關閉 / 封存）＋ 名冊移出 ----
@@ -1566,7 +1531,6 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
             byName: msg.byName || '',
             scores: msg.scores,
             own: msg.own,
-            pk: msg.pk,
           });
           break;
         }

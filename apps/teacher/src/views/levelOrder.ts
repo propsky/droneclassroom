@@ -41,13 +41,13 @@ export class RingAngle {
 
   /**
    * 依飛行順序把每個圈轉成面對路線，並停止自轉（會轉的圈角度沒意義）。
-   * 0° 不寫進關卡，維持舊關卡的 JSON 樣子。
+   * 0° 不寫進關卡，維持舊關卡的 JSON 樣子；但有 faceYaw 的圈沒寫 yaw 會改用 faceYaw 擺，0° 也要寫。
    */
   static alongRoute(rings: readonly RingDef[]): RingDef[] {
     return rings.map((r, i) => {
       const yaw = RingGuide.routeYaw(rings, i);
       const next: RingDef = { ...r, spin: 0 };
-      if (yaw === 0) delete next.yaw;
+      if (yaw === 0 && r.faceYaw == null) delete next.yaw;
       else next.yaw = yaw;
       return next;
     });

@@ -162,16 +162,11 @@ function hud(over: Partial<SoccerHudInput> = {}): SoccerHudInput {
     status: 'running',
     mode: 'striker',
     scores: { blue: 0, red: 0 },
-    sets: { blue: 0, red: 0 },
-    period: 1,
     endTime: 10_000,
     now: 0,
     myTeam: 'blue',
     myStriker: true,
     needReturn: false,
-    pkScores: { blue: 0, red: 0 },
-    pkTurn: null,
-    pkRound: 0,
     ...over,
   };
 }

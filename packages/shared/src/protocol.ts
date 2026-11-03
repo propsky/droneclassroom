@@ -69,14 +69,12 @@ export interface SoccerGoalMsg { type: 'soccer_goal' }
 export interface SoccerCrashMsg { type: 'soccer_crash' }
 /** 前鋒失能時，未失能的隊員喊暫停換前鋒。strikerId 空著就換隊上第一位還能飛的。 */
 export interface SoccerTimeoutMsg { type: 'soccer_timeout'; strikerId?: string }
-/** PK 這一記改由自己來罰（要輪到自己的隊）。 */
-export interface SoccerPkClaimMsg { type: 'soccer_pk_claim' }
 
 export type StudentToServer =
   | RegisterMsg | ProgressMsg | LevelStartMsg | LevelLoadReqMsg | PingMsg | CompleteLevelMsg
   | ArenaJoinMsg | ArenaLeaveMsg | ArenaPosMsg | ArenaPopMsg
   | SoccerJoinMsg | SoccerLeaveMsg | SoccerPosMsg | SoccerGoalMsg | SoccerCrashMsg
-  | SoccerTimeoutMsg | SoccerPkClaimMsg;
+  | SoccerTimeoutMsg;
 
 // ---------- Teacher → Server ----------
 
@@ -108,20 +106,14 @@ export interface ArenaStopMsg { type: 'arena_stop' }
 
 /** 足球玩法。前鋒穿對方圓環。推球（ball）已移除。 */
 export type SoccerMode = 'striker';
-/** 局數打平之後怎麼走。預設 pk_then_golden（WDSC：先各 3 球 PK，再黃金進球）。 */
-export type SoccerTieBreak = 'pk_then_golden' | 'golden_then_pk';
-/** f9a = 舊比賽紀錄。新的比賽一律 taipei，讀到 f9a 也不改去三局兩勝。 */
-export type SoccerRuleset = 'f9a' | 'taipei';
+// 足球只有臺北賽制（單場、扣分制）。舊的 F9A 三局兩勝／黃金進球／PK 已移除。
 export interface SoccerStartMsg {
   type: 'soccer_start';
   durationSec: number;
   mode?: SoccerMode;
-  tieBreak?: SoccerTieBreak;
-  ruleset?: SoccerRuleset;
 }
 /**
- * 老師記一次警告。F9A：同理由兩次升黃牌，deduct 不算分。
- * 臺北賽制且 deduct：該隊扣 1 分，不升黃牌。studentId 空、改帶 team = 整隊扣分。
+ * 老師記一次警告。deduct：該隊扣 1 分，不升黃牌。studentId 空、改帶 team = 整隊扣分。
  */
 export interface SoccerWarnMsg {
   type: 'soccer_warn';
@@ -160,8 +152,6 @@ export interface RoomSettings {
    * 'server' = 取消釘選（舊語意）。不影響這一場用的場地。
    */
   soccerClass?: SoccerClassCode | 'server';
-  /** 舊房間可能寫著 f9a。伺服器讀到一律當臺北賽制，不改已存的字。 */
-  soccerRuleset?: SoccerRuleset;
 }
 
 export interface RoomInfo {
@@ -186,8 +176,6 @@ export interface RoomInfo {
   soccerClass?: SoccerClassCode;
   /** true = JSON 裡還留著釘選。比賽不採用，固定 F9A-B。 */
   soccerClassPinned?: boolean;
-  /** 實際賽制。現在固定 taipei。舊紀錄若寫 f9a，仍是合法字，畫面不當成三局兩勝。 */
-  soccerRuleset?: SoccerRuleset;
 }
 
 /**
@@ -474,44 +462,27 @@ export interface SoccerFieldDef {
   startWidth?: number;
 }
 
-/** 賽制階段。正規局進行中 status 仍是 'running'；休息／黃金／PK 用同名 status */
-export type SoccerPhase = 'idle' | 'period' | 'break' | 'golden' | 'pk' | 'landing';
+/** 賽制階段：period 比賽中、landing 時間到後的降落倒數。 */
+export type SoccerPhase = 'idle' | 'period' | 'landing';
 
-/** 三局兩勝的局數與 PK 進度（soccer_state / soccer_go / soccer_scores / soccer_end 附帶） */
+/**
+ * 臺北賽制的進度（soccer_state / soccer_go / soccer_scores / soccer_end 附帶）。
+ * 伺服器為了舊版快取客戶端仍會多送 sets／pk* 等舊欄位，這裡不讀。
+ */
 export interface SoccerMatchMeta {
   phase: SoccerPhase;
-  /** 正規局序（1–3）；尚未開賽為 0 */
-  period: number;
-  /** 已贏局數 */
-  sets: Record<SoccerTeam, number>;
-  /** PK 點球比分 */
-  pkScores: Record<SoccerTeam, number>;
-  /** PK 輪到哪一隊；非 PK 為 null */
-  pkTurn: SoccerTeam | null;
-  /** PK 輪次（1 起）；非 PK 為 0 */
-  pkRound: number;
-  /** 擲硬幣贏的那一隊先罰；非 PK 為 null／缺省 */
-  pkFirst?: SoccerTeam | null;
-  /** 這一記的主罰；可以不是開賽時的前鋒 */
-  pkShooterId?: string | null;
-  /** 這一記的守方 */
-  pkDefenderId?: string | null;
-  /** 這場的平手順序 */
-  tieBreak?: SoccerTieBreak;
-  /** 這場賽制。舊伺服器不帶，客戶端當成 f9a。 */
-  ruleset?: SoccerRuleset;
-  /** 臺北賽制：這場第一個有效進球的隊伍。沒有進球為 null。 */
+  /** 這場第一個有效進球的隊伍。沒有進球為 null。 */
   firstGoal?: SoccerTeam | null;
-  /** 臺北賽制：各隊累計扣分。 */
+  /** 各隊累計扣分。 */
   deductions?: Record<SoccerTeam, number>;
-  /** 臺北賽制：進球減扣分。 */
+  /** 進球減扣分。 */
   netScores?: Record<SoccerTeam, number>;
 }
 
 export interface SoccerStateMsg {
   type: 'soccer_state';
-  /** 結束是 'done'。break / golden / pk 是階段一的賽制階段 */
-  status: 'idle' | 'countdown' | 'running' | 'break' | 'golden' | 'pk' | 'done';
+  /** 結束是 'done' */
+  status: 'idle' | 'countdown' | 'running' | 'done';
   /** 玩法（缺省視為 'striker'） */
   mode?: SoccerMode;
   endTime: number; durationSec: number;
@@ -521,7 +492,7 @@ export interface SoccerStateMsg {
   players: SoccerPlayerState[];
   spawns?: SoccerSpawn[];
   field?: SoccerFieldDef;
-  /** 三局兩勝／黃金進球／PK。舊伺服器可能不帶 */
+  /** 舊伺服器可能不帶 */
   match?: SoccerMatchMeta;
 }
 export interface SoccerCountdownMsg { type: 'soccer_countdown'; n: number }
@@ -541,8 +512,6 @@ export interface SoccerGoalOkMsg {
   scores: Record<SoccerTeam, number>;
   /** 烏龍：進了自己隊的門，雙方都不加分，scores 是當下比分（沒有變） */
   own?: boolean;
-  /** PK 點球命中（比分在 match.pkScores，不計入正規局） */
-  pk?: boolean;
 }
 export interface SoccerScoresMsg {
   type: 'soccer_scores';
@@ -550,8 +519,6 @@ export interface SoccerScoresMsg {
   armed: Record<SoccerTeam, boolean>;
   status: string; endTime: number;
   match?: SoccerMatchMeta;
-  /** PK 換人時附帶，客戶端把輪到的人送到點球點 */
-  spawns?: SoccerSpawn[];
 }
 /** 黃牌（本局出場）或紅牌（整場出場）。按隊伍累計，不是墜機。 */
 export interface SoccerCardMsg {
@@ -570,7 +537,7 @@ export interface SoccerWarningMsg {
   team: SoccerTeam | null;
   reason: string;
   count: number;
-  /** 臺北賽制這一筆扣了幾分。沒有這個欄位 = 只是警告（F9A）。 */
+  /** 這一筆扣了幾分。沒有這個欄位 = 只是警告、不扣分。 */
   deduction?: number;
   deductions?: Record<SoccerTeam, number>;
 }

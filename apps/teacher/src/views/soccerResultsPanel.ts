@@ -6,9 +6,9 @@ export class SoccerResultsPanel {
   static show(root: ParentNode, input: SoccerResultInput): void {
     const overlay = root.querySelector<HTMLElement>('#soccer-results');
     if (!overlay) return;
-    SoccerResultsPanel.text(root, '#soccer-results-kicker', SoccerResultCopy.kicker(input));
+    SoccerResultsPanel.text(root, '#soccer-results-kicker', SoccerResultCopy.kicker());
     SoccerResultsPanel.text(root, '#soccer-results-title', SoccerResultCopy.title(input));
-    SoccerResultsPanel.text(root, '#soccer-results-detail', SoccerResultCopy.detail(input));
+    SoccerResultsPanel.text(root, '#soccer-results-detail', SoccerResultCopy.detail());
     const list = root.querySelector<HTMLElement>('#soccer-results-list');
     if (list) {
       list.textContent = '';

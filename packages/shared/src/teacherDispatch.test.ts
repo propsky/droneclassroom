@@ -12,14 +12,10 @@ describe('教師派送上限', () => {
   });
 
   it('倒數與進行中算比賽中，結束與閒置可以再派', () => {
-    for (const status of ['countdown', 'running', 'break', 'golden', 'pk']) {
-      expect(TeacherDispatch.matchIsLive('soccer', status)).toBe(true);
+    expect(TeacherDispatch.matchIsLive('countdown')).toBe(true);
+    expect(TeacherDispatch.matchIsLive('running')).toBe(true);
+    for (const status of ['idle', 'done', 'ended']) {
+      expect(TeacherDispatch.matchIsLive(status)).toBe(false);
     }
-    expect(TeacherDispatch.matchIsLive('soccer', 'idle')).toBe(false);
-    expect(TeacherDispatch.matchIsLive('soccer', 'done')).toBe(false);
-    expect(TeacherDispatch.matchIsLive('arena', 'countdown')).toBe(true);
-    expect(TeacherDispatch.matchIsLive('arena', 'running')).toBe(true);
-    expect(TeacherDispatch.matchIsLive('arena', 'ended')).toBe(false);
-    expect(TeacherDispatch.matchIsLive('arena', 'idle')).toBe(false);
   });
 });

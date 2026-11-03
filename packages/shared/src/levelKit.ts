@@ -1,6 +1,7 @@
 // 關卡素材庫 — 老師編輯器可插入的圈點、障礙、任務步驟等預設片段。
 // 座標以起飛墊 (0,0) 為中心，z 負值 = 向前。
 import type { LevelDef } from './levels';
+import { EDITOR_HALF } from './levelEditorUtils';
 
 export type LevelKitCategory = 'rings' | 'obstacles' | 'tasks' | 'scenes' | 'draw' | 'races';
 
@@ -831,8 +832,8 @@ export const LEVEL_KIT_SNIPPETS: LevelKitSnippet[] = [
   },
 ];
 
-/** 場地邊界（世界座標 ±14.5m 內） */
-export const LEVEL_KIT_BOUNDS = 14.5;
+/** 場地邊界：和編輯器同一個 60m 場地（世界座標 ±30m 內） */
+export const LEVEL_KIT_BOUNDS = EDITOR_HALF;
 
 export type LevelKitApplyMode = 'append' | 'replace-tasks';
 

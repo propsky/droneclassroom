@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FlightArea } from './flightArea';
+import { FlightArea, zoneJudgeBox } from './flightArea';
 
 const box = { minX: -5, maxX: 5, minZ: -8, maxZ: 3 };
 
@@ -76,5 +76,22 @@ describe('飛到邊界', () => {
   it('框內判斷：邊上算在內', () => {
     expect(FlightArea.contains(box, 5, 3)).toBe(true);
     expect(FlightArea.contains(box, 5.1, 0)).toBe(false);
+  });
+});
+
+describe('zoneJudgeBox', () => {
+  it('沒設的邊畫到場地邊（±30），四邊都沒設回 null', () => {
+    expect(zoneJudgeBox({ maxZ: -5.5 }, {})).toEqual({ minX: -30, maxX: 30, minZ: -30, maxZ: -5.5 });
+    expect(zoneJudgeBox({}, {})).toBeNull();
+  });
+
+  it('有飛行範圍時畫到飛行範圍邊，設的邊超出也收回', () => {
+    const level = { flightBounds: { minX: -8, maxX: 8, minZ: -10, maxZ: 6 } };
+    expect(zoneJudgeBox({ maxZ: -5.5, minX: -20 }, level)).toEqual({ minX: -8, maxX: 8, minZ: -10, maxZ: -5.5 });
+  });
+
+  it('範圍整個在飛行範圍外回 null（學生飛不到，不畫）', () => {
+    const level = { flightBounds: { minX: -5, maxX: 5, minZ: -5, maxZ: 5 } };
+    expect(zoneJudgeBox({ minX: 10 }, level)).toBeNull();
   });
 });

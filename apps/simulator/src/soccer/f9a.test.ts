@@ -91,26 +91,20 @@ function hud(over: Partial<SoccerHudInput> = {}): SoccerHudInput {
     status: 'idle',
     mode: 'striker',
     scores: { blue: 0, red: 0 },
-    sets: { blue: 0, red: 0 },
-    period: 1,
     endTime: 0,
     now: 0,
     myTeam: 'blue',
     myStriker: true,
     needReturn: false,
-    pkScores: { blue: 0, red: 0 },
-    pkTurn: null,
-    pkRound: 0,
     ...over,
   };
 }
 
-describe('F9A 階段一 HUD 賽制', () => {
-  it('沒寫賽制是臺北；舊的 f9a 紀錄仍讀得出三局兩勝', () => {
+describe('足球 HUD 賽制（只有臺北賽制）', () => {
+  it('等待開始寫臺北賽制與自己的隊伍角色', () => {
     expect(formatSoccerMatchLine(hud())).toContain('臺北賽制');
     expect(formatSoccerMatchLine(hud())).not.toContain('三局兩勝');
-    expect(formatSoccerMatchLine(hud({ ruleset: 'f9a' }))).toContain('三局兩勝');
-    expect(formatSoccerMatchLine(hud({ ruleset: 'f9a' }))).toContain('我：藍隊・前鋒');
+    expect(formatSoccerMatchLine(hud())).toContain('我：藍隊・前鋒');
   });
 
   it('比賽結束時 phase 還停在 landing，也要顯示結束與淨分，不是降落倒數', () => {
@@ -130,7 +124,6 @@ describe('F9A 階段一 HUD 賽制', () => {
   it('臺北賽制寫扣分與降落，不寫三局兩勝', () => {
     const line = formatSoccerMatchLine(
       hud({
-        ruleset: 'taipei',
         status: 'running',
         scores: { blue: 1, red: 1 },
         deductions: { blue: 0, red: 1 },
@@ -141,47 +134,19 @@ describe('F9A 階段一 HUD 賽制', () => {
     expect(line).toContain('臺北賽制');
     expect(line).toContain('扣分 0:1');
     expect(line).not.toContain('三局兩勝');
-    expect(formatSoccerMatchLine(hud({ ruleset: 'taipei', phase: 'landing', endTime: 10_000 }))).toContain(
+    expect(formatSoccerMatchLine(hud({ phase: 'landing', endTime: 10_000 }))).toContain(
       '降落倒數',
     );
   });
 
-  it('舊的 f9a 紀錄仍顯示局數、休息、黃金進球與 PK', () => {
+  it('進行中寫倒數、得分後提醒全隊先退回半場', () => {
     const line = formatSoccerMatchLine(
-      hud({
-        ruleset: 'f9a',
-        status: 'running',
-        scores: { blue: 1, red: 0 },
-        sets: { blue: 0, red: 0 },
-        endTime: 90_000,
-        now: 30_000,
-        needReturn: true,
-      }),
+      hud({ status: 'running', scores: { blue: 1, red: 0 }, endTime: 90_000, now: 30_000, needReturn: true }),
     );
-    expect(line).toContain('局數 0:0');
-    expect(line).toContain('第1局 藍 1 : 0 紅');
+    expect(line).toContain('藍 1 : 0 紅');
     expect(line).toContain('1:00');
     expect(line).toContain('全隊先退回半場');
-    expect(
-      formatSoccerMatchLine(hud({ ruleset: 'f9a', status: 'break', sets: { blue: 1, red: 0 }, endTime: 15_000 })),
-    ).toContain('局間休息');
-    expect(formatSoccerMatchLine(hud({ ruleset: 'f9a', status: 'golden', endTime: 180_000, now: 0 }))).toContain(
-      '黃金進球',
-    );
-    const pk = formatSoccerMatchLine(
-      hud({
-        ruleset: 'f9a',
-        status: 'pk',
-        pkTurn: 'blue',
-        pkRound: 2,
-        pkScores: { blue: 1, red: 0 },
-        endTime: 20_000,
-      }),
-    );
-    expect(pk).toContain('PK 第2輪');
-    expect(pk).toContain('藍方罰球');
-    expect(pk).toContain('點球 1:0');
-    expect(pk).toContain('輪到你');
+    expect(line).not.toContain('局數');
   });
 
   it('非攻擊手的計分列不寫犯規', () => {

@@ -454,7 +454,8 @@ export function createPropsController(host: PropsHost): PropsController {
         thickness: thick === 0.24 ? undefined : thick,
         spin: spin === DEFAULT_RING_SPIN ? undefined : spin,
         bobAmp: bobAmp === DEFAULT_RING_BOB_AMP ? undefined : bobAmp,
-        yaw: ringYaw === 0 ? undefined : ringYaw,
+        // 有 faceYaw 時 0° 也要寫，否則擺放角度會退回 faceYaw
+        yaw: ringYaw === 0 && faceYaw == null ? undefined : ringYaw,
         faceYaw,
         faceTol: faceYaw != null ? faceTol : undefined,
         physics: readPhysics(root, 'ring', false),

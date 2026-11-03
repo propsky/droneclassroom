@@ -12,9 +12,9 @@ export function showSoccerResults(input: SoccerResultInput): void {
   const detail = $('arena-results-detail');
   const wait = $('arena-results-wait');
   const list = $('arena-results-list');
-  if (kicker) kicker.textContent = SoccerResultCopy.kicker(input);
+  if (kicker) kicker.textContent = SoccerResultCopy.kicker();
   if (title) title.textContent = SoccerResultCopy.title(input);
-  if (detail) detail.textContent = SoccerResultCopy.detail(input);
+  if (detail) detail.textContent = SoccerResultCopy.detail();
   if (wait) wait.textContent = '等老師開始下一場';
   if (list) {
     list.textContent = '';

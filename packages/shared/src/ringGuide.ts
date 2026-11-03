@@ -33,7 +33,8 @@ export class RingGuide {
 
   /**
    * 照飛行順序前後接連排成一列、從這個圈看得到前面圈的洞（1-4 直線穿圈）時，
-   * 編號要往側面錯開（公尺），不然遠處的編號會疊在近處的洞裡。錯開量＝往前數有幾個圈連續排在同一列。
+   * 編號要往側面錯開（公尺），不然遠處的編號會疊在近處的洞裡。錯開量依「往前數有幾個圈連續排在同一列」，
+   * 左右輪流（正＝沿 badgeDir、負＝反方向），一長排圈的編號才不會一路往同一側推出場外。
    * 位置岔開、或只是剛好落在同一條線上但不是接連飛的圈（例如 8 字的 1 和 4）回 0，編號留在自己的圈旁邊。
    */
   static lateralSpread(index: number, rings: readonly { x: number; z: number; yawDeg?: number }[]): number {
@@ -58,7 +59,10 @@ export class RingGuide {
       run++;
     }
     // 3m：近處的圈在畫面上大約佔這個寬度，後面的編號才不會被它擋住。
-    return run * 3;
+    // 1、2、3、4… → +3、-3、+6、-6…
+    if (run === 0) return 0;
+    const step = Math.ceil(run / 2) * 3;
+    return run % 2 === 1 ? step : -step;
   }
 
   /**

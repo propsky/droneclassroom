@@ -61,3 +61,22 @@ export class FlightArea {
     return x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ;
   }
 }
+
+/**
+ * 位置任務點的判定框（畫面用）：沒設的邊＝不限，畫到飛行範圍邊；沒有飛行範圍就畫到編輯場地邊。
+ * 四邊都沒設回 null（整個場地都算，畫面改畫標記圈）。學生端與編輯器共用，兩邊看到的範圍才一致。
+ */
+export function zoneJudgeBox(
+  zone: { minX?: number; maxX?: number; minZ?: number; maxZ?: number },
+  level: { flightBounds?: Partial<FlightBounds> | null },
+): FlightBounds | null {
+  if (zone.minX == null && zone.maxX == null && zone.minZ == null && zone.maxZ == null) return null;
+  const area = FlightArea.of(level) ?? { minX: -EDITOR_HALF, maxX: EDITOR_HALF, minZ: -EDITOR_HALF, maxZ: EDITOR_HALF };
+  const box = {
+    minX: Math.max(area.minX, zone.minX ?? area.minX),
+    maxX: Math.min(area.maxX, zone.maxX ?? area.maxX),
+    minZ: Math.max(area.minZ, zone.minZ ?? area.minZ),
+    maxZ: Math.min(area.maxZ, zone.maxZ ?? area.maxZ),
+  };
+  return box.maxX > box.minX && box.maxZ > box.minZ ? box : null;
+}

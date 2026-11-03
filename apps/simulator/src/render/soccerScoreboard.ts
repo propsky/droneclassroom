@@ -117,24 +117,22 @@ export function createSoccerScoreboard(scene: Scene, pose: ScoreboardPose): Socc
     ctx.font = 'bold 28px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('藍勝局', 36, 24);
+    ctx.fillText('藍扣分', 36, 24);
     ctx.textAlign = 'right';
-    ctx.fillText('紅勝局', W - 36, 24);
+    ctx.fillText('紅扣分', W - 36, 24);
     ctx.textAlign = 'center';
-    ctx.fillText('第     局', W / 2 - 150, 24);
-    ctx.fillText('倒數', W / 2 + 210, 24);
+    ctx.fillText('倒數', W / 2, 24);
 
-    // 勝局（各一位）、局數（一位）、倒數（四位）
-    drawDigit(ctx, String(view.blueSets), 48, 70, 70, 110, '#3ec2ff');
-    drawDigit(ctx, String(view.redSets), W - 118, 70, 70, 110, '#ff4d5a');
-    drawDigit(ctx, String(view.period % 10), W / 2 - 188, 68, 64, 100, '#f4f7fb');
+    // 扣分（各一位）、倒數（四位，置中）
+    drawDigit(ctx, String(view.blueDeductions), 48, 70, 70, 110, '#3ec2ff');
+    drawDigit(ctx, String(view.redDeductions), W - 118, 70, 70, 110, '#ff4d5a');
     const clock = formatClock(view.remainSec);
-    drawClock(ctx, clock, W / 2 + 40, 68, 52, 100, '#ffe08a');
+    drawClock(ctx, clock, W / 2 - 130, 68, 52, 100, '#ffe08a');
 
     ctx.fillStyle = '#9aa4b2';
     ctx.font = 'bold 26px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('本局進球', W / 2, 250);
+    ctx.fillText('進球', W / 2, 250);
 
     const b = String(view.blueGoals).padStart(2, '0');
     const r = String(view.redGoals).padStart(2, '0');
@@ -159,10 +157,9 @@ export function createSoccerScoreboard(scene: Scene, pose: ScoreboardPose): Socc
     root,
     update(view: BroadcastView): void {
       const key = [
-        view.period,
         view.remainSec,
-        view.blueSets,
-        view.redSets,
+        view.blueDeductions,
+        view.redDeductions,
         view.blueGoals,
         view.redGoals,
         view.flag,

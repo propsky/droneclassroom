@@ -78,7 +78,7 @@ class PatchCustomLevelRequest(BaseModel):
 
 
 KIT_CATEGORIES = frozenset({"rings", "obstacles", "tasks", "scenes", "draw", "races"})
-KIT_BOUNDS = 14.5
+KIT_BOUNDS = 30.0  # 與 @creafly/shared EDITOR_HALF（60m 編輯場地）一致
 
 
 class TeacherLevelKitBrief(BaseModel):

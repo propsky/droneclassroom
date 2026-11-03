@@ -15,8 +15,8 @@ function input(over: Partial<BroadcastInput> = {}): BroadcastInput {
     status: 'running',
     mode: 'striker',
     scores: { blue: 1, red: 0 },
-    sets: { blue: 1, red: 0 },
-    period: 2,
+    deductions: { blue: 0, red: 1 },
+    winner: null,
     endTime: 95_000,
     now: 0,
     myTeam: 'blue',
@@ -39,19 +39,18 @@ describe('F9A 階段三護罩顏色', () => {
   });
 });
 
-describe('F9A 階段三七段計分', () => {
+describe('足球七段計分板', () => {
   it('8 亮七段、1 只亮兩段', () => {
     expect(sevenSegOnCount('8')).toBe(7);
     expect(sevenSegOnCount('1')).toBe(2);
     expect(sevenSegOnCount('x')).toBe(0);
   });
 
-  it('計分板含局數、該局倒數、各隊勝局與本局比分', () => {
+  it('計分板含倒數、各隊扣分與進球', () => {
     const view = readBroadcast(input());
-    expect(view.period).toBe(2);
     expect(formatClock(view.remainSec)).toBe('01:35');
-    expect(view.blueSets).toBe(1);
-    expect(view.redSets).toBe(0);
+    expect(view.blueDeductions).toBe(0);
+    expect(view.redDeductions).toBe(1);
     expect(view.blueGoals).toBe(1);
     expect(view.redGoals).toBe(0);
     expect(view.flag).toBe('可得分');
@@ -63,14 +62,28 @@ describe('F9A 階段三七段計分', () => {
     expect(readBroadcast(input({ myStriker: false, needReturn: true })).flag).toBe('');
   });
 
-  it('結束畫面寫出勝隊與勝局', () => {
+  it('結束畫面跟伺服器的勝方，寫出淨分、進球與扣分', () => {
     const view = readBroadcast(
-      input({ status: 'done', endTime: 0, sets: { blue: 2, red: 1 }, scores: { blue: 3, red: 2 } }),
+      input({ status: 'done', endTime: 0, winner: 'blue', scores: { blue: 3, red: 2 }, deductions: { blue: 1, red: 0 } }),
     );
     expect(view.ended).toBe(true);
     expect(view.title).toBe('藍隊獲勝');
-    expect(view.detail).toContain('勝局 2:1');
-    expect(view.detail).toContain('本局 3:2');
+    expect(view.detail).toContain('淨分 2:2');
+    expect(view.detail).toContain('進球 3:2');
+    expect(view.detail).toContain('扣分 1:0');
+    expect(view.detail).not.toContain('勝局');
+  });
+
+  it('淨分同分時照伺服器判的先進球勝方，不寫平手', () => {
+    const view = readBroadcast(
+      input({ status: 'done', endTime: 0, winner: 'red', scores: { blue: 1, red: 1 }, deductions: { blue: 0, red: 0 } }),
+    );
+    expect(view.title).toBe('紅隊獲勝');
+  });
+
+  it('平手寫兩隊平手；老師中途結束沒有勝方只寫比賽結束', () => {
+    expect(readBroadcast(input({ status: 'done', endTime: 0, winner: 'draw' })).title).toBe('兩隊平手');
+    expect(readBroadcast(input({ status: 'done', endTime: 0, winner: null })).title).toBe('比賽結束');
   });
 });
 

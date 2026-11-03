@@ -25,17 +25,8 @@ export class TeacherDispatch {
     return activity === 'soccer' ? '足球對戰' : '大亂鬥';
   }
 
-  /** 倒數與進行中（足球含局間、黃金進球、PK）。這段不能再派人。 */
-  static matchIsLive(activity: DispatchActivity, status: string): boolean {
-    if (activity === 'soccer') {
-      return (
-        status === 'countdown' ||
-        status === 'running' ||
-        status === 'break' ||
-        status === 'golden' ||
-        status === 'pk'
-      );
-    }
+  /** 倒數與進行中。這段不能再派人。 */
+  static matchIsLive(status: string): boolean {
     return status === 'countdown' || status === 'running';
   }
 }

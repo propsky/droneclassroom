@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { SoccerRulesetForm } from './soccerRuleset';
 
 describe('SoccerRulesetForm', () => {
-  it('舊的 f9a 與空值都讀成臺北賽制，場地不能改', () => {
-    expect(SoccerRulesetForm.parse(undefined)).toBe('taipei');
-    expect(SoccerRulesetForm.parse('f9a')).toBe('taipei');
-    expect(SoccerRulesetForm.parse('nope')).toBe('taipei');
-    expect(SoccerRulesetForm.locksField('f9a')).toBe(true);
+  it('場地固定 F9A-B，不能改', () => {
     expect(SoccerRulesetForm.fieldNote()).toContain('不能改成大場');
     expect(SoccerRulesetForm.fieldNote()).toContain('F9A-B');
   });

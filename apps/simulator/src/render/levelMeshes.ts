@@ -24,6 +24,7 @@ import {
   ringYawDeg,
   ringThickness,
   zoneMarkerDiameter,
+  zoneJudgeBox,
   zoneTriggerRadius,
   obstacleIsCollidable,
 } from '@creafly/shared';
@@ -274,13 +275,8 @@ export class LevelVisuals {
       const z = zone.z || 0;
       const root = this.track(new TransformNode(`zoneNode${i}`, scene));
       root.position.set(x, 0, z);
-      // 位置任務點四邊都有設：直接畫出判定框（學生看到的就是要飛進去的範圍）；其他畫圓
-      const box =
-        zone.type === 'position' &&
-        zone.minX != null && zone.maxX != null && zone.minZ != null && zone.maxZ != null &&
-        zone.maxX > zone.minX && zone.maxZ > zone.minZ
-          ? { minX: zone.minX, maxX: zone.maxX, minZ: zone.minZ, maxZ: zone.maxZ }
-          : null;
+      // 位置任務點有設邊界：直接畫出判定框（學生看到的就是要飛進去的範圍，沒設的邊畫到飛行範圍邊）；其他畫圓
+      const box = zone.type === 'position' ? zoneJudgeBox(zone, level) : null;
       const disc = this.track(
         box
           ? MeshBuilder.CreateGround(`zoneDisc${i}`, { width: box.maxX - box.minX, height: box.maxZ - box.minZ }, scene)
@@ -349,7 +345,7 @@ export class LevelVisuals {
 
   /**
    * 編號放在自己那圈的側邊、路線外側（RingGuide.badgeDir）。
-   * 若好幾圈幾乎排在同一條直線（1-4），再依順序往右錯開，避免編號疊在同一個洞裡。
+   * 若好幾圈幾乎排在同一條直線（1-4），再依順序左右輪流錯開，避免編號疊在同一個洞裡。
    * 位置岔開的關卡（1-5）不錯開，編號才會留在自己的圈旁邊。
    */
   private placeBadges(): void {
@@ -359,7 +355,8 @@ export class LevelVisuals {
       const points = this.rings.map((r) => ({ x: r.node.position.x, z: r.node.position.z, yawDeg: r.yawDeg }));
       // 沿圈面往外放：圈轉了角度，編號牌也跟著擺到圈的側邊，不會擋在穿越路線上
       const dir = RingGuide.badgeDir(ring.index, points);
-      const dist = side + RingGuide.lateralSpread(ring.index, points);
+      const spread = RingGuide.lateralSpread(ring.index, points);
+      const dist = spread < 0 ? spread - side : side + spread;
       ring.badge.position.x = dir.x * dist;
       ring.badge.position.z = dir.z * dist;
       ring.badge.position.y = 0.35;

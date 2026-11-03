@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PassZoneDef, RingDef } from '@creafly/shared';
+import { ringYawDeg } from '@creafly/shared';
 import { ItemOrder, RingAngle } from './levelOrder';
 
 const ring = (label?: string): RingDef => ({ x: 0, y: 2, z: 0, label });
@@ -54,5 +55,15 @@ describe('圈的擺放角度', () => {
     expect('yaw' in out[0]!).toBe(false);
     expect(out.every((r) => r.spin === 0)).toBe(true);
     expect(rings[0]!.yaw).toBe(30);
+  });
+
+  it('有 faceYaw 的圈算出 0° 也要寫 yaw，不然圈面會退回 faceYaw 的方向', () => {
+    const rings: RingDef[] = [
+      { x: 0, y: 2, z: -5, faceYaw: 90 },
+      { x: 0, y: 2, z: -10 },
+    ];
+    const out = RingAngle.alongRoute(rings);
+    expect(out[0]!.yaw).toBe(0);
+    expect(ringYawDeg(out[0])).toBe(0);
   });
 });

@@ -57,11 +57,4 @@ describe('任務點移動與邊界', () => {
     expect(ZoneEdit.readBound('-5.5')).toBe(-5.5);
   });
 
-  it('編輯器畫框：沒設的邊畫到場地邊緣', () => {
-    const box = ZoneEdit.drawBox(forward as { maxZ: number });
-    expect(box.maxZ).toBe(-5.5);
-    expect(box.minZ).toBeLessThan(-14);
-    expect(ZoneEdit.hasBox(forward as { maxZ: number })).toBe(true);
-    expect(ZoneEdit.hasBox({})).toBe(false);
-  });
 });

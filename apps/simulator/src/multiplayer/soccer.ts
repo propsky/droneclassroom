@@ -46,14 +46,7 @@ const POS_SEND_MS = 80;
 const GOAL_COOLDOWN_MS = 1500;
 /** 分身位置內插係數（每 60Hz tick；與 clones.ts 的 INTERP 同語意） */
 const INTERP = 0.25;
-export type SoccerMatchStatus =
-  | 'idle'
-  | 'countdown'
-  | 'running'
-  | 'break'
-  | 'golden'
-  | 'pk'
-  | 'done';
+export type SoccerMatchStatus = 'idle' | 'countdown' | 'running' | 'done';
 
 /** 其他玩家（分身）的邏輯狀態；pos 為 60Hz 內插後位置 — 碰撞與 render 共用同一份 */
 export interface SoccerOther {
@@ -87,18 +80,12 @@ export const soccerState = {
   contactEnabled: true,
   /** playerId → 分身邏輯狀態 */
   others: new Map<string, SoccerOther>(),
-  /** 三局兩勝進度（伺服器 match；缺省當第 0 局） */
-  period: 0,
-  sets: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
-  pkScores: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
-  pkTurn: null as SoccerTeam | null,
-  pkRound: 0,
-  pkShooterId: null as string | null,
-  pkDefenderId: null as string | null,
-  ruleset: 'taipei' as 'f9a' | 'taipei',
+  /** 臺北賽制進度（伺服器 match）：period 比賽中、landing 時間到的降落倒數 */
   phase: 'idle',
   deductions: { blue: 0, red: 0 } as Record<SoccerTeam, number>,
   firstGoal: null as SoccerTeam | null,
+  /** 伺服器判的勝方（結束後才有）。淨分同分時看先進球，客戶端不自己算 */
+  winner: null as SoccerTeam | 'draw' | null,
   /** 起槳後、GO 之前 */
   motorsArmed: false,
   myCard: null as 'yellow' | 'red' | null,
@@ -125,12 +112,6 @@ export function initSoccerMatch(): void {
   });
   soccerState.contactEnabled =
     new URLSearchParams(location.search).get('nocontact') !== '1';
-  window.addEventListener('keydown', (e) => {
-    if (e.key !== 'k' && e.key !== 'K') return;
-    if (!soccerState.active || soccerState.status !== 'pk') return;
-    if (soccerState.disabled || soccerState.pkTurn !== soccerState.myTeam) return;
-    sendToServer({ type: 'soccer_pk_claim' });
-  });
   // 開發後門：?soccermp=1 自動進對戰（headless 驗收 / demo 用；對齊 ?arena=1）
   const params = new URLSearchParams(location.search);
   if (params.get('soccermp') === '1') {
@@ -165,7 +146,6 @@ function previewPhase2(kind: 'arm' | 'card'): void {
   enterSoccerMatch();
   soccerState.myTeam = 'blue';
   soccerState.myStriker = true;
-  soccerState.period = 1;
   if (kind === 'arm') {
     soccerState.status = 'countdown';
     soccerState.motorsArmed = true;
@@ -193,13 +173,10 @@ export function enterSoccerMatch(): void {
   soccerState.armed = { blue: true, red: true };
   soccerState.endTime = 0;
   soccerState.goalCooldownUntil = 0;
-  soccerState.period = 0;
-  soccerState.sets = { blue: 0, red: 0 };
-  soccerState.pkScores = { blue: 0, red: 0 };
-  soccerState.pkTurn = null;
-  soccerState.pkRound = 0;
-  soccerState.pkShooterId = null;
-  soccerState.pkDefenderId = null;
+  soccerState.phase = 'idle';
+  soccerState.deductions = { blue: 0, red: 0 };
+  soccerState.firstGoal = null;
+  soccerState.winner = null;
   soccerState.motorsArmed = false;
   soccerState.myCard = null;
   soccerState.disabled = false;
@@ -282,7 +259,6 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       byName: msg.byName || '',
       scores: msg.scores,
       own: msg.own,
-      pk: msg.pk,
     });
   }
   if (!soccerState.active) return;
@@ -293,13 +269,14 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       soccerState.endTime = msg.endTime || 0;
       if (msg.scores) soccerState.scores = msg.scores;
       if (msg.armed) soccerState.armed = msg.armed;
+      soccerState.winner = msg.status === 'done' ? (msg.winner ?? null) : null;
       applyMatch(msg.match);
       applyServerMode(msg.mode);
       applyServerField(msg.field);
       applyMyTeamRole(msg.players);
       updateSoccerPlayers(msg.players);
       // 倒數 / 待機時套用出生點（開賽前大家先站好）
-      if (msg.spawns && (msg.status === 'countdown' || msg.status === 'idle' || msg.status === 'pk')) {
+      if (msg.spawns && (msg.status === 'countdown' || msg.status === 'idle')) {
         applyMySpawn(msg.spawns);
       }
       notePhase(prev);
@@ -343,11 +320,9 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       bus.emit('countdown', { n: 0 }); // GO!
       sound('go');
       stateHud(
-        (msg.match?.period ?? 1) > 1
-          ? `⚽ 第 ${msg.match?.period} 局開始`
-          : soccerState.myStriker
-            ? '🎀 你是前鋒！穿過對方的圓環得分，得分後全隊先回己方半場'
-            : '🛡 你是防守。打進自己的門不算分。得分後跟全隊回半場',
+        soccerState.myStriker
+          ? '🎀 你是前鋒！穿過對方的圓環得分，得分後全隊先回己方半場'
+          : '🛡 你是防守。打進自己的門不算分。得分後跟全隊回半場',
       );
       syncSoccerLock();
       updateMatchHud();
@@ -360,9 +335,6 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       if (msg.scores) soccerState.scores = msg.scores;
       if (msg.armed) soccerState.armed = msg.armed;
       applyMatch(msg.match);
-      if (msg.spawns && soccerState.status === 'pk') {
-        applyMySpawn(msg.spawns);
-      }
       notePhase(prev);
       syncSoccerLock();
       updateMatchHud();
@@ -412,7 +384,7 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
     case 'soccer_goal_ok':
       if (msg.scores) soccerState.scores = msg.scores;
       sound('ring');
-      if (!msg.pk && !msg.own && msg.team === soccerState.myTeam && soccerState.mode === 'striker') {
+      if (!msg.own && msg.team === soccerState.myTeam && soccerState.mode === 'striker') {
         stateHud('⚽ 進球！全隊先退回己方半場才能再攻');
       }
       updateMatchHud();
@@ -431,17 +403,9 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
   }
 }
 
-/** 三局兩勝／黃金／PK。沒帶 match 的舊伺服器 → 維持現值 */
+/** 臺北賽制進度。沒帶 match 的舊伺服器 → 維持現值 */
 function applyMatch(match: SoccerMatchMeta | undefined): void {
   if (!match) return;
-  soccerState.period = match.period || 0;
-  if (match.sets) soccerState.sets = match.sets;
-  if (match.pkScores) soccerState.pkScores = match.pkScores;
-  soccerState.pkTurn = match.pkTurn ?? null;
-  soccerState.pkRound = match.pkRound || 0;
-  soccerState.pkShooterId = match.pkShooterId ?? null;
-  soccerState.pkDefenderId = match.pkDefenderId ?? null;
-  soccerState.ruleset = match.ruleset === 'f9a' ? 'f9a' : 'taipei';
   soccerState.phase = match.phase || 'idle';
   if (match.deductions) soccerState.deductions = match.deductions;
   soccerState.firstGoal = match.firstGoal === 'blue' || match.firstGoal === 'red' ? match.firstGoal : null;
@@ -450,12 +414,7 @@ function applyMatch(match: SoccerMatchMeta | undefined): void {
 function notePhase(prev: SoccerMatchStatus): void {
   const s = soccerState.status;
   if (s === prev) return;
-  if (s === 'break') stateHud('⏸ 局間休息');
-  else if (s === 'golden') stateHud('⚡ 平手！黃金進球，先進球者勝');
-  else if (s === 'pk') stateHud('🎯 點球：每球 10 秒，按 K 可以換人來罰');
-  else if (soccerState.ruleset === 'taipei' && soccerState.phase === 'landing') {
-    stateHud('時間到，10 秒內降落');
-  }
+  if (soccerState.phase === 'landing') stateHud('時間到，10 秒內降落');
 }
 
 /** 玩法固定前鋒穿門。舊封包若還帶 ball，忽略、維持 striker。 */
@@ -524,7 +483,7 @@ function applyMySpawn(spawns: SoccerSpawn[]): void {
   droneState.position.y = HOME_POSITION.y;
   droneState.position.z = mine.z;
   droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
-  // 藍隊攻 +z（yaw π）、紅隊攻 -z（yaw 0）。點球站位在對方半場，不能用 z 符號猜朝向。
+  // 藍隊攻 +z（yaw π）、紅隊攻 -z（yaw 0）。看隊伍決定朝向，不用 z 符號猜。
   droneState.yaw =
     soccerState.myTeam === 'red' ? 0 : soccerState.myTeam === 'blue' ? Math.PI : mine.z > 0 ? 0 : Math.PI;
   droneState.isGrounded = true;
@@ -557,27 +516,19 @@ function showMatchResult(msg: SoccerEndMsg): void {
     return;
   }
   stateHud('🏁 足球結束！');
+  soccerState.winner = msg.winner;
   showSoccerResults({
-    ruleset: msg.match?.ruleset === 'f9a' ? 'f9a' : 'taipei',
     winner: msg.winner,
     goals: s,
     deductions: msg.match?.deductions,
     firstGoal: msg.match?.firstGoal,
-    sets: msg.match?.sets,
-    pkScores: msg.match?.pkScores,
-    reason: msg.reason,
   });
-  const sets = msg.match ? ` 局數 ${msg.match.sets.blue}:${msg.match.sets.red}` : '';
-  const pk =
-    msg.reason === 'pk' && msg.match
-      ? ` 點球 ${msg.match.pkScores.blue}:${msg.match.pkScores.red}`
-      : '';
   const txt =
     msg.winner === 'blue'
-      ? `🔵 藍隊勝！${s.blue} : ${s.red}${sets}${pk}`
+      ? `🔵 藍隊勝！進球 ${s.blue} : ${s.red}`
       : msg.winner === 'red'
-        ? `🔴 紅隊勝！${s.blue} : ${s.red}${sets}${pk}`
-        : `🤝 平手 ${s.blue} : ${s.red}${sets}`;
+        ? `🔴 紅隊勝！進球 ${s.blue} : ${s.red}`
+        : `🤝 平手 ${s.blue} : ${s.red}`;
   toast(txt, 'success');
   sound('complete');
   updateMatchHud();
@@ -617,9 +568,7 @@ function clampMatchBounds(): void {
 function noteCrash(): void {
   if (!droneState.hardLanding) return;
   droneState.hardLanding = false;
-  const live =
-    soccerState.mode === 'striker' &&
-    (soccerState.status === 'running' || soccerState.status === 'golden');
+  const live = soccerState.mode === 'striker' && soccerState.status === 'running';
   if (!live || soccerState.crashSent || soccerState.disabled) return;
   soccerState.crashSent = true;
   soccerState.disabled = true;
@@ -674,19 +623,13 @@ function resolveDroneContacts(): void {
  * 上報前先補送最新位置，讓伺服器這一段軌跡含穿越。
  */
 function detectGoal(): void {
-  const pkShooter =
-    soccerState.status === 'pk' && soccerState.pkShooterId === wsState.myId;
-  const live =
-    soccerState.status === 'running' ||
-    soccerState.status === 'golden' ||
-    pkShooter;
   const team = soccerState.myTeam;
   if (
     soccerState.mode !== 'striker' ||
     soccerState.disabled ||
     !team ||
-    (!soccerState.myStriker && !pkShooter) ||
-    !live
+    !soccerState.myStriker ||
+    soccerState.status !== 'running'
   ) {
     soccerState.goalPassage = createRingPassage();
     return;
@@ -707,11 +650,7 @@ function detectGoal(): void {
     },
   );
   soccerState.goalPassage = step.state;
-  // PK 每一記獨立，不受「得分後回半場」鎖住；正規局仍看 armed
-  const armed =
-    soccerState.status === 'pk' ||
-    soccerState.armed[team] !== false;
-  if (step.passed && armed && performance.now() > soccerState.goalCooldownUntil) {
+  if (step.passed && soccerState.armed[team] !== false && performance.now() > soccerState.goalCooldownUntil) {
     soccerState.goalCooldownUntil = performance.now() + GOAL_COOLDOWN_MS;
     sendSoccerPos();
     sendToServer({ type: 'soccer_goal' });
@@ -728,20 +667,13 @@ function updateMatchHud(): void {
       status: soccerState.status,
       mode: soccerState.mode,
       scores: soccerState.scores,
-      sets: soccerState.sets,
-      period: soccerState.period,
       endTime: soccerState.endTime,
       now: Date.now(),
       myTeam: team,
       myStriker: soccerState.myStriker,
       needReturn: !!team && soccerState.armed[team] === false,
-      ruleset: soccerState.ruleset,
       phase: soccerState.phase,
       deductions: soccerState.deductions,
-      pkScores: soccerState.pkScores,
-      pkTurn: soccerState.pkTurn,
-      pkRound: soccerState.pkRound,
-      pkMine: !!soccerState.pkShooterId && soccerState.pkShooterId === wsState.myId,
       card: soccerState.myCard,
       disabled: soccerState.disabled,
       feelLabel: SOCCER_FEELS[getSoccerFeel()].label,

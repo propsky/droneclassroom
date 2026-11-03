@@ -26,6 +26,7 @@ import {
   refitMapZoom,
   zoomMapAtPointer,
   zoneMarkerDiameter,
+  zoneJudgeBox,
   zoneTriggerRadius,
   LEVEL_KIT_CATEGORIES,
   applyLevelKitSnippet,
@@ -1014,8 +1015,9 @@ export function openLevelEditor(
       };
       const trigger = zoneTriggerRadius(zone);
       let area: [number, number][] | null = null;
-      if (isPos && ZoneEdit.hasBox(zone)) {
-        const { minX, maxX, minZ, maxZ } = ZoneEdit.drawBox(zone);
+      const box = isPos ? zoneJudgeBox(zone, level) : null;
+      if (box) {
+        const { minX, maxX, minZ, maxZ } = box;
         area = [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]];
       } else if (isPos || trigger !== null) {
         const r = isPos ? zoneMarkerDiameter(zone) / 2 : trigger!;

@@ -78,7 +78,6 @@ describe('房間足球場地', () => {
         room({
           code: 'MAIN',
           createdAt: 1,
-          soccerRuleset: 'f9a',
           soccerClass: 'F9A-A',
           soccerClassPinned: true,
         }),

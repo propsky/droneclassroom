@@ -73,24 +73,15 @@ export interface SoccerHudInput {
   status: string;
   mode: 'striker';
   scores: { blue: number; red: number };
-  sets: { blue: number; red: number };
-  period: number;
   endTime: number;
   now: number;
   myTeam: 'blue' | 'red' | null;
   myStriker: boolean;
   /** 自己這隊剛得分，還沒全員回己方半場 */
   needReturn: boolean;
-  /** PK 這一記輪到自己主罰（可以不是開賽時的前鋒） */
-  pkMine?: boolean;
-  pkScores: { blue: number; red: number };
-  pkTurn: 'blue' | 'red' | null;
-  pkRound: number;
   card?: 'yellow' | 'red' | null;
   disabled?: boolean;
   feelLabel?: string;
-  /** 沒帶 ruleset 的舊畫面當臺北。明確寫 f9a 的舊紀錄仍走下面的句子，避免讀取時崩潰。 */
-  ruleset?: 'f9a' | 'taipei';
   phase?: string;
   deductions?: { blue: number; red: number };
 }
@@ -100,17 +91,12 @@ function fmtClock(endTime: number, now: number): string {
   return `${Math.floor(rem / 60)}:${String(rem % 60).padStart(2, '0')}`;
 }
 
-/** 多人足球 HUD 一行字：局數、本節比分、休息／黃金／PK、回半場 */
+/** 多人足球 HUD 一行字：臺北賽制比分、扣分、倒數、回半場 */
 export function formatSoccerMatchLine(s: SoccerHudInput): string {
   const me = s.myTeam === 'red' ? '紅隊' : s.myTeam === 'blue' ? '藍隊' : '—';
   const role = s.mode === 'striker' ? (s.myStriker ? '・前鋒' : '・防守') : '';
   const who = `我：${me}${role}`;
-  const back =
-    s.mode === 'striker' &&
-    s.needReturn &&
-    (s.status === 'running' || s.status === 'golden')
-      ? '｜全隊先退回半場'
-      : '';
+  const back = s.mode === 'striker' && s.needReturn && s.status === 'running' ? '｜全隊先退回半場' : '';
   const card =
     s.card === 'red'
       ? '｜紅牌・整場出場'
@@ -120,47 +106,21 @@ export function formatSoccerMatchLine(s: SoccerHudInput): string {
           ? '｜本局少一人'
           : '';
   const feel = s.feelLabel ? `｜手感${s.feelLabel}` : '';
-
-  const sets = `局數 ${s.sets.blue}:${s.sets.red}`;
-  if (s.ruleset !== 'f9a') {
-    const d = s.deductions ?? { blue: 0, red: 0 };
-    const net = `淨分 ${s.scores.blue - d.blue}:${s.scores.red - d.red}`;
-    const ded = `扣分 ${d.blue}:${d.red}`;
-    if (s.status === 'countdown') return `臺北賽制｜起槳｜3-2-1…｜${who}${feel}`;
-    // 結束時伺服器的 phase 還停在 landing：要先看 done，否則一直顯示「降落倒數 0:00」
-    if (s.status === 'done') return `結束｜${net}｜${ded}｜${who}`;
-    if (s.phase === 'landing') {
-      const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-      return `降落倒數｜${t}｜${ded}｜${who}`;
-    }
-    if (s.status === 'running') {
-      const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-      return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜${t}｜${who}${back}${card}${feel}`;
-    }
-    return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜等待開始｜${who}${feel}`;
-  }
-  if (s.status === 'countdown') return `三局兩勝｜第${s.period || 1}局｜起槳｜3-2-1…｜${who}${feel}`;
-  if (s.status === 'done') return `結束｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${who}`;
-  if (s.status === 'break') {
+  const d = s.deductions ?? { blue: 0, red: 0 };
+  const net = `淨分 ${s.scores.blue - d.blue}:${s.scores.red - d.red}`;
+  const ded = `扣分 ${d.blue}:${d.red}`;
+  if (s.status === 'countdown') return `臺北賽制｜起槳｜3-2-1…｜${who}${feel}`;
+  // 結束時伺服器的 phase 還停在 landing：要先看 done，否則一直顯示「降落倒數 0:00」
+  if (s.status === 'done') return `結束｜${net}｜${ded}｜${who}`;
+  if (s.phase === 'landing') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `局間休息｜${sets}｜${t}｜${who}`;
-  }
-  if (s.status === 'golden') {
-    const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `黃金進球｜${sets}｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${card}${feel}`;
-  }
-  if (s.status === 'pk') {
-    const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    const side = s.pkTurn === 'red' ? '紅方罰球' : '藍方罰球';
-    const mine =
-      s.pkTurn && s.pkTurn === s.myTeam && (s.pkMine ?? s.myStriker) ? '｜輪到你' : '';
-    return `PK 第${s.pkRound || 1}輪｜${side}｜點球 ${s.pkScores.blue}:${s.pkScores.red}｜${t}｜${who}${mine}`;
+    return `降落倒數｜${t}｜${ded}｜${who}`;
   }
   if (s.status === 'running') {
     const t = s.endTime ? fmtClock(s.endTime, s.now) : '—';
-    return `${sets}｜第${s.period || 1}局 藍 ${s.scores.blue} : ${s.scores.red} 紅｜${t}｜${who}${back}${card}${feel}`;
+    return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜${t}｜${who}${back}${card}${feel}`;
   }
-  return `三局兩勝｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜等待開始｜${who}${feel}`;
+  return `臺北賽制｜藍 ${s.scores.blue} : ${s.scores.red} 紅｜${ded}｜等待開始｜${who}${feel}`;
 }
 
 let feelWired = false;

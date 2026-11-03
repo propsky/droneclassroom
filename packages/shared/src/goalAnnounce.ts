@@ -6,11 +6,10 @@ export interface GoalAnnounceInput {
   byName: string;
   scores: Record<SoccerTeam, number>;
   own?: boolean;
-  pk?: boolean;
 }
 
 export interface GoalAnnounceCopy {
-  /** 小標：進球 / 點球 / 烏龍球 */
+  /** 小標：進球 / 烏龍球 */
   kicker: string;
   /** 主標 */
   title: string;
@@ -48,9 +47,6 @@ export class GoalAnnounce {
       };
     }
     const team = GoalAnnounce.teamName(input.team);
-    if (input.pk) {
-      return { kicker: '點球', title: `${team}點球命中`, who: name, score, own: false };
-    }
     return { kicker: '進球', title: `${team}進球`, who: name, score, own: false };
   }
 }

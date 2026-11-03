@@ -1,7 +1,7 @@
 // 關卡編輯：任務點的編輯規則（換類型、移動、讀邊界欄位、編輯器畫框）。
 // 判定規則見 @creafly/shared PassZoneJudge：位置框沒設的邊＝不限。
 
-import { HEADING_TOLERANCE_DEG, LEVEL_KIT_BOUNDS, type PassZoneDef } from '@creafly/shared';
+import { HEADING_TOLERANCE_DEG, type PassZoneDef } from '@creafly/shared';
 
 type ZoneType = PassZoneDef['type'];
 
@@ -53,26 +53,5 @@ export class ZoneEdit {
     if (t === '') return undefined;
     const n = Number(t);
     return Number.isFinite(n) ? n : undefined;
-  }
-
-  /** 編輯器俯視畫框用：沒設的邊畫到場地邊緣，和判定的「不限」一致。 */
-  static drawBox(zone: { minX?: number; maxX?: number; minZ?: number; maxZ?: number }): {
-    minX: number;
-    maxX: number;
-    minZ: number;
-    maxZ: number;
-  } {
-    const edge = LEVEL_KIT_BOUNDS;
-    return {
-      minX: zone.minX ?? -edge,
-      maxX: zone.maxX ?? edge,
-      minZ: zone.minZ ?? -edge,
-      maxZ: zone.maxZ ?? edge,
-    };
-  }
-
-  /** 位置框至少有一邊有設（全部沒設＝整個場地都算，編輯器改畫小方塊提示）。 */
-  static hasBox(zone: { minX?: number; maxX?: number; minZ?: number; maxZ?: number }): boolean {
-    return zone.minX != null || zone.maxX != null || zone.minZ != null || zone.maxZ != null;
   }
 }
