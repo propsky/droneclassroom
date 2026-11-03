@@ -32,6 +32,16 @@ function ensureAudio(): AudioContext | null {
   return audioState.ctx;
 }
 
+/** 給馬達聲共用同一個 AudioContext（瀏覽器對同時開幾個有上限）。第一次呼叫要在使用者互動之後。 */
+export function audioContext(): AudioContext | null {
+  return ensureAudio();
+}
+
+/** 工具列「音效」關掉時，馬達聲也不響 */
+export function sfxMuted(): boolean {
+  return audioState.muted;
+}
+
 // 進球：短促喇叭 + 上行三音（只在足球場取代一般過圈音）
 function playSoccerGoalSound(): void {
   const ctx = ensureAudio();

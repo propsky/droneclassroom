@@ -1281,6 +1281,30 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
 #joystick-right {
   right: var(--joystick-right, var(--sp-6));
 }
+/* 按住時不要捲動、縮放、長按選字（pointer events 才收得到完整的拖曳） */
+.joystick-zone {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* 搖桿頭：畫的是搖桿值（相對拖曳，見 input/padGrab.ts）。直徑 = PadGrab.KNOB_HALF_PX × 2 */
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-full);
+  background: color-mix(in srgb, #fff 55%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--bg-0) 50%, transparent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: background 0.12s;
+}
+.joystick-zone.stick-active .stick-knob {
+  background: color-mix(in srgb, #fff 88%, transparent);
+}
 .joystick-label {
   position: absolute;
   top: calc(-1 * var(--sp-5));

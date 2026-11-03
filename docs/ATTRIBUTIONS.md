@@ -44,6 +44,20 @@
 - 變更說明：改寫成靜態方法；只保留 BETAFLIGHT 曲線（偏航指數，預設 0 = 線性）與死區縮放。未引入其他 rates type、油門曲線或校正精靈。
 - 檔頭保留 MIT 宣告：Copyright (c) 2026 Andrii Shramko。
 
+### 畫質自動調整、觸控搖桿相對拖曳、馬達聲
+
+| 項目 | 檔案 | 作者 | 授權 | 來源 |
+|---|---|---|---|---|
+| 掉幀降解析度（DisplayPeriod、FrameGovernor） | `apps/simulator/src/render/frameGovernor.ts` | Andrii Shramko | **MIT** | [ShramkoGSFPV](https://github.com/AndriiShramko/ShramkoGSFPV) `packages/render-pc/src/governor.ts` |
+| 觸控搖桿相對拖曳（PadGrab） | `apps/simulator/src/input/padGrab.ts` | Andrii Shramko | **MIT** | ShramkoGSFPV `apps/fly/src/play/touch-map.ts` |
+| 馬達聲音色與音效圖（諧波振盪器 + 帶通噪音） | `apps/simulator/src/ui/motorMix.ts`、`apps/simulator/src/ui/motorSound.ts` | Andrii Shramko | **MIT** | ShramkoGSFPV `apps/fly/src/audio/motor-sound.ts` |
+
+- 變更說明：
+  - 畫質調整只保留渲染比例分級；潑濺預算、延遲守衛、串流例外沒有搬。
+  - 觸控拖曳改成靜態方法與中文註解，行為不變；取代原本的 nipplejs。
+  - 馬達聲：我們沒有馬達模型，四顆馬達的負載改由飛機實際移動推算（`MotorSound.loads`），其餘音色參數沿用。
+- 以上檔案檔頭保留 MIT 宣告：Copyright (c) 2026 Andrii Shramko。
+
 ## 授權連結
 
 - CC0 1.0：https://creativecommons.org/publicdomain/zero/1.0/

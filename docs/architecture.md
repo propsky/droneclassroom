@@ -36,7 +36,7 @@ droneclassroom/
 │   │       │   ├── program.ts      # cf_* Action API + 程式執行器
 │   │       │   └── events.ts       # 型別化 event bus（核心 → 訂閱者）
 │   │       ├── render/   # Babylon 渲染層（訂閱 core）
-│   │       ├── input/    # 鍵盤 / nipplejs / Gamepad 三路疊加
+│   │       ├── input/    # 鍵盤 / 觸控虛擬搖桿 / Gamepad 三路疊加
 │   │       ├── blockly/  # 積木定義 + toolbox（v11 npm 包、media 本地化）
 │   │       ├── net/      # WS client（協定相容 legacy、退避重連）、帳號 / 進度 / 錄製上傳
 │   │       ├── multiplayer/ soccer/  # 大亂鬥 / 足球（多人 + 單人練習）

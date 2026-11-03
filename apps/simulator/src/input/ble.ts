@@ -6,6 +6,7 @@ import { bus, toast } from '../core/events';
 import { iconHtml } from '../ui/icons';
 import { decodeFrame, NUS_SERVICE, NUS_TX, NUS_RX, type BleControllerState } from './bleDecode';
 import { applyDeadzone, detectButtonEdge } from './padMath';
+import { BleLinkWatch } from './bleLinkWatch';
 
 // ---- Web Bluetooth 最小型別（tsconfig DOM lib 不含；只宣告用到的部分）----
 interface BleCharacteristic extends EventTarget {
@@ -49,6 +50,16 @@ export const bleState = {
 };
 
 const BLE_DEADZONE = 0.08;
+
+/** 封包斷了但系統還沒報斷線：桿量當 0（見 bleLinkWatch.ts） */
+const linkWatch = new BleLinkWatch();
+
+/** 這個 tick 的桿量還能不能信；剛斷訊、剛恢復各提示一次 */
+function linkIsFresh(): boolean {
+  const status = linkWatch.check(performance.now());
+  if (status === 'went-stale') toast('⚠️ 搖桿訊號中斷：先停住推桿，請靠近電腦或檢查電量', 'warning');
+  return status === 'fresh';
+}
 
 const dz = (v: number): number => applyDeadzone(v, BLE_DEADZONE);
 
@@ -101,6 +112,7 @@ export function bleUiButtons(): {
 } | null {
   const pad = bleState.pad;
   if (!bleState.connected || !pad) return null;
+  if (!linkIsFresh()) return null; // 停在最後一筆的方向鍵不要一直移動選單焦點
   const b = pad.buttons;
   const edge = (k: BleBtnKey): boolean => detectButtonEdge(!!b[k], prevBleButtons[k]);
   return {
@@ -124,10 +136,12 @@ export function syncBleButtonSample(): void {
 
 /**
  * BLE 搖桿的語意軸讀值（虛擬搖桿慣例：推上 = 負 = 上升 / 前進）。
- * 連線中覆寫虛擬搖桿四軸；未連線回傳 null（疊加路徑改用 nipplejs）。
+ * 連線中覆寫虛擬搖桿四軸；未連線回傳 null（疊加路徑改用畫面虛擬搖桿）。
  */
 export function bleAxes(): { throttle: number; yaw: number; pitch: number; roll: number } | null {
   if (!bleState.connected || !bleState.pad) return null;
+  // 斷訊：四軸歸零（不回 null，否則會改讀畫面虛擬搖桿）
+  if (!linkIsFresh()) return { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
   return {
     throttle: dz(-bleState.pad.throttle), // 搖桿往上(+1) → 上升（負）
     yaw: dz(bleState.pad.yaw),
@@ -158,6 +172,7 @@ function setBleButton(text: string, connected: boolean): void {
 function resetToDisconnected(): void {
   bleState.pad = null;
   bleState.deviceName = '';
+  linkWatch.reset();
   for (const k of BLE_BTN_KEYS) prevBleButtons[k] = false;
   setBleConnected(false);
   setBleButton('連線搖桿', false);
@@ -201,6 +216,8 @@ async function attachAndListen(dev: BleDevice): Promise<void> {
     if (!value) return;
     const pad = decodeFrame(value);
     if (pad) {
+      const key = Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)).join(',');
+      if (linkWatch.packet(performance.now(), key)) toast('搖桿訊號恢復', 'success');
       bleState.pad = pad;
       syncBleButtonSample();
       if (!bleState.connected) setBleConnected(true, dev.name ?? bleState.deviceName);

@@ -1,4 +1,4 @@
-// 相機：第三人稱跟隨（offset (0,4,12) 依 yaw 旋轉、lerp 0.06、lookAt drone）、
+// 相機：第三人稱跟隨（offset (0,4,12) 依 yaw 旋轉、lerp 0.06（60fps 基準，依時間換算見 FrameLerp）、lookAt drone）、
 // 考證視角（固定在操作員站位）、FPV（C 鍵切換，機身隱藏），
 // 以及畫畫教室的 topdown / orbit3d 兩模式（依 level.view 切換）。
 //
@@ -18,6 +18,7 @@ import { SOCCER_CAM_MIN_Y } from '../soccer/enclosureView';
 import type { SightSolid } from './cameraSight';
 import { CourseScale } from './courseScale';
 import { FixedCamLift } from './fixedCamLift';
+import { FrameLerp } from './frameLerp';
 import { PilotView, type CameraPose, type CameraViewMode } from './pilotView';
 
 // ---- 俯視（topdown）取景常數 ----
@@ -95,6 +96,8 @@ export class CameraRig {
   /** ⚽ 足球視角模式已併入 mode：follow 跟隨、team 全場、exam 考證、fpv 第一人稱 */
   /** 進足球或切回跟隨時直接貼到目標，避免從教室鏡頭插值時整段穿在外殼上 */
   private soccerSnap = false;
+  /** 上次 update 的時間（ms），算鏡頭平滑要走多少；-1 = 還沒更新過 */
+  private lastUpdateMs = -1;
 
   constructor(scene: Scene) {
     this.camera = new FreeCamera('cam', new Vector3(0, 15, 30), scene);
@@ -143,6 +146,9 @@ export class CameraRig {
 
   /** 每個渲染幀更新（pos/yaw 已是插值後的值）。回傳機身是否應顯示。 */
   update(pos: Vector3, yaw: number): boolean {
+    const now = performance.now();
+    const dtMs = this.lastUpdateMs < 0 ? FrameLerp.REF_MS : now - this.lastUpdateMs;
+    this.lastUpdateMs = now;
     if (this.mode === 'fpv') {
       // 第一視角：相機在機身、看機頭方向（略往下，像 FPV 眼鏡）
       const pose = PilotView.fpv(
@@ -177,7 +183,7 @@ export class CameraRig {
         this.camera.position.copyFrom(target);
         this.soccerSnap = false;
       } else {
-        Vector3.LerpToRef(this.camera.position, target, 0.28, this.camera.position);
+        Vector3.LerpToRef(this.camera.position, target, FrameLerp.alpha(0.28, dtMs), this.camera.position);
         this.camera.position.y = Math.max(SOCCER_CAM_MIN_Y, this.camera.position.y);
       }
       this.tmpTarget.set(pos.x, pos.y + 0.02, pos.z);
@@ -203,7 +209,7 @@ export class CameraRig {
       this.courseSolids,
     );
     const target = new Vector3(followed.eye.x, followed.eye.y, followed.eye.z);
-    Vector3.LerpToRef(this.camera.position, target, 0.06, this.camera.position);
+    Vector3.LerpToRef(this.camera.position, target, FrameLerp.alpha(0.06, dtMs), this.camera.position);
     this.camera.setTarget(new Vector3(pos.x, pos.y, pos.z));
     return true;
   }

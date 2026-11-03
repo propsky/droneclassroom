@@ -22,6 +22,7 @@ import { registerBleConnectedChecker } from '../core/execution/mode';
 import { resolveStickSource, type StickAxes } from './padMath';
 import { StickCurve } from './stickCurve';
 import { YawExpoPreference } from './yawExpoPref';
+import { YawKeyRamp } from './yawKeyRamp';
 
 export { isTouchDevice, touchJoysticksShouldShow };
 
@@ -106,8 +107,12 @@ function stickHasInput(s: StickAxes): boolean {
   return s.throttle !== 0 || s.yaw !== 0 || s.pitch !== 0 || s.roll !== 0;
 }
 
+const yawKeyRamp = new YawKeyRamp();
+
 /** 彙整本 tick 的手動控制輸入 */
 export function collectControlFrame(): ControlFrame {
+  // 方向鍵轉向漸進：每 tick 都要推進（含下面提早返回的情況），放開才歸零
+  const yawKey = yawKeyRamp.next((keys['arrowleft'] ? 1 : 0) - (keys['arrowright'] ? 1 : 0));
   const idle: ControlFrame = {
     lift: 0,
     forward: 0,
@@ -139,8 +144,7 @@ export function collectControlFrame(): ControlFrame {
   if (keys['s']) frame.forward -= 1;
   if (keys['a']) frame.right -= 1;
   if (keys['d']) frame.right += 1;
-  if (keys['arrowleft']) frame.yawDelta += YAW_KEY_RATE;
-  if (keys['arrowright']) frame.yawDelta -= YAW_KEY_RATE;
+  frame.yawDelta += yawKey * YAW_KEY_RATE;
 
   // 校正若記下解鎖開關，飛行迴圈也不讀。鍵盤、虛擬搖桿、實體搖桿都維持開始 + 起飛。
   if (stick.throttle !== 0) {

@@ -62,6 +62,7 @@ import {
   skipCalibStep,
 } from './input/calibration';
 import { initAudio } from './ui/audio';
+import { initMotorSound, tickMotorSound } from './ui/motorSound';
 import { initEndCountdown } from './ui/endCountdown';
 import { initBroadcastBanner } from './ui/broadcastBanner';
 import { ClassLevelCommand } from './net/classLevelCommand';
@@ -100,6 +101,7 @@ import { SoccerFieldVisuals } from './render/soccerField';
 import { initSoccerHud } from './ui/soccerHud';
 import { applySoccerFeel, initSoccerFeelFromUrl } from './soccer/flightFeel';
 import { initFpsMeter } from './ui/fpsMeter';
+import { FrameGovernor } from './render/frameGovernor';
 import { initPwa } from './pwa';
 
 // ---- 場景與渲染 ----
@@ -153,6 +155,7 @@ initRealToolbar(); // 積木工具列：模擬器／真機（在 initOverlays �
 initHeaderOverflow(); // header 溢出防護（在 initOverlays 之後：圖標已掛載，量測才準）
 initLevelComplete(); // 過關結算卡（下一關 / 再玩一次）
 initAudio();
+initMotorSound();
 if (!isPreviewMode()) {
   initWs();
 }
@@ -202,7 +205,14 @@ bus.on('level-cleared', () => {
   applyHomePadLook(world.scene, false);
   showSceneEnv(chosenSceneEnv());
 });
-initFpsMeter(() => world.engine.getFps()); // ?fps=1 效能驗收後門（docs/perf-arena.md）
+// 畫質自動調整：掉幀就降渲染解析度、順了再升回來（只動畫面，物理照樣 60Hz）。?governor=0 關掉
+const governor = new FrameGovernor();
+governor.enabled = FrameGovernor.enabledBy(location.search);
+const nativeScaling = world.engine.getHardwareScalingLevel();
+initFpsMeter(
+  () => world.engine.getFps(),
+  () => governor.renderScale,
+); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initSceneEnvControl();
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進；預覽模式在 initPlayer 內略過 WS
@@ -386,6 +396,8 @@ function fixedTick(nowMs: number): void {
 
 world.engine.runRenderLoop(() => {
   const now = performance.now();
+  const scale = governor.onFrame(now);
+  if (scale !== null) world.engine.setHardwareScalingLevel(nativeScaling / scale);
   if (flags.paused) {
     // 暫停中：不累積時間、不 tick（物理 / motion plan / 判定全部凍結），畫面照常渲染。
     // 仍以 60Hz 讀搖桿，否則暫停 overlay 無法用 A / START 繼續、也無法移動焦點。
@@ -437,6 +449,7 @@ world.engine.runRenderLoop(() => {
   soccerVisuals.present(interpPos.x, interpPos.y, interpPos.z, interpYaw, bodyVisible);
 
   updateHudFrame();
+  tickMotorSound(now);
   world.scene.render();
 });
 

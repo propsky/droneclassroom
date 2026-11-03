@@ -126,7 +126,7 @@ export class PortraitChrome {
     return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
   }
 
-  /** 點擊是否落在搖桿區（nipplejs 的圓盤節點也算）。 */
+  /** 點擊是否落在搖桿區（搖桿頭節點也算）。 */
   static hitIsStick(stick: Element, hit: Element | null): boolean {
     return !!hit && (hit === stick || stick.contains(hit));
   }

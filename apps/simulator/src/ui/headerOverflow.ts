@@ -10,6 +10,7 @@ const $ = (id: string): HTMLElement | null => document.getElementById(id);
 const MOVE_ORDER = [
   'connect-gamepad-btn',
   'fullscreen-btn',
+  'motor-btn',
   'music-btn',
   'mute-btn',
   'view-btn',

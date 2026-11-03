@@ -1,10 +1,11 @@
-// nipplejs 虛擬雙搖桿 — 美國手 Mode 2：
+// 畫面虛擬雙搖桿 — 美國手 Mode 2：
 // 左桿：上下 = 升降（throttle）、左右 = 旋轉（yaw）
 // 右桿：上下 = 前後（pitch）、左右 = 左右平移（roll）
 // 軸向對齊 W3C 慣例：推上 = 負值。
 // 要不要畫出來由 TouchJoystickPreference 決定（主要指標 coarse、有觸控螢幕，或使用者手動打開）。
-import nipplejs from 'nipplejs';
+// 相對拖曳（padGrab.ts）：按下的點就是中心，手指一碰不會瞬間打桿；搖桿頭畫的是搖桿值，不是手指位置。
 import { isManualLocked } from '../core/droneState';
+import { PadGrab } from './padGrab';
 import { TouchJoystickPreference } from './touchJoystickPref';
 
 export const virtualStick = {
@@ -14,14 +15,18 @@ export const virtualStick = {
   roll: 0, // +1 = 右飛
 };
 
-interface StickManager {
-  destroy(): void;
-  on(event: 'move', handler: (evt: unknown, data: { vector: { x: number; y: number } }) => void): void;
-  on(event: 'end', handler: () => void): void;
+/** 一個圓盤：抓住它的那根手指、搖桿頭、寫入哪兩軸。 */
+interface Pad {
+  zone: HTMLElement;
+  knob: HTMLElement;
+  grab: PadGrab;
+  pointer: number | null;
+  travel: number;
+  /** x 往右、y 往上，各 -1..1 */
+  write(x: number, y: number): void;
 }
 
-const managers: StickManager[] = [];
-let lastZoneWidth = 0;
+let mounted: { pads: Pad[]; stop: AbortController } | null = null;
 
 function browserStore(): Storage | null {
   try {
@@ -65,14 +70,69 @@ function zeroStick(): void {
 }
 
 function destroySticks(): void {
-  while (managers.length > 0) {
-    const manager = managers.pop();
-    try {
-      manager?.destroy();
-    } catch {
-      /* 已經拆掉 */
-    }
-  }
+  if (!mounted) return;
+  mounted.stop.abort();
+  for (const pad of mounted.pads) pad.knob.remove();
+  mounted = null;
+}
+
+/** 搖桿值寫進兩軸並移動搖桿頭。倒數、程式執行中鎖手動：軸寫 0、頭留在中間。 */
+function setPad(pad: Pad, x: number, y: number): void {
+  if (isManualLocked()) x = y = 0;
+  pad.write(x, y);
+  pad.knob.style.transform = `translate(-50%, -50%) translate(${x * pad.travel}px, ${-y * pad.travel}px)`;
+}
+
+function releasePad(pad: Pad): void {
+  pad.pointer = null;
+  pad.zone.classList.remove('stick-active');
+  setPad(pad, 0, 0);
+}
+
+function mountPad(zone: HTMLElement, write: Pad['write'], signal: AbortSignal): Pad {
+  const knob = document.createElement('div');
+  knob.className = 'stick-knob';
+  zone.appendChild(knob);
+  const pad: Pad = { zone, knob, grab: new PadGrab(), pointer: null, travel: PadGrab.travel(zone.clientWidth || 170), write };
+
+  zone.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (pad.pointer !== null) return; // 同一個圓盤只認第一根手指
+      e.preventDefault();
+      pad.pointer = e.pointerId;
+      try {
+        zone.setPointerCapture(e.pointerId); // 手指滑出圓盤仍繼續推
+      } catch {
+        /* 合成事件沒有可捕捉的指標 */
+      }
+      pad.travel = PadGrab.travel(zone.clientWidth || 170);
+      const vv = window.visualViewport;
+      const reach = PadGrab.reachOf(vv?.width ?? window.innerWidth, vv?.height ?? window.innerHeight);
+      // 兩根桿放開都彈回 0：按下的點就是中心
+      pad.grab.grab(e.clientX, e.clientY, 0, 0, pad.travel, reach);
+      zone.classList.add('stick-active');
+      setPad(pad, 0, 0);
+    },
+    { signal },
+  );
+  zone.addEventListener(
+    'pointermove',
+    (e) => {
+      if (e.pointerId !== pad.pointer) return;
+      const [x, y] = pad.grab.read(e.clientX, e.clientY);
+      setPad(pad, x, y);
+    },
+    { signal },
+  );
+  const end = (e: PointerEvent): void => {
+    if (e.pointerId === pad.pointer) releasePad(pad);
+  };
+  zone.addEventListener('pointerup', end, { signal });
+  zone.addEventListener('pointercancel', end, { signal });
+  zone.addEventListener('lostpointercapture', end, { signal });
+  setPad(pad, 0, 0);
+  return pad;
 }
 
 function mountSticks(): void {
@@ -80,61 +140,33 @@ function mountSticks(): void {
   const leftZone = document.getElementById('joystick-left');
   const rightZone = document.getElementById('joystick-right');
   if (!leftZone || !rightZone) return;
-
-  // 圓盤跟區域一起縮（直式把區域收到 132，避免左右桿互壓）。橫式區域仍是 170 → 維持 130。
-  const zoneWidth = Math.min(leftZone.clientWidth || 170, rightZone.clientWidth || 170);
-  lastZoneWidth = zoneWidth;
-  const nippleSize = Math.min(130, Math.max(96, Math.round(zoneWidth - 8)));
-  const commonOpts = {
-    mode: 'static' as const,
-    position: { left: '50%', top: '50%' },
-    color: 'white',
-    size: nippleSize,
-    restJoystick: true,
-    restOpacity: 0.5,
-    dynamicPage: false,
-  };
-
-  const leftStick = nipplejs.create({ ...commonOpts, zone: leftZone }) as StickManager;
-  leftStick.on('move', (_evt, data) => {
-    if (isManualLocked()) {
-      virtualStick.throttle = 0;
-      virtualStick.yaw = 0;
-      return;
-    }
-    // nipplejs 推上是 +y；取負後：推上 = 負 = 上升
-    virtualStick.throttle = -data.vector.y;
-    virtualStick.yaw = data.vector.x;
-  });
-  leftStick.on('end', () => {
-    virtualStick.throttle = 0;
-    virtualStick.yaw = 0;
-  });
-
-  const rightStick = nipplejs.create({ ...commonOpts, zone: rightZone }) as StickManager;
-  rightStick.on('move', (_evt, data) => {
-    if (isManualLocked()) {
-      virtualStick.pitch = 0;
-      virtualStick.roll = 0;
-      return;
-    }
-    virtualStick.pitch = -data.vector.y;
-    virtualStick.roll = data.vector.x;
-  });
-  rightStick.on('end', () => {
-    virtualStick.pitch = 0;
-    virtualStick.roll = 0;
-  });
-
-  managers.push(leftStick, rightStick);
+  const stop = new AbortController();
+  const pads = [
+    mountPad(
+      leftZone,
+      (x, y) => {
+        // 推上 = 負 = 上升
+        virtualStick.throttle = -y;
+        virtualStick.yaw = x;
+      },
+      stop.signal,
+    ),
+    mountPad(
+      rightZone,
+      (x, y) => {
+        virtualStick.pitch = -y;
+        virtualStick.roll = x;
+      },
+      stop.signal,
+    ),
+  ];
+  mounted = { pads, stop };
 }
 
 function relayoutSticks(): void {
   syncLayout();
   if (!document.body.classList.contains('touch-joysticks')) return;
-  const zone = document.getElementById('joystick-left');
-  const width = zone?.clientWidth ?? 0;
-  if (managers.length === 0 || Math.abs(width - lastZoneWidth) > 1) mountSticks();
+  if (!mounted) mountSticks();
 }
 
 /** 依解析結果掛上或拆掉 body.touch-joysticks。隱藏時軸歸零，避免看不見的搖桿還在推飛機。 */
@@ -144,7 +176,6 @@ export function applyTouchJoystickVisibility(visible = touchJoysticksShouldShow(
   syncLayout();
   if (!visible) {
     destroySticks();
-    lastZoneWidth = 0;
     return;
   }
   mountSticks();

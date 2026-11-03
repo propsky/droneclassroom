@@ -1,8 +1,9 @@
 // 效能驗收後門：?fps=1 → 右下角極簡小字，每秒更新一次 fps（實機驗收 16 機 ≥50fps 用，見 docs/perf-arena.md）。
 // 純 DOM、不引 Babylon：fps 由 main.ts 以 getter 注入（engine.getFps() 是渲染層的事）。
+// 畫質自動調整降級時一併顯示目前的渲染比例（render/frameGovernor.ts）。
 // 沒帶 ?fps=1 時不建任何 DOM、不起計時器 → 對正常使用零成本。
 
-export function initFpsMeter(getFps: () => number): void {
+export function initFpsMeter(getFps: () => number, getRenderScale?: () => number): void {
   if (new URLSearchParams(location.search).get('fps') !== '1') return;
   const el = document.createElement('div');
   el.id = 'fps-meter';
@@ -24,6 +25,7 @@ export function initFpsMeter(getFps: () => number): void {
   document.body.appendChild(el);
   // 每秒一次：engine.getFps() 本身就是滑動平均，秒級更新足夠、不干擾主迴圈
   setInterval(() => {
-    el.textContent = `fps ${Math.round(getFps())}`;
+    const scale = getRenderScale?.() ?? 1;
+    el.textContent = `fps ${Math.round(getFps())}` + (scale < 1 ? ` · 畫質 ${Math.round(scale * 100)}%` : '');
   }, 1000);
 }
