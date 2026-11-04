@@ -6,6 +6,7 @@
 //   3. 關卡判定（圈圈距離 detHypot、ring 浮動 detSin、faceYaw）
 //   4. 程式模式（motion plan、async 指令鏈、cf_random 可播種 PRNG、
 //      cf_elapsed 模擬時間條件、畫筆隨機色）
+//   5. 真實物理（油門、傾角 detSin/detCos、sqrt 阻力、落地）
 // 逐 tick 對無人機狀態 hash（FNV-1a 64，吃 Float64 位元），輸出最終 hash。
 import type { LevelDef } from '@creafly/shared';
 import {
@@ -19,7 +20,9 @@ import {
 } from '../src/core/droneState';
 import {
   applyManualControls,
+  applyRealControls,
   integrate,
+  integrateReal,
   floorProtect,
   resolveObstacleCollisions,
   type ControlFrame,
@@ -78,9 +81,26 @@ function scriptedFrame(t: number): ControlFrame {
   return f;
 }
 
+/** 真實物理段：油門推上起飛 → 斜前方傾斜加減油門 → 轉向 → 收油門摔下（含落地） */
+function realFrame(t: number): ControlFrame {
+  const f = scriptedFrame(t);
+  // 起飛後照高度加減油門（輸入只由 tick 與狀態決定，仍是確定性的），在 6 m 上下飛
+  if (t < 120) f.lift = t < 70 ? 1 : 0;
+  else f.lift = droneState.position.y < 6 ? 0.25 : -0.25;
+  if (t >= 900) {
+    f.lift = -1;
+    f.forward = 0;
+  }
+  return f;
+}
+
 export interface ScenarioResult {
   manualHash: string;
   programHash: string;
+  realHash: string;
+  /** 真實物理段的最高高度與是否摔回地面（確認這段真的飛過、落過地） */
+  realMaxY: number;
+  realLanded: boolean;
   ticks: number;
   ringsCollected: number;
   programFinished: boolean;
@@ -151,11 +171,32 @@ export async function runScenario(): Promise<ScenarioResult> {
     for (let y = 0; y < YIELDS_PER_TICK; y++) await Promise.resolve();
   }
   off();
+  const programHash = hashToHex(h);
+
+  // ---- 真實物理段 ----
+  resetDroneState();
+  flags.physics = 'real';
+  h = FNV_OFFSET;
+  let realMaxY = 0;
+  for (let t = 0; t < MANUAL_TICKS; t++) {
+    advanceSimTick();
+    // 900–960：手動被鎖（倒數等）的路徑
+    applyRealControls(t >= 900 && t < 960 ? null : realFrame(t));
+    integrateReal();
+    realMaxY = Math.max(realMaxY, droneState.position.y);
+    resolveObstacleCollisions();
+    tickLevel(simNowMs());
+    h = hashDroneTick(h);
+  }
+  flags.physics = 'arcade';
 
   return {
     manualHash,
-    programHash: hashToHex(h),
-    ticks: MANUAL_TICKS + pt,
+    programHash,
+    realHash: hashToHex(h),
+    realMaxY,
+    realLanded: droneState.isGrounded,
+    ticks: MANUAL_TICKS * 2 + pt,
     ringsCollected,
     programFinished: finished,
     finalState: {

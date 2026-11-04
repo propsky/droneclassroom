@@ -15,6 +15,7 @@ pnpm install            # install all workspace deps
 pnpm dev                # simulator (:5173) + teacher (:5174) + admin (:5175) + api (:3000) in parallel
 pnpm dev:sim            # student client only
 pnpm typecheck          # tsc --noEmit across all packages (must stay clean)
+pnpm check:arch         # architecture rules: core/ has no Babylon/DOM/non-core imports, shared has zero runtime deps (CI-gated)
 pnpm build              # production build → apps/simulator/dist (zero CDN deps)
 pnpm build:pages        # what Cloudflare Pages runs: simulator + teacher (/teacher/) + admin (/admin/) in one dist
 pnpm test               # Vitest (shared / simulator / teacher) + pytest (api)

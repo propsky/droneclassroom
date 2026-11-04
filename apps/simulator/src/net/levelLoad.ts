@@ -6,10 +6,11 @@ import {
   levelState,
   type LoadLevelOptions,
 } from '../core/level';
-import { toast } from '../core/events';
+import { bus, toast } from '../core/events';
 import { fetchLevelDefinition } from './curriculum';
 import { loadEntitlement } from './entitlement';
 import { sendToServer, wsState } from './ws';
+import { WsReady } from './wsReady';
 
 const LOAD_TIMEOUT_MS = 8000;
 const pending = new Map<
@@ -44,7 +45,15 @@ async function requestLevelLoad(levelId: string): Promise<boolean> {
 
   if (canLoadLevelOfflineGrace(levelId)) return true;
 
-  if (!wsState.connected) {
+  // 剛開頁面（還沒連上過）：重新整理時 WebSocket 常比關卡資料晚到，先等它連上，逾時才當作斷線。
+  // 連上過又斷線：照舊立刻提示，不讓學生乾等。
+  const online = wsState.everConnected
+    ? wsState.connected
+    : await WsReady.wait(
+        { connected: () => wsState.connected, onConnected: (fn) => bus.on('ws-connected', fn) },
+        LOAD_TIMEOUT_MS,
+      );
+  if (!online) {
     toast('📡 請恢復連線以載入關卡', 'warning');
     return false;
   }

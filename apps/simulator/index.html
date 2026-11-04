@@ -53,6 +53,7 @@
                 </div>
                 <button id="home-btn" class="header-btn" title="一鍵飛回起飛墊"><span class="btn-ic" data-icon="home"></span><span>回家</span></button>
                 <button id="pause-btn" class="header-btn" title="暫停 / 繼續（鍵盤 P）"><span class="btn-ic" data-icon="pause"></span><span>暫停</span></button>
+                <button id="physics-btn" class="header-btn" type="button" aria-pressed="false" title="切換飛行物理：簡易（放開就停）／真實（有重力，自己控油門）。只在一般關卡生效"><span class="btn-ic" data-icon="atom"></span><span>物理：簡易</span></button>
             </div>
             <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 2：音效 / 音樂 / 視角 -->
@@ -62,6 +63,7 @@
                 <button id="motor-btn" class="header-btn" type="button" aria-pressed="false" title="開關馬達聲（照飛機的動作嗡嗡響）"><span class="btn-ic" data-icon="fan"></span><span>馬達聲：關</span></button>
                 <button id="view-btn" class="header-btn" title="切換視角：第三人稱 / 考證視角 / 第一人稱（鍵盤 C）"><span class="btn-ic" data-icon="eye"></span><span>視角：第三人稱</span></button>
                 <button id="scene-env-btn" class="header-btn" type="button" title="切換背景：教室 / 展場"><span class="btn-ic" data-icon="sun"></span><span>背景：教室</span></button>
+                <button id="scale-ref-btn" class="header-btn" type="button" aria-pressed="false" title="顯示 1 公尺格線、距離標籤和課桌椅，看出場地和無人機有多大"><span class="btn-ic" data-icon="ruler"></span><span>比例尺：關</span></button>
             </div>
             <span class="header-sep" aria-hidden="true"></span>
             <!-- 群組 3：搖桿 / 校正 / 全螢幕 -->
@@ -191,7 +193,7 @@
                             </div>
                             <div class="help-group-title">升降・旋轉</div>
                             <div class="help-grid">
-                                <span class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="help-desc">上升 / 下降（地面 ↑ 起飛）</span>
+                                <span class="help-keys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="help-desc"><span class="arcade-only">上升 / 下降（地面 ↑ 起飛）</span><span class="real-only">加 / 減油門（放開會保持）</span></span>
                                 <span class="help-keys"><kbd>←</kbd><kbd>→</kbd></span><span class="help-desc">旋轉機頭</span>
                             </div>
                             <div class="help-group-title">其他</div>
@@ -209,7 +211,7 @@
                             </div>
                             <div class="help-group-title">升降・旋轉</div>
                             <div class="help-grid">
-                                <span class="help-keys"><kbd>左桿 ↕</kbd></span><span class="help-desc">上升 / 下降（推上起飛）</span>
+                                <span class="help-keys"><kbd>左桿 ↕</kbd></span><span class="help-desc"><span class="arcade-only">上升 / 下降（推上起飛）</span><span class="real-only">加 / 減油門（放開會保持）</span></span>
                                 <span class="help-keys"><kbd>左桿 ↔</kbd></span><span class="help-desc">旋轉機頭</span>
                             </div>
                         </div>
@@ -222,7 +224,7 @@
                             </div>
                             <div class="help-group-title">升降・旋轉</div>
                             <div class="help-grid">
-                                <span class="help-keys"><kbd>左桿 ↕</kbd></span><span class="help-desc">上升 / 下降</span>
+                                <span class="help-keys"><kbd>左桿 ↕</kbd></span><span class="help-desc"><span class="arcade-only">上升 / 下降</span><span class="real-only">加 / 減油門（放開會保持）</span></span>
                                 <span class="help-keys"><kbd>左桿 ↔</kbd></span><span class="help-desc">旋轉機頭</span>
                             </div>
                             <div class="help-group-title">其他</div>

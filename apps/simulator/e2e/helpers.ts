@@ -46,3 +46,18 @@ export async function waitForFlightReady(page: Page): Promise<void> {
     )
     .toBeGreaterThan(0);
 }
+
+/**
+ * 工具列按鈕：寬度不夠時會被收進「更多」（ui/headerOverflow.ts，例如 iPad 直式）。
+ * 在「更多」裡就先打開面板，回傳按鈕 locator。
+ */
+export async function headerButton(page: Page, id: string) {
+  const btn = page.locator(`#${id}`);
+  await expect(btn).toBeAttached();
+  const inMore = await btn.evaluate((el) => !!el.closest('#header-more-panel'));
+  if (inMore && !(await page.locator('#header-more').evaluate((el) => el.classList.contains('open')))) {
+    await page.locator('#header-more-btn').click();
+  }
+  await expect(btn).toBeVisible();
+  return btn;
+}

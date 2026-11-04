@@ -1,0 +1,121 @@
+name: CI
+
+# 推上 main（= 正式部署）前後的擋關：型別、單元測試、架構規則、重播確定性。
+# Pages 與 deploy-api 不等這裡的結果；紅燈代表剛推上去的東西要馬上修。
+# 不使用任何 secret，也不碰正式資料庫。
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: 型別・單元測試・架構
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # pnpm typecheck 也會跑 apps/api 的 ruff（uv run ruff check .）
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: 安裝
+        run: pnpm install --frozen-lockfile
+
+      - name: 型別檢查（tsc + ruff）
+        run: pnpm typecheck
+
+      - name: 架構檢查（core 純 TS、shared 零依賴）
+        run: pnpm check:arch
+
+      - name: 單元測試（shared / simulator / teacher）
+        run: |
+          pnpm --filter @creafly/shared test
+          pnpm --filter @creafly/simulator test
+          pnpm --filter @creafly/teacher test
+
+  api:
+    name: API 測試（pytest，無資料庫）
+    runs-on: ubuntu-latest
+    env:
+      # 不設 DATABASE_URL：conftest 也強制無資料庫模式。真庫測試只在有 TEST_DATABASE_URL 時跑，這裡跳過。
+      TEST_DATABASE_URL: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: 安裝
+        run: pnpm install --frozen-lockfile
+
+      # 先打包驗證器，test_replay_verify 的真實 bundle 測試才不會被跳過（前端 core ↔ 後端重播的整條路徑）
+      - name: 重播驗證器 bundle
+        run: pnpm --filter @creafly/simulator build:replay-verifier
+
+      - name: pytest
+        working-directory: apps/api
+        run: uv run pytest -q
+
+  determinism:
+    name: 重播確定性（V8 ≡ JavaScriptCore）
+    # 跨引擎比對要 jsc（iPad Safari 的引擎）。macOS 系統內建 /System/Library/Frameworks/JavaScriptCore.framework，
+    # Linux runner 沒有現成可信的 jsc，所以這個 job 跑在 macOS（分鐘數較貴，但整個 job 只要一兩分鐘）。
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安裝
+        run: pnpm install --frozen-lockfile
+
+      - name: 確認有 jsc（找不到時腳本只會警告並略過跨引擎比對，這裡改成直接失敗）
+        run: test -x /System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc || test -x /System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Helpers/jsc
+
+      - name: verify:determinism
+        run: pnpm --filter @creafly/simulator verify:determinism

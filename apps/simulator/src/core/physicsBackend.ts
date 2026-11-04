@@ -15,6 +15,8 @@ export interface CollisionResult {
   vel: Vec3;
   /** 本 tick 有推出（呼叫端據此播撞擊音效等） */
   bumped: boolean;
+  /** 撞進去的速度（沿推出方向、每 tick 公尺，≥ 0）；沒撞或只是貼著滑 = 0。撞擊速度提示用。 */
+  impact: number;
 }
 
 export interface PhysicsBackend {
@@ -53,6 +55,7 @@ export class SimpleBackend implements PhysicsBackend {
 
   resolveCollisions(pos: Vec3, vel: Vec3, radius: number): CollisionResult {
     let bumped = false;
+    let impact = 0;
     for (const { center: c, half } of this.boxes.values()) {
       const hx = half.x + radius;
       const hy = half.y + radius;
@@ -65,19 +68,23 @@ export class SimpleBackend implements PhysicsBackend {
       const py = hy - Math.abs(dy);
       const pz = hz - Math.abs(dz);
       const m = Math.min(px, py, pz);
+      // 撞進去 = 朝方塊中心那一側的速度（在 -x 側往 +x 飛才算）
       if (m === px) {
         pos.x = c.x + (dx < 0 ? -hx : hx);
+        impact = Math.max(impact, dx < 0 ? vel.x : -vel.x);
         vel.x = 0;
       } else if (m === py) {
         pos.y = c.y + (dy < 0 ? -hy : hy);
+        impact = Math.max(impact, dy < 0 ? vel.y : -vel.y);
         vel.y = 0;
       } else {
         pos.z = c.z + (dz < 0 ? -hz : hz);
+        impact = Math.max(impact, dz < 0 ? vel.z : -vel.z);
         vel.z = 0;
       }
       bumped = true;
     }
-    return { pos, vel, bumped };
+    return { pos, vel, bumped, impact };
   }
 
   addStaticBox(id: string, center: Vec3, half: Vec3): void {

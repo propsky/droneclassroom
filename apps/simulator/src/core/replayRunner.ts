@@ -4,10 +4,10 @@
 //   - 同一畫面內連跑的 tick 之間不排空（multiTickFrames）
 //   - tick 內操作（搖桿按鍵）在 advanceSimTick 之後、物理之前套用
 import type { InputRecordingV2, RecordedAction } from '@creafly/shared';
-import { advanceSimTick, droneState, flags, simNowMs, simTime } from './droneState';
+import { advanceSimTick, droneState, flags, realFlight, resetRealFlight, simNowMs, simTime } from './droneState';
 import { seedRng } from './rng';
 import { bootstrapLevelForReplay, levelState, resetMission, resyncLevelPose } from './level';
-import { autoLand, emergencyStop, goHome, padTakeoff } from './physics';
+import { autoLand, emergencyStop, goHome, padTakeoff, setFlightPhysics } from './physics';
 import { programState, runProgram, setMode, stopProgram } from './program';
 import { bus } from './events';
 import { FNV_OFFSET, hashDroneTick, hashToHex } from './simHash';
@@ -56,6 +56,9 @@ function applyAction(a: RecordedAction): void {
     case 'run':
       if (a.code !== undefined) runProgram(a.code);
       break;
+    case 'physics':
+      if (a.physics) setFlightPhysics(a.physics);
+      break;
   }
 }
 
@@ -70,6 +73,10 @@ export async function replayRecording(rec: InputRecordingV2): Promise<ReplayResu
   droneState.isFlying = init.isFlying;
   droneState.isGrounded = init.isGrounded;
   droneState.frozen = init.frozen;
+  // 物理模式與真實物理的內部狀態：沒有這兩欄 = 簡易物理（舊錄製）
+  flags.physics = rec.physics === 'real' ? 'real' : 'arcade';
+  resetRealFlight();
+  if (rec.physics === 'real' && init.real) Object.assign(realFlight, init.real);
   // 錄製起點的位置／機頭是關卡載入後才套的：重新取樣「上一 tick」，第一個 tick 才不會被當成瞬移或轉動
   resyncLevelPose();
   flags.mode = rec.mode;

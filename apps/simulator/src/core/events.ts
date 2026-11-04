@@ -61,6 +61,10 @@ export interface CoreEventMap {
   'program-running': { running: boolean };
   /** 清除飛行軌跡線 */
   'trail-clear': Record<string, never>;
+  /** 撞牆／障礙／落地夠快（core/impact.ts）：畫面跳「撞擊 3.2 m/s」 */
+  'impact': { speed: number; surface: import('./impact').ImpactSurface };
+  /** 簡易物理 ↔ 真實物理切換（core/physics.ts setFlightPhysics） */
+  'physics-changed': { physics: import('@creafly/shared').FlightPhysics };
   // ---- 畫畫教室（core/pen.ts → render/ink.ts + ui）----
   /** 開新一段墨水 stroke（下筆 / 換色 / 段滿接續） */
   'ink-stroke-start': { id: number; color: string };

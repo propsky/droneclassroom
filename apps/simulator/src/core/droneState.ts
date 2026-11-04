@@ -1,7 +1,7 @@
 // 無人機物理狀態 — 單一真相來源（框架無關純 TS）。
 // 座標系：右手系、機頭朝 -Z、yaw 正向 = 左轉（與 legacy Three.js 版一致）。
 // G-04：模擬路徑上的 sin/cos/hypot 一律走 detmath（跨引擎 bit 一致）。
-import { detSin, detCos, detHypot2, detHypot3 } from '@creafly/shared';
+import { detSin, detCos, detHypot2, detHypot3, type FlightPhysics, type RecordedRealFlight } from '@creafly/shared';
 import { FlightReview } from './flightReview';
 
 export interface Vec3 {
@@ -85,6 +85,21 @@ export interface DroneState {
   hardLanding: boolean;
 }
 
+/**
+ * 真實物理（core/realFlight.ts）的內部狀態。簡易物理不讀不寫。
+ * 不進 hash，但會影響之後的位置：錄製起點要帶（InputRecordingV2.initial.real）。
+ */
+export const realFlight: RecordedRealFlight = { throttle: 0, thrust: 0, pitch: 0, roll: 0, detent: 0 };
+
+/** 油門歸零、傾角回正（在地上、重置、自動降落結束） */
+export function resetRealFlight(): void {
+  realFlight.throttle = 0;
+  realFlight.thrust = 0;
+  realFlight.pitch = 0;
+  realFlight.roll = 0;
+  realFlight.detent = 0;
+}
+
 export const droneState: DroneState = {
   position: vec3(HOME_POSITION.x, HOME_POSITION.y, HOME_POSITION.z),
   velocity: vec3(),
@@ -111,6 +126,7 @@ export function resetDroneState(): void {
   droneState.attitudePitch = null;
   droneState.attitudeRoll = null;
   droneState.hardLanding = false;
+  resetRealFlight();
   // 本趟回顧跟這次飛行一起清掉。數字不在 droneState 上，也不進重播 hash。
   FlightReview.reset();
 }
@@ -133,6 +149,8 @@ export const flags = {
   multiplayerLock: false,
   /** 老師已派送、還在原關卡等待。不能飛，直到進場或取消。 */
   dispatchHold: false,
+  /** 手動飛行用哪種物理（只作用在一般關卡；足球、大亂鬥一律簡易）。切換走 physics.setFlightPhysics */
+  physics: 'arcade' as FlightPhysics,
 };
 
 /** 手動輸入是否被鎖定（程式模式 / 程式執行中 / 倒數中 / 暫停中 / 回家中 / 多人鎖定 / 派送等待） */

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { headerButton } from './helpers';
 
 /**
  * 第二、三章補測。
@@ -120,8 +121,8 @@ test.describe('第二、三章', () => {
     await page.goto('/?level=2-5');
     await guest(page, '背景');
     await page.locator('#level-intro-start').click();
-    const btn = page.locator('#scene-env-btn');
-    await expect(btn).toBeVisible();
+    // iPad 直式工具列塞不下時在「更多」裡，也要點得到
+    const btn = await headerButton(page, 'scene-env-btn');
     await expect(btn).toContainText('教室');
     await expect(page.locator('body')).toHaveAttribute('data-scene-env', 'default');
     await btn.click();

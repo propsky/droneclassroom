@@ -40,6 +40,8 @@ import { LevelVisuals } from './render/levelMeshes';
 import { InkVisual } from './render/ink';
 import { GuideVisual } from './render/guide';
 import { FlightFenceVisual } from './render/flightFence';
+import { ScaleReference } from './render/scaleReference';
+import { initScaleReferenceToggle } from './ui/scaleReferenceToggle';
 import { CourseScale } from './render/courseScale';
 import { CameraRig } from './render/cameras';
 import { initHud, updateHudFrame } from './ui/hud';
@@ -63,6 +65,8 @@ import {
 } from './input/calibration';
 import { initAudio } from './ui/audio';
 import { initMotorSound, tickMotorSound } from './ui/motorSound';
+import { initFlightPhysicsUi, updatePhysicsHud } from './ui/flightPhysicsUi';
+import { initImpactPopup } from './ui/impactPopup';
 import { initEndCountdown } from './ui/endCountdown';
 import { initBroadcastBanner } from './ui/broadcastBanner';
 import { ClassLevelCommand } from './net/classLevelCommand';
@@ -114,6 +118,8 @@ new InkVisual(world.scene);
 new GuideVisual(world.scene);
 // 飛行範圍：地面紅框＋半透明圍牆（關卡有 flightBounds 才畫）
 new FlightFenceVisual(world.scene);
+// 比例尺：1 m 格線、距離標籤、課桌椅與 140 cm 學生剪影（工具列開關，只在一般關卡顯示）
+const scaleReference = new ScaleReference(world.scene);
 // 大亂鬥：他人分身 / 名牌 / 氣球 / 光環（訂閱 arena-entered / arena-exited 自動建與清）
 const arenaClones = new ArenaCloneVisuals(world.scene, droneVisual);
 // 大亂鬥 playground 場地：glb 場景 + Havok 網格碰撞（訂閱 arena-field-changed 自動載卸）
@@ -156,6 +162,8 @@ initHeaderOverflow(); // header 溢出防護（在 initOverlays 之後：圖標�
 initLevelComplete(); // 過關結算卡（下一關 / 再玩一次）
 initAudio();
 initMotorSound();
+initFlightPhysicsUi(); // 簡易 ↔ 真實物理（記在這台裝置；只在一般關卡生效）
+initImpactPopup(); // 撞牆／落地夠快時跳「撞擊 3.2 m/s」
 if (!isPreviewMode()) {
   initWs();
 }
@@ -215,6 +223,10 @@ initFpsMeter(
 ); // ?fps=1 效能驗收後門（docs/perf-arena.md）
 initOnboarding(); // 首次上手新手引導（在 initPlayer 之前掛好 player-ready 監聽）
 initSceneEnvControl();
+initScaleReferenceToggle(
+  (on) => scaleReference.setEnabled(on),
+  () => CourseScale.isReal(levelState.current),
+);
 initPlayer(rejoin); // 登入 / 改名 / 換房 / 被踢後重進；預覽模式在 initPlayer 內略過 WS
 
 // 關卡授權 gate（enforce / demo 模式；open 或無 entitlement 時恆放行）
@@ -449,6 +461,7 @@ world.engine.runRenderLoop(() => {
   soccerVisuals.present(interpPos.x, interpPos.y, interpPos.z, interpYaw, bodyVisible);
 
   updateHudFrame();
+  updatePhysicsHud();
   tickMotorSound(now);
   world.scene.render();
 });

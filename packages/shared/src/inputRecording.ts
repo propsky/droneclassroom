@@ -8,7 +8,11 @@
 //   - multiTickFrames：瀏覽器一個畫面連跑多個 tick 時，tick 之間不會排空微任務；
 //     重播據此在相同時點排空，程式模式 async 指令鏈的推進時點才會一致
 //   - initial / startTick / mode：錄製起點的無人機狀態、模擬 tick 與操控模式
+//   - physics / initial.real：真實物理模式（重力＋油門）。沒有這兩欄 = 原本的簡易物理，舊錄製不受影響
 import type { LevelDef } from './levels';
+
+/** 手動飛行的物理：arcade = 原本的簡易物理（放開就停、沒有重力）；real = 重力＋油門＋傾斜才會走 */
+export type FlightPhysics = 'arcade' | 'real';
 
 export const INPUT_RECORDING_VERSION = 2 as const;
 
@@ -25,7 +29,8 @@ export type RecordedActionKind =
   | 'reset'
   | 'stop'
   | 'mode'
-  | 'run';
+  | 'run'
+  | 'physics';
 
 export interface RecordedAction {
   /** 套用在第 t 個錄製 tick 的物理之前（t = 當時已錄 tick 數） */
@@ -37,6 +42,17 @@ export interface RecordedAction {
   mode?: 'manual' | 'program';
   /** a='run' */
   code?: string;
+  /** a='physics'：切到哪一種物理 */
+  physics?: FlightPhysics;
+}
+
+/** 真實物理的內部狀態（油門設定、實際推力、傾角、懸停卡點）。錄製起點要帶，重播才接得上 */
+export interface RecordedRealFlight {
+  throttle: number;
+  thrust: number;
+  pitch: number;
+  roll: number;
+  detent: number;
 }
 
 export interface RecordedDroneState {
@@ -46,6 +62,8 @@ export interface RecordedDroneState {
   isFlying: boolean;
   isGrounded: boolean;
   frozen: boolean;
+  /** 錄製起點是真實物理時才有 */
+  real?: RecordedRealFlight;
 }
 
 export interface InputRecordingV2 {
@@ -60,6 +78,8 @@ export interface InputRecordingV2 {
   /** 錄製起點的模擬 tick（simTime.tick） */
   startTick: number;
   mode: 'manual' | 'program';
+  /** 錄製起點是真實物理才有（'real'）；沒有 = 簡易物理 */
+  physics?: FlightPhysics;
   initial: RecordedDroneState;
   /** 錄製 tick 數（= frames.length） */
   ticks: number;
@@ -91,6 +111,7 @@ export function isInputRecordingV2(v: unknown): v is InputRecordingV2 {
     typeof r.rngSeed === 'number' &&
     typeof r.startTick === 'number' &&
     (r.mode === 'manual' || r.mode === 'program') &&
+    (r.physics === undefined || r.physics === 'arcade' || r.physics === 'real') &&
     typeof r.initial === 'object' &&
     r.initial !== null &&
     typeof r.ticks === 'number' &&
@@ -102,7 +123,7 @@ export function isInputRecordingV2(v: unknown): v is InputRecordingV2 {
 }
 
 const ACTION_KINDS: ReadonlySet<string> = new Set([
-  'takeoff', 'land', 'home', 'estop', 'reset', 'stop', 'mode', 'run',
+  'takeoff', 'land', 'home', 'estop', 'reset', 'stop', 'mode', 'run', 'physics',
 ]);
 
 /** 結構校驗：欄位齊全、tick 數一致、操作與區段落在錄製範圍內 */
@@ -120,7 +141,13 @@ export function validateRecording(rec: InputRecordingV2): string | null {
     if (typeof a.t !== 'number' || a.t < lastT || a.t > rec.ticks) return '操作 tick 超出範圍';
     if (a.a === 'run' && typeof a.code !== 'string') return 'run 操作缺 code';
     if (a.a === 'mode' && a.mode !== 'manual' && a.mode !== 'program') return 'mode 操作缺 mode';
+    if (a.a === 'physics' && a.physics !== 'arcade' && a.physics !== 'real') return 'physics 操作缺 physics';
     lastT = a.t;
+  }
+  const real = rec.initial.real;
+  if (real !== undefined) {
+    const nums = [real?.throttle, real?.thrust, real?.pitch, real?.roll, real?.detent];
+    if (!nums.every((n) => typeof n === 'number' && Number.isFinite(n))) return 'initial.real 格式錯誤';
   }
   for (const seg of rec.multiTickFrames) {
     const [start, n] = seg;

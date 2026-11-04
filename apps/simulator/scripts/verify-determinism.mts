@@ -67,6 +67,9 @@ ok('回放場景 bundle 完成（esbuild，單檔零依賴）');
 interface Result {
   manualHash: string;
   programHash: string;
+  realHash: string;
+  realMaxY: number;
+  realLanded: boolean;
   ticks: number;
   ringsCollected: number;
   programFinished: boolean;
@@ -84,8 +87,9 @@ const n1 = runBundle(process.execPath, [bundle]);
 const n2 = runBundle(process.execPath, [bundle]);
 if (!n1.programFinished) bad('程式段未在限時內結束');
 if (n1.ringsCollected < 1) bad(`場景應至少穿過 1 圈（實際 ${n1.ringsCollected}）`);
-if (n1.manualHash === n2.manualHash && n1.programHash === n2.programHash) {
-  ok(`Node 重跑一致：manual=${n1.manualHash} program=${n1.programHash}（${n1.ticks} ticks, 圈 ${n1.ringsCollected}/3）`);
+if (n1.realMaxY < 2 || !n1.realLanded) bad(`真實物理段應飛高再落地（最高 ${n1.realMaxY.toFixed(2)} m、落地 ${n1.realLanded}）`);
+if (n1.manualHash === n2.manualHash && n1.programHash === n2.programHash && n1.realHash === n2.realHash) {
+  ok(`Node 重跑一致：manual=${n1.manualHash} program=${n1.programHash} real=${n1.realHash}（${n1.ticks} ticks, 圈 ${n1.ringsCollected}/3）`);
 } else {
   bad(`Node 重跑不一致：${JSON.stringify(n1)} vs ${JSON.stringify(n2)}`);
 }
@@ -96,11 +100,11 @@ if (!jsc) {
   console.warn('⚠ 本機找不到 jsc（非 macOS？）— 跨引擎比對跳過，僅完成同引擎驗證');
 } else {
   const j = runBundle(jsc, [bundle]);
-  if (j.manualHash === n1.manualHash && j.programHash === n1.programHash) {
-    ok(`跨引擎 bit 級一致：V8(Node) ≡ JavaScriptCore(jsc)（manual=${j.manualHash} program=${j.programHash}）`);
+  if (j.manualHash === n1.manualHash && j.programHash === n1.programHash && j.realHash === n1.realHash) {
+    ok(`跨引擎 bit 級一致：V8(Node) ≡ JavaScriptCore(jsc)（manual=${j.manualHash} program=${j.programHash} real=${j.realHash}）`);
   } else {
     bad(
-      `跨引擎不一致！V8: manual=${n1.manualHash} program=${n1.programHash} ｜ JSC: manual=${j.manualHash} program=${j.programHash}`,
+      `跨引擎不一致！V8: manual=${n1.manualHash} program=${n1.programHash} real=${n1.realHash} ｜ JSC: manual=${j.manualHash} program=${j.programHash} real=${j.realHash}`,
     );
   }
 }

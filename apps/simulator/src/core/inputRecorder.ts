@@ -8,7 +8,7 @@ import type {
 } from '@creafly/shared';
 import { FRAME_BIT_ANY_INPUT, FRAME_BIT_TAKEOFF, MAX_RECORDING_TICKS } from '@creafly/shared';
 import type { ControlFrame } from './physics';
-import { droneState, flags, simTime } from './droneState';
+import { droneState, flags, realFlight, simTime } from './droneState';
 import { FNV_OFFSET, hashDroneTick, hashToHex } from './simHash';
 import { seedRng } from './rng';
 import { SIM_VERSION } from './simVersion';
@@ -79,6 +79,7 @@ export function startInputRecording(level: LevelDef): void {
       // tick 內開始：本 tick 已 advance、物理未跑 → 重播從前一 tick 起算
       startTick: inFixedTick ? simTime.tick - 1 : simTime.tick,
       mode: flags.mode,
+      ...(flags.physics === 'real' ? { physics: 'real' as const } : {}),
       initial: {
         position: { x: p.x, y: p.y, z: p.z },
         velocity: { x: v.x, y: v.y, z: v.z },
@@ -86,6 +87,7 @@ export function startInputRecording(level: LevelDef): void {
         isFlying: droneState.isFlying,
         isGrounded: droneState.isGrounded,
         frozen: droneState.frozen,
+        ...(flags.physics === 'real' ? { real: { ...realFlight } } : {}),
       },
       frames: [],
       actions: [],

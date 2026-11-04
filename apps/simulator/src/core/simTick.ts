@@ -4,7 +4,10 @@ import { droneState, flags, isManualLocked, TICK_MS } from './droneState';
 import { FlightReview } from './flightReview';
 import {
   applyManualControls,
+  applyRealControls,
   integrate,
+  integrateReal,
+  realPhysicsOn,
   floorProtect,
   resolveObstacleCollisions,
   tickAutopilot,
@@ -15,8 +18,11 @@ import { tickPen } from './pen';
 import { programState, tickProgram } from './program';
 import { beginRecordedTick, endRecordedTick } from './recordingSession';
 
-/** 飛行物理（程式 motion plan / 自動駕駛 / 手動推力 + 積分）+ 靜態障礙碰撞 — 所有模式共用 */
-export function tickFlightPhysics(controlFrame: ControlFrame, thrustScale = 1): void {
+/**
+ * 飛行物理（程式 motion plan / 自動駕駛 / 手動推力 + 積分）+ 靜態障礙碰撞 — 所有模式共用。
+ * allowReal：只有一般關卡傳 true，開了真實物理才走重力＋油門；足球、大亂鬥一律簡易物理。
+ */
+export function tickFlightPhysics(controlFrame: ControlFrame, thrustScale = 1, allowReal = false): void {
   if (flags.dispatchHold) {
     // 等待進場：速度歸零、程式也不推進，人停在目前關卡。
     droneState.velocity.x = 0;
@@ -31,10 +37,14 @@ export function tickFlightPhysics(controlFrame: ControlFrame, thrustScale = 1): 
   } else {
     if (droneState.returning) {
       tickAutopilot(TICK_MS);
-    } else if (!isManualLocked()) {
-      applyManualControls(controlFrame, thrustScale);
+      integrate();
+    } else if (allowReal && realPhysicsOn()) {
+      applyRealControls(isManualLocked() ? null : controlFrame);
+      integrateReal();
+    } else {
+      if (!isManualLocked()) applyManualControls(controlFrame, thrustScale);
+      integrate();
     }
-    integrate();
   }
   // 實心方塊 AABB 碰撞（兩種模式都要；大亂鬥掩體也走這裡）
   resolveObstacleCollisions();
@@ -47,7 +57,7 @@ export interface LevelSimTickOpts {
 
 /** 一般關卡路徑的固定 tick（不含大亂鬥 / 足球 / 練習） */
 export function tickLevelSimulation(opts: LevelSimTickOpts): void {
-  tickFlightPhysics(opts.controlFrame);
+  tickFlightPhysics(opts.controlFrame, 1, true);
   // 回顧只吃本 tick 結束後的狀態。足球 / 大亂鬥不走這裡，也不寫進 hash。
   FlightReview.tick({
     position: droneState.position,

@@ -7,7 +7,7 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { InputRecordingV2, LevelDef } from '@creafly/shared';
 import { advanceSimTick, flags, simNowMs, simTime } from './droneState';
 import { applyLoadLevel, armLevelStart, levelState, resetMission } from './level';
-import { emergencyStop, goHome, padTakeoff, autoLand, type ControlFrame } from './physics';
+import { emergencyStop, goHome, padTakeoff, autoLand, setFlightPhysics, type ControlFrame } from './physics';
 import { programState, runProgram, setMode, stopProgram } from './program';
 import { bus } from './events';
 import {
@@ -118,6 +118,7 @@ beforeEach(async () => {
   setMode('manual');
   flags.countdownActive = false;
   flags.paused = false;
+  flags.physics = 'arcade';
 });
 
 describe('錄製 ↔ 重播一致', () => {
@@ -231,6 +232,60 @@ describe('錄製 ↔ 重播一致', () => {
     await fly(up, 60);
     await fly(fwd, 60);
     await expectReplayMatches(finalizeRecording());
+  });
+
+  it('真實物理：油門起飛、傾斜飛、起飛鍵、急停後恢復', async () => {
+    setFlightPhysics('real');
+    load('1-2');
+    startTiming();
+    await fly(up, 90);
+    await fly(fwd, 60, 2);
+    await fly(idle, 30);
+    emergencyStop();
+    await fly(idle, 10);
+    await fly(fwd, 20, 3);
+    await fly(down, 120);
+    await renderFrame([idle], () => padTakeoff());
+    await fly(idle, 60);
+    const rec = finalizeRecording();
+    expect(rec?.physics).toBe('real');
+    await expectReplayMatches(rec);
+    // 反向：拿掉物理欄位當簡易物理重播 → 軌跡不同（確定重播真的照錄製的物理跑）
+    const asArcade = structuredClone(rec!);
+    delete asArcade.physics;
+    delete asArcade.initial.real;
+    expect((await replayRecording(asArcade)).replayHash).not.toBe(rec!.replayHash);
+  });
+
+  it('計時中切換物理（地上切真實、空中切回簡易再切真實）', async () => {
+    load('1-2');
+    startTiming();
+    await fly(idle, 5);
+    setFlightPhysics('real');
+    await fly(up, 100);
+    setFlightPhysics('arcade');
+    await fly(fwd, 30);
+    setFlightPhysics('real');
+    await fly(turn, 30, 2);
+    await fly(idle, 60);
+    const rec = finalizeRecording();
+    expect(rec?.physics).toBeUndefined();
+    expect(rec?.actions.filter((a) => a.a === 'physics').length).toBe(3);
+    await expectReplayMatches(rec);
+  });
+
+  it('真實物理飛到一半才開始計時：起點帶油門與傾角', async () => {
+    setFlightPhysics('real');
+    load('1-2');
+    // 計時前先飛起來（起點不在地上、油門不是 0）
+    await fly(up, 80);
+    await fly(fwd, 10);
+    startTiming();
+    await fly(fwd, 40);
+    await fly(idle, 40);
+    const rec = finalizeRecording();
+    expect(rec?.initial.real?.throttle).toBeGreaterThan(0);
+    await expectReplayMatches(rec);
   });
 
   it('竄改任一 frame → hash 不一致（重播確實會抓到）', async () => {

@@ -243,6 +243,7 @@ describe('場次生命週期', () => {
         pos,
         vel,
         bumped: false,
+        impact: 0,
       }),
       addStaticBox() {},
       addStaticMesh() {},

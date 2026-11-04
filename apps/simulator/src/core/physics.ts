@@ -1,7 +1,10 @@
 // 固定時步物理（60Hz tick）— 每 tick 語意與 legacy 每幀完全相同。
 // 手動：velocity += 推力 → position += velocity → velocity *= DRAG。不推桿即懸停（無重力）。
+// 選配的真實物理（重力＋油門）在 realFlight.ts，只在一般關卡生效，見 setFlightPhysics。
 import {
   droneState,
+  flags,
+  resetRealFlight,
   HOME_POSITION,
   THRUST,
   MANUAL_LIFT,
@@ -15,10 +18,13 @@ import {
   distVec3,
   type Vec3,
 } from './droneState';
-import { FlightArea, type FlightBounds } from '@creafly/shared';
-import { toast, sound, stateHud } from './events';
+import { FlightArea, type FlightBounds, type FlightPhysics } from '@creafly/shared';
+import { bus, toast, sound, stateHud } from './events';
 import { SimpleBackend, type PhysicsBackend } from './physicsBackend';
 import { recordAction } from './inputRecorder';
+import { RealFlight } from './realFlight';
+import { ImpactWatch } from './impact';
+import { GameSession } from './session';
 
 /** 一個 tick 的手動控制輸入（鍵盤 / 虛擬搖桿 / 實體搖桿 疊加後的語意軸） */
 export interface ControlFrame {
@@ -80,6 +86,9 @@ export function setSolidObstacles(list: SolidObstacle[]): void {
     ),
   );
 }
+
+/** 撞牆提示只在剛撞上那一下（貼著推不重複跳） */
+const wallImpact = new ImpactWatch();
 
 // 飛行範圍（關卡 flightBounds）：null＝不限。由 level 載入時設定，離開關卡清掉。
 let flightBounds: FlightBounds | null = null;
@@ -159,18 +168,37 @@ export function integrate(): void {
   v.y *= DRAG;
   v.z *= DRAG;
   if (lenVec3(v) < 0.001) v.x = v.y = v.z = 0;
+  touchFloor(false);
+  stopAtCeiling();
+}
 
-  // 地板：y < 0.4 落地。下降速度夠大才記硬著陸（足球墜機）；輕點落地不算。
+/**
+ * 地板：y < 0.4 落地。下降速度夠大才記硬著陸（足球墜機）；輕點落地不算。
+ * stopAll：真實物理落地連水平速度一起停（簡易物理只停 y，與 legacy 相同）。
+ */
+function touchFloor(stopAll: boolean): void {
+  const p = droneState.position;
+  const v = droneState.velocity;
   if (p.y < HOME_POSITION.y) {
     const wasFlying = droneState.isFlying;
     if (wasFlying && v.y < -0.08) droneState.hardLanding = true;
+    if (wasFlying) {
+      const mps = ImpactWatch.floor(-v.y);
+      if (mps !== null) bus.emit('impact', { speed: mps, surface: 'floor' });
+    }
     p.y = HOME_POSITION.y;
     v.y = 0;
+    if (stopAll) v.x = v.z = 0;
     droneState.isGrounded = true;
     droneState.isFlying = false;
     if (wasFlying) sound('bump'); // 撞地音效
   }
-  // 天花板：撞頂停住（不彈、不掉），提示節流避免每 tick 洗版
+}
+
+/** 天花板：撞頂停住（不彈、不掉），提示節流避免每 tick 洗版 */
+function stopAtCeiling(): void {
+  const p = droneState.position;
+  const v = droneState.velocity;
   if (p.y > CEILING_Y) {
     p.y = CEILING_Y;
     if (v.y > 0) v.y = 0;
@@ -183,6 +211,60 @@ export function integrate(): void {
 }
 
 let ceilingHintAt = 0;
+
+// =============================================================================
+// 真實物理（重力＋油門）— 選配，只在一般關卡；模型見 realFlight.ts
+// =============================================================================
+
+/**
+ * 這一 tick 該不該走真實物理：開了真實物理、而且在一般關卡（含伺服器重播，那時沒有場次 = idle）。
+ * 足球、大亂鬥一律簡易物理，大家手感一樣才公平。
+ */
+export function realPhysicsOn(): boolean {
+  if (flags.physics !== 'real') return false;
+  const s = GameSession.active;
+  return s === 'level' || s === 'idle';
+}
+
+/**
+ * 切換簡易 ↔ 真實物理。錄製中會記成一個操作，伺服器重播在同一 tick 切換，照樣驗證得了。
+ * 空中切進真實物理從懸停接手，不會一切就掉。
+ */
+export function setFlightPhysics(mode: FlightPhysics): void {
+  if (flags.physics === mode) return;
+  recordAction({ a: 'physics', physics: mode });
+  flags.physics = mode;
+  if (mode === 'real') RealFlight.enter();
+  else {
+    droneState.attitudePitch = null;
+    droneState.attitudeRoll = null;
+  }
+  bus.emit('physics-changed', { physics: mode });
+}
+
+/** 真實物理的操控。frame 為 null = 手動被鎖（倒數等）：油門不動、傾角回平 */
+export function applyRealControls(frame: ControlFrame | null): void {
+  if (droneState.frozen) {
+    if (!frame?.anyInput) return;
+    droneState.frozen = false;
+    RealFlight.hover();
+    toast('▶ 恢復飛行', 'success');
+  }
+  RealFlight.control(frame);
+}
+
+/** 真實物理的積分。急停中原地懸住（像空拍機的暫停鍵），不受重力 */
+export function integrateReal(): void {
+  if (droneState.frozen) return;
+  if (!RealFlight.accelerate()) return;
+  const p = droneState.position;
+  const v = droneState.velocity;
+  p.x += v.x;
+  p.y += v.y;
+  p.z += v.z;
+  touchFloor(true);
+  stopAtCeiling();
+}
 
 /** 程式模式：位置由 motion plan 控制，只做地板 / 天花板保護 */
 export function floorProtect(): void {
@@ -197,15 +279,21 @@ export function floorProtect(): void {
 /**
  * 靜態體碰撞（每 tick、兩種模式都跑）：drone 視為半徑 DRONE_RADIUS 的球。
  * 1. SimpleBackend：AABB 沿最小穿透軸推出、該軸速度歸零（對齊 legacy L3295–3317）＋撞擊音效。
- * 2. meshBackend（有掛才跑）：三角網格推出＋速度衰減；對齊 legacy resolveBVHCollision，
+ * 2. meshBackend（有掛才跑）：三角網格推出，只消掉撞進去的法向速度、沿牆加摩擦，
+ *    快速移動時切小步防穿模（render/havokBackend.ts、meshContact.ts；不再像 legacy 整個 ×0.4）。
  *    該路徑刻意不播音效（沿結構滑行時每 tick 都接觸，會吵）。
  */
 export function resolveObstacleCollisions(): void {
   const p = droneState.position;
   const v = droneState.velocity;
-  const { bumped } = simpleBackend.resolveCollisions(p, v, DRONE_RADIUS);
-  if (bumped && droneState.isFlying) sound('bump');
-  if (meshBackend) meshBackend.resolveCollisions(p, v, meshRadius);
+  const box = simpleBackend.resolveCollisions(p, v, DRONE_RADIUS);
+  if (box.bumped && droneState.isFlying) sound('bump');
+  const mesh = meshBackend ? meshBackend.resolveCollisions(p, v, meshRadius) : null;
+  const mps = wallImpact.wall(
+    box.bumped || (mesh?.bumped ?? false),
+    Math.max(box.impact, mesh?.impact ?? 0),
+  );
+  if (mps !== null && droneState.isFlying) bus.emit('impact', { speed: mps, surface: 'wall' });
   // 地板 / 天花板護欄（碰撞 QA 6e / 3d 復現）：方塊底離地 < 球半徑（或頂離天花板 < 球半徑）
   // 且高速切入時，AABB 最小穿透軸會選 y、把機身推到地板下 / 天花板上；下一 tick integrate 再 clamp
   // 回來 → 兩個 clamp 每 tick 打架：位置在 0.3↔0.4 抖、還被 integrate 誤判「落地」（isFlying 變 false）。
@@ -248,6 +336,11 @@ export const easeInOut = (t: number): number => {
 export function padTakeoff(): boolean {
   recordAction({ a: 'takeoff' });
   if (!droneState.isGrounded) return false;
+  if (realPhysicsOn()) {
+    // 真實物理：起飛鍵 = 把油門推到比懸停多一點，推力上來才離地
+    RealFlight.takeoff();
+    return true;
+  }
   droneState.isGrounded = false;
   droneState.isFlying = true;
   return true;
@@ -318,6 +411,7 @@ export function tickAutopilot(dtMs: number): void {
     if (autoPlan.landOnDone) {
       droneState.isFlying = false;
       droneState.isGrounded = true;
+      resetRealFlight(); // 真實物理：降落後油門歸零，不會一落地又自己飛起來
     }
     droneState.returning = false;
     toast(autoPlan.doneToast, 'success');

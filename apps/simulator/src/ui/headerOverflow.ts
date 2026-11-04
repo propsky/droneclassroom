@@ -11,10 +11,12 @@ const MOVE_ORDER = [
   'connect-gamepad-btn',
   'fullscreen-btn',
   'motor-btn',
+  'scale-ref-btn',
   'music-btn',
   'mute-btn',
   'view-btn',
   'calib-fab',
+  'physics-btn',
   // 觸控搖桿與背景切換盡量留在工具列上（排越後面越晚被收進「更多」）
   'touch-joystick-btn',
   'scene-env-btn',
@@ -85,6 +87,9 @@ export function initHeaderOverflow(): void {
     // 先判定各群組是否還有可見內容
     kids.forEach((k) => {
       if (!k.classList.contains('header-group')) return;
+      // 先放出來再量：群組自己藏著時子項 offsetParent 永遠是 null，
+      // 不先清掉就會一直藏著（按鈕歸位了卻整組消失，「更多」裡也沒有）
+      k.style.display = '';
       k.style.display = Array.from(k.children).some(isVisible) ? '' : 'none';
     });
     // 分隔線：只在「前後都有可見內容」時顯示，連續多條只留一條
