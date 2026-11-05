@@ -129,7 +129,7 @@ export class CameraCoverage {
   }
 
   private static fieldPoints(scene: SceneCase): SightPoint[] {
-    if (scene.field && scene.sign) return PilotView.soccerWatchPoints(scene.field, scene.sign);
+    if (scene.field && scene.sign) return PilotView.soccerPitchPoints(scene.field, scene.sign);
     if (scene.arena) return PilotView.keyPoints(PilotView.arenaBox());
     return PilotView.keyPoints(PilotView.courseBox(scene.level));
   }
