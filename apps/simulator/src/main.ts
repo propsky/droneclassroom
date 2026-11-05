@@ -29,6 +29,7 @@ import {
   setInFixedTick,
 } from './core/recordingSession';
 import { tickFlightPhysics, tickRecordedLevel } from './core/simTick';
+import { realPhysicsOn } from './core/physics';
 import { GameSession } from './core/session';
 import { getStudentToken } from './net/studentAuth';
 import { API_BASE } from './net/backend';
@@ -103,7 +104,7 @@ import {
 } from './multiplayer/soccer';
 import { SoccerFieldVisuals } from './render/soccerField';
 import { initSoccerHud } from './ui/soccerHud';
-import { applySoccerFeel, initSoccerFeelFromUrl } from './soccer/flightFeel';
+import { applySoccerFeel, initSoccerFeelFromUrl, soccerRealTuning } from './soccer/flightFeel';
 import { initFpsMeter } from './ui/fpsMeter';
 import { FrameGovernor } from './render/frameGovernor';
 import { initPwa } from './pwa';
@@ -162,7 +163,7 @@ initHeaderOverflow(); // header 溢出防護（在 initOverlays 之後：圖標�
 initLevelComplete(); // 過關結算卡（下一關 / 再玩一次）
 initAudio();
 initMotorSound();
-initFlightPhysicsUi(); // 簡易 ↔ 真實物理（記在這台裝置；只在一般關卡生效）
+initFlightPhysicsUi(); // 簡易 ↔ 真實物理（記在這台裝置；一般關卡與足球生效）
 initImpactPopup(); // 撞牆／落地夠快時跳「撞擊 3.2 m/s」
 if (!isPreviewMode()) {
   initWs();
@@ -371,11 +372,15 @@ function fixedTick(nowMs: number): void {
 
   const controlFrame = collectControlFrame();
   // 足球手感只改這條推力（含選配無定高）；關卡與大亂鬥仍用原本的控制幀。
+  // 足球開了真實物理：傾角與推力交給 realFlight，參數照手感檔與場地大小。
   const soccerOn = soccerState.active || practiceState.active;
+  const soccerReal = soccerOn && realPhysicsOn();
   const feltFrame = applySoccerFeel(controlFrame, {
     enabled: soccerOn,
     locked: isManualLocked() || (soccerState.active && soccerControlsLocked()),
+    real: soccerReal,
   });
+  const soccerTune = soccerReal ? soccerRealTuning() : null;
 
   // 模式分派：大亂鬥 / 足球 tick 接管 ↔ 一般關卡（與伺服器重播共用 core/simTick）。
   // 各模式自己管邊界/判定/HUD，分身視覺在 arenaClones / soccerVisuals
@@ -388,12 +393,12 @@ function fixedTick(nowMs: number): void {
     arenaClones.tick();
   } else if (soccerState.active) {
     // ⚽ 多人足球：邊界 / 分身內插 / 機對機碰撞 / 進球偵測 / 計分 HUD
-    tickFlightPhysics(feltFrame, arenaThrustScale());
+    tickFlightPhysics(feltFrame, 1, soccerTune);
     tickSoccerMatch();
     soccerVisuals.tick();
   } else if (practiceState.active) {
     // ⚽ 單人練習：邊界 / 正面穿門計分
-    tickFlightPhysics(feltFrame, arenaThrustScale());
+    tickFlightPhysics(feltFrame, 1, soccerTune);
     tickSoccerPractice();
     soccerVisuals.tick();
   } else {

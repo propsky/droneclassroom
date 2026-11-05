@@ -3,7 +3,7 @@
 // 穿自己這側的門不加分。得分後要先回到自己半場（z > 0），下一球才算。
 // 不計時、不扣分。場地用房間目前的子類；沒進房就用預設 F9A-B。
 // 穿環幾何在 crossing.ts，與對戰同一套。
-import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
+import { droneState, resetDroneState, resetRealFlight, HOME_POSITION, flags } from '../core/droneState';
 import { setMeshCollisionBackend, setSolidObstacles } from '../core/physics';
 import { clearLevel } from '../core/level';
 import { GameSession } from '../core/session';
@@ -156,6 +156,7 @@ function resetPracticeDronePos(): void {
   droneState.yaw = 0;
   droneState.isFlying = false;
   droneState.isGrounded = true;
+  resetRealFlight(); // 真實物理：油門歸零，不帶著關卡裡的懸停油門進場
   practiceState.prevX = droneState.position.x;
   practiceState.prevY = droneState.position.y;
   practiceState.prevZ = droneState.position.z;

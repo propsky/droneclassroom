@@ -55,7 +55,7 @@ droneclassroom/
 
 1. **`core/` 是框架無關純 TS**：擁有 droneState、物理、關卡邏輯、cf_* API；對外只透過 event bus。render（Babylon）與 ui（DOM）是訂閱者。之後上 React/Vue 只重寫 `ui/`。
 2. **物理是 60Hz 固定時步**（accumulator + 渲染插值）。手感常數（THRUST=0.012 / LIFT=0.015 / DRAG=0.92）是 per-tick 值、刻意與 legacy per-frame 相同。**絕不把模擬綁到 rAF 幀率。**
-   - **真實物理（選配）**：`core/realFlight.ts`，工具列「物理：簡易／真實」切換，記在各裝置 localStorage。重力 g、油門（推上／下是加減，放開保持，懸停 50%）、推力隨機身傾斜分解、一次＋二次阻力、馬達與姿態延遲。**只在一般關卡生效**（`tickFlightPhysics(…, allowReal)`），足球、大亂鬥一律簡易物理；程式模式照舊走 motion plan。參數讓極速低於簡易物理，排行榜不會因切換變快。
+   - **真實物理（選配）**：`core/realFlight.ts`，工具列「物理：簡易／真實」切換，記在各裝置 localStorage。重力 g、油門（推上／下是加減，放開保持，懸停 50%）、推力隨機身傾斜分解、一次＋二次阻力、馬達與姿態延遲。一般關卡與足球生效（`tickFlightPhysics(…, realTune)`）：關卡固定用 `RealFlight.LEVEL`（重播 hash 綁這組），足球依手感檔與場地大小由 `soccer/flightFeel.ts` 的 `soccerRealTuning()` 給傾角、反應、阻力；大亂鬥一律簡易物理；程式模式照舊走 motion plan。關卡參數讓極速低於簡易物理，排行榜不會因切換變快。足球兩種物理的滿舵極速都由手感檔的 m/s 定義（F9A-B：新手 1.8／模擬 2.8／專業 4.0，大場依 √半長 放大），不再沿用關卡約 9 m/s 的推力。
    - 重播：錄製 `physics: 'real'` 與 `initial.real`（油門、推力、傾角）記錄起點，計時中切換記成 `{a:'physics'}` 操作，伺服器重算照樣驗證。簡易物理的錄製格式與 hash 完全不變。
    - **撞擊速度**：`core/impact.ts` 在撞牆／障礙（剛撞上那一下）與落地夠快時發 `impact` 事件，`ui/impactPopup.ts` 顯示「撞擊 3.2 m/s」。只發事件，不改狀態。
    - **網格碰撞**（足球門框、大亂鬥遊樂場，`render/havokBackend.ts` + `render/meshContact.ts`）：只消掉撞進牆的法向速度、沿牆方向庫侖摩擦（μ = 0.4），一 tick 移動超過半個護罩半徑時分段掃掠防穿模。

@@ -218,3 +218,67 @@ test.describe('足球練習飛行手感不擋操作', () => {
     });
   }
 });
+
+test.describe('足球練習：鍵盤速度與真實物理', () => {
+  test.beforeEach(async ({ page }, info) => {
+    test.skip(info.project.name === 'webkit-ipad', 'iPad 沒有實體鍵盤');
+    await page.addInitScript(() => {
+      localStorage.setItem('creafly_guide_done_v1', '1');
+    });
+  });
+
+  /** 0.5 秒內的水平速度（m/s） */
+  async function horizontalSpeed(page: Page): Promise<number> {
+    const read = () =>
+      page.evaluate(() => ({ x: window.CREAFLY.droneState.position.x, z: window.CREAFLY.droneState.position.z }));
+    const a = await read();
+    const t0 = Date.now();
+    await page.waitForTimeout(500);
+    const b = await read();
+    return Math.hypot(b.x - a.x, b.z - a.z) / ((Date.now() - t0) / 1000);
+  }
+
+  test('鍵盤滿推不會一秒衝過小場；切真實物理有重力、手感列看得出來', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/?soccer=1');
+    await guest(page, '足球手感');
+    await expect.poll(() => page.evaluate(() => window.CREAFLY.practiceState.active), { timeout: 15_000 }).toBe(true);
+    const note = page.locator('#soccer-feel-note');
+    await expect(note).toHaveText('最快 2.8 m/s・升降 1.6 m/s・放開就停');
+
+    // 起飛到約 1.5 m（定高：放開就停在那個高度）
+    await page.keyboard.down('ArrowUp');
+    await page.waitForTimeout(900);
+    await page.keyboard.up('ArrowUp');
+    const y0 = await page.evaluate(() => window.CREAFLY.droneState.position.y);
+    expect(y0).toBeGreaterThan(1);
+    expect(y0, '3 m 高的場地，0.9 秒不該衝頂').toBeLessThan(2.4);
+
+    // 按住 W：模擬檔極速 2.8 m/s（以前約 6.7 m/s）
+    await page.keyboard.down('w');
+    await page.waitForTimeout(700);
+    const v = await horizontalSpeed(page);
+    await page.keyboard.up('w');
+    expect(v).toBeGreaterThan(1.8);
+    expect(v).toBeLessThan(3.2);
+    await page.waitForTimeout(600);
+
+    // 切真實物理：手感列與狀態卡的油門儀表都要變；在空中從懸停接手，不會一切就掉
+    const physics = await headerButton(page, 'physics-btn');
+    await physics.click();
+    await expect(physics).toHaveAttribute('aria-pressed', 'true');
+    await expect(note).toContainText('真實物理：油門＋重力');
+    await expect(page.locator('#physics-live')).toBeVisible();
+    const hoverY = await page.evaluate(() => window.CREAFLY.droneState.position.y);
+    await page.waitForTimeout(500);
+    const stillY = await page.evaluate(() => window.CREAFLY.droneState.position.y);
+    expect(Math.abs(stillY - hoverY)).toBeLessThan(0.05);
+
+    // 油門往下推過懸停 → 推力小於重量，會往下掉（簡易物理按下降只是等速下降，這裡要越掉越快）
+    await page.keyboard.down('ArrowDown');
+    await page.waitForTimeout(1200);
+    await page.keyboard.up('ArrowDown');
+    const fallY = await page.evaluate(() => window.CREAFLY.droneState.position.y);
+    expect(fallY).toBeLessThan(stillY - 0.3);
+  });
+});

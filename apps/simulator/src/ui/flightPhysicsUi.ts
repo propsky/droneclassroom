@@ -1,5 +1,5 @@
 // 簡易 ↔ 真實物理：工具列切換鈕、狀態卡裡的「推力 vs 重量」儀表。
-// 選擇記在 localStorage（每台平板自己的偏好）。真實物理只在一般關卡生效，足球、大亂鬥固定簡易。
+// 選擇記在 localStorage（每台平板自己的偏好）。真實物理在一般關卡與足球生效，大亂鬥固定簡易。
 import { droneState, flags, realFlight } from '../core/droneState';
 import { bus, toast } from '../core/events';
 import { realPhysicsOn, setFlightPhysics } from '../core/physics';
@@ -116,9 +116,7 @@ export function initFlightPhysicsUi(): void {
     const next: FlightPhysics = flags.physics === 'real' ? 'arcade' : 'real';
     setFlightPhysics(next);
     save(next);
-    const s = GameSession.active;
-    const elsewhere = s === 'arena' || s === 'soccer-practice' || s === 'soccer-match';
-    const note = elsewhere ? '（足球、大亂鬥固定用簡易物理，回到關卡才生效）' : '';
+    const note = GameSession.active === 'arena' ? '（大亂鬥固定用簡易物理，離開大亂鬥才生效）' : '';
     toast(
       next === 'real'
         ? `真實物理：有重力，油門要自己控制。上升／下降是加減油門，放開會保持${note}`

@@ -17,6 +17,23 @@ import type { ControlFrame } from './physics';
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 
+/**
+ * 會隨場地改變的參數：最大傾角、姿態反應、阻力。油門、重力、推重比全場通用。
+ * 一般關卡固定用 RealFlight.LEVEL（重播 hash 綁這一組）；足球依手感檔與場地大小另給一組。
+ */
+export interface RealFlightTuning {
+  /** 最大傾角（弧度） */
+  maxTilt: number;
+  /** 推桿時傾角每 tick 追目標的比例 */
+  attitudeGain: number;
+  /** 鬆桿時回平的每 tick 比例 */
+  levelGain: number;
+  /** 一次阻力（1/s） */
+  dragLinear: number;
+  /** 二次阻力（1/m） */
+  dragQuad: number;
+}
+
 export class RealFlight {
   /** 重力加速度（m/s²，地球標準重力） */
   static readonly G = 9.80665;
@@ -43,6 +60,15 @@ export class RealFlight {
 
   private static readonly DT = 1 / TICK_HZ;
 
+  /** 一般關卡的參數（與伺服器重播同一組，不要改） */
+  static readonly LEVEL: RealFlightTuning = {
+    maxTilt: RealFlight.MAX_TILT,
+    attitudeGain: RealFlight.ATTITUDE_GAIN,
+    levelGain: RealFlight.ATTITUDE_GAIN,
+    dragLinear: RealFlight.DRAG_LINEAR,
+    dragQuad: RealFlight.DRAG_QUAD,
+  };
+
   /** 一進真實物理：在空中就從懸停接手（不會一切換就掉下去），在地上油門歸零 */
   static enter(): void {
     if (droneState.isFlying && !droneState.returning) RealFlight.hover();
@@ -68,7 +94,7 @@ export class RealFlight {
    * 一個 tick 的操控：油門、傾角、馬達、機頭。
    * frame 為 null = 手動被鎖（倒數等）：油門不動、傾角回平。
    */
-  static control(frame: ControlFrame | null): void {
+  static control(frame: ControlFrame | null, tune: RealFlightTuning = RealFlight.LEVEL): void {
     const r = realFlight;
     const flying = droneState.isFlying;
     if (frame) {
@@ -90,7 +116,7 @@ export class RealFlight {
     let tp = 0;
     let tr = 0;
     if (frame && flying) {
-      const max = RealFlight.MAX_TILT;
+      const max = tune.maxTilt;
       tp = clamp(frame.forward, -1, 1) * max;
       tr = clamp(frame.right, -1, 1) * max;
       const m = Math.sqrt(tp * tp + tr * tr);
@@ -100,8 +126,9 @@ export class RealFlight {
       }
     }
     if (flying) {
-      r.pitch += (tp - r.pitch) * RealFlight.ATTITUDE_GAIN;
-      r.roll += (tr - r.roll) * RealFlight.ATTITUDE_GAIN;
+      const gain = tp !== 0 || tr !== 0 ? tune.attitudeGain : tune.levelGain;
+      r.pitch += (tp - r.pitch) * gain;
+      r.roll += (tr - r.roll) * gain;
     } else {
       r.pitch = 0;
       r.roll = 0;
@@ -130,7 +157,7 @@ export class RealFlight {
    * 合力改速度（不動位置）。在地上推力撐不起重量就不動；撐得起就離地。
    * 回傳 false = 還在地上，這 tick 不用積分位置。
    */
-  static accelerate(): boolean {
+  static accelerate(tune: RealFlightTuning = RealFlight.LEVEL): boolean {
     const v = droneState.velocity;
     const r = realFlight;
     const up = RealFlight.netLift();
@@ -158,7 +185,7 @@ export class RealFlight {
     const dt = RealFlight.DT;
     const dt2 = dt * dt;
     const speed = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) * TICK_HZ;
-    const kdt = (RealFlight.DRAG_LINEAR + RealFlight.DRAG_QUAD * speed) * dt;
+    const kdt = (tune.dragLinear + tune.dragQuad * speed) * dt;
     v.x += ax * dt2 - kdt * v.x;
     v.y += up * dt2 - kdt * v.y;
     v.z += az * dt2 - kdt * v.z;

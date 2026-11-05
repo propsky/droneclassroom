@@ -18,8 +18,9 @@ import type {
   SoccerFieldDef,
   SoccerMatchMeta,
 } from '@creafly/shared';
-import { droneState, resetDroneState, HOME_POSITION, flags } from '../core/droneState';
-import { setMeshCollisionBackend, setSolidObstacles } from '../core/physics';
+import { droneState, resetDroneState, resetRealFlight, HOME_POSITION, flags } from '../core/droneState';
+import { RealFlight } from '../core/realFlight';
+import { realPhysicsOn, setMeshCollisionBackend, setSolidObstacles } from '../core/physics';
 import { clearLevel } from '../core/level';
 import { GameSession } from '../core/session';
 import { setMode } from '../core/program';
@@ -198,6 +199,7 @@ export function enterSoccerMatch(): void {
   droneState.yaw = 0;
   droneState.isGrounded = true;
   droneState.isFlying = false;
+  resetRealFlight(); // 真實物理：油門歸零，不帶著關卡裡的懸停油門進場
   soccerState.prevZ = 0;
   soccerState.goalPassage = createRingPassage();
 
@@ -398,6 +400,7 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       droneState.position.z = msg.z;
       droneState.yaw = msg.yaw;
       droneState.velocity.x = droneState.velocity.y = droneState.velocity.z = 0;
+      RealFlight.enter(); // 真實物理：在空中就從懸停接手，在地上油門歸零
       toast('🟢 已恢復連線，回到斷線前位置', 'success');
       break;
   }
@@ -488,6 +491,8 @@ function applyMySpawn(spawns: SoccerSpawn[]): void {
     soccerState.myTeam === 'red' ? 0 : soccerState.myTeam === 'blue' ? Math.PI : mine.z > 0 ? 0 : Math.PI;
   droneState.isGrounded = true;
   droneState.isFlying = false;
+  // 真實物理：回起飛點油門歸零。不然倒數時油門還開著會自己升空，被判提前起飛
+  resetRealFlight();
   soccerState.prevX = mine.x;
   soccerState.prevY = HOME_POSITION.y;
   soccerState.prevZ = mine.z;
@@ -572,6 +577,7 @@ function noteCrash(): void {
   if (!live || soccerState.crashSent || soccerState.disabled) return;
   soccerState.crashSent = true;
   soccerState.disabled = true;
+  resetRealFlight(); // 墜機斷槳：真實物理油門歸零，不會在地上又自己飛起來
   syncSoccerLock();
   sendToServer({ type: 'soccer_crash' });
   stateHud('墜機：本局排除');
@@ -676,7 +682,7 @@ function updateMatchHud(): void {
       deductions: soccerState.deductions,
       card: soccerState.myCard,
       disabled: soccerState.disabled,
-      feelLabel: SOCCER_FEELS[getSoccerFeel()].label,
+      feelLabel: SOCCER_FEELS[getSoccerFeel()].label + (realPhysicsOn() ? '・真實物理' : ''),
     }),
   );
 }

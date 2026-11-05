@@ -15,14 +15,20 @@ import {
 } from './physics';
 import { tickLevel } from './level';
 import { tickPen } from './pen';
+import { RealFlight, type RealFlightTuning } from './realFlight';
 import { programState, tickProgram } from './program';
 import { beginRecordedTick, endRecordedTick } from './recordingSession';
 
 /**
  * 飛行物理（程式 motion plan / 自動駕駛 / 手動推力 + 積分）+ 靜態障礙碰撞 — 所有模式共用。
- * allowReal：只有一般關卡傳 true，開了真實物理才走重力＋油門；足球、大亂鬥一律簡易物理。
+ * realTune：這個模式允許真實物理時給參數（一般關卡 RealFlight.LEVEL、足球依手感檔）；
+ * 開了真實物理才走重力＋油門。null = 固定簡易物理（大亂鬥）。
  */
-export function tickFlightPhysics(controlFrame: ControlFrame, thrustScale = 1, allowReal = false): void {
+export function tickFlightPhysics(
+  controlFrame: ControlFrame,
+  thrustScale = 1,
+  realTune: RealFlightTuning | null = null,
+): void {
   if (flags.dispatchHold) {
     // 等待進場：速度歸零、程式也不推進，人停在目前關卡。
     droneState.velocity.x = 0;
@@ -38,9 +44,9 @@ export function tickFlightPhysics(controlFrame: ControlFrame, thrustScale = 1, a
     if (droneState.returning) {
       tickAutopilot(TICK_MS);
       integrate();
-    } else if (allowReal && realPhysicsOn()) {
-      applyRealControls(isManualLocked() ? null : controlFrame);
-      integrateReal();
+    } else if (realTune && realPhysicsOn()) {
+      applyRealControls(isManualLocked() ? null : controlFrame, realTune);
+      integrateReal(realTune);
     } else {
       if (!isManualLocked()) applyManualControls(controlFrame, thrustScale);
       integrate();
@@ -57,7 +63,7 @@ export interface LevelSimTickOpts {
 
 /** 一般關卡路徑的固定 tick（不含大亂鬥 / 足球 / 練習） */
 export function tickLevelSimulation(opts: LevelSimTickOpts): void {
-  tickFlightPhysics(opts.controlFrame, 1, true);
+  tickFlightPhysics(opts.controlFrame, 1, RealFlight.LEVEL);
   // 回顧只吃本 tick 結束後的狀態。足球 / 大亂鬥不走這裡，也不寫進 hash。
   FlightReview.tick({
     position: droneState.position,

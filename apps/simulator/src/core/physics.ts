@@ -1,6 +1,6 @@
 // 固定時步物理（60Hz tick）— 每 tick 語意與 legacy 每幀完全相同。
 // 手動：velocity += 推力 → position += velocity → velocity *= DRAG。不推桿即懸停（無重力）。
-// 選配的真實物理（重力＋油門）在 realFlight.ts，只在一般關卡生效，見 setFlightPhysics。
+// 選配的真實物理（重力＋油門）在 realFlight.ts，一般關卡與足球生效，見 setFlightPhysics。
 import {
   droneState,
   flags,
@@ -22,7 +22,7 @@ import { FlightArea, type FlightBounds, type FlightPhysics } from '@creafly/shar
 import { bus, toast, sound, stateHud } from './events';
 import { SimpleBackend, type PhysicsBackend } from './physicsBackend';
 import { recordAction } from './inputRecorder';
-import { RealFlight } from './realFlight';
+import { RealFlight, type RealFlightTuning } from './realFlight';
 import { ImpactWatch } from './impact';
 import { GameSession } from './session';
 
@@ -213,17 +213,18 @@ function stopAtCeiling(): void {
 let ceilingHintAt = 0;
 
 // =============================================================================
-// 真實物理（重力＋油門）— 選配，只在一般關卡；模型見 realFlight.ts
+// 真實物理（重力＋油門）— 選配，一般關卡與足球；模型見 realFlight.ts
 // =============================================================================
 
 /**
- * 這一 tick 該不該走真實物理：開了真實物理、而且在一般關卡（含伺服器重播，那時沒有場次 = idle）。
- * 足球、大亂鬥一律簡易物理，大家手感一樣才公平。
+ * 這一 tick 該不該走真實物理：開了真實物理、而且在一般關卡（含伺服器重播，那時沒有場次 = idle）
+ * 或足球（練習、對戰；參數依手感檔與場地，見 soccer/flightFeel.ts）。
+ * 大亂鬥固定簡易物理：鬼抓人的「鬼」推力加倍，接在簡易物理上才調得準。
  */
 export function realPhysicsOn(): boolean {
   if (flags.physics !== 'real') return false;
   const s = GameSession.active;
-  return s === 'level' || s === 'idle';
+  return s === 'level' || s === 'idle' || s === 'soccer-practice' || s === 'soccer-match';
 }
 
 /**
@@ -243,20 +244,20 @@ export function setFlightPhysics(mode: FlightPhysics): void {
 }
 
 /** 真實物理的操控。frame 為 null = 手動被鎖（倒數等）：油門不動、傾角回平 */
-export function applyRealControls(frame: ControlFrame | null): void {
+export function applyRealControls(frame: ControlFrame | null, tune?: RealFlightTuning): void {
   if (droneState.frozen) {
     if (!frame?.anyInput) return;
     droneState.frozen = false;
     RealFlight.hover();
     toast('▶ 恢復飛行', 'success');
   }
-  RealFlight.control(frame);
+  RealFlight.control(frame, tune);
 }
 
 /** 真實物理的積分。急停中原地懸住（像空拍機的暫停鍵），不受重力 */
-export function integrateReal(): void {
+export function integrateReal(tune?: RealFlightTuning): void {
   if (droneState.frozen) return;
-  if (!RealFlight.accelerate()) return;
+  if (!RealFlight.accelerate(tune)) return;
   const p = droneState.position;
   const v = droneState.velocity;
   p.x += v.x;

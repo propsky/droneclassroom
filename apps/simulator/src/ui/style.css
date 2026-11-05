@@ -1982,6 +1982,15 @@ body.touch-joysticks:not(.gamepad-connected):not(.ble-connected) #joystick-layer
   color: var(--accent);
   font-weight: 700;
 }
+.soccer-feel-note {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-2);
+}
+.soccer-feel-note:empty {
+  display: none;
+}
 
 /* 攻擊手旗號：頂部置中，不擋球門 */
 .soccer-flag {
@@ -3262,8 +3271,12 @@ body:has(#pad-ui-hint.show) #toast.show {
     z-index: var(--z-hud);
   }
 
+  /* 右上的足球分數／大亂鬥卡只拿右半邊：桌機的 min-width 220 會壓進左邊的狀態卡 */
   .hud-fixed {
     top: calc(56px + env(safe-area-inset-top, 0px) + var(--sp-4));
+    min-width: 0;
+    width: min(176px, calc(50vw - var(--sp-6)));
+    max-width: min(176px, calc(50vw - var(--sp-6)));
   }
 
   /* 左右各半（用 vw，不能用會把絕對定位父層撐塌的百分比）。
@@ -3280,6 +3293,13 @@ body:has(#pad-ui-hint.show) #toast.show {
   }
   #status-hud {
     padding: var(--sp-2) var(--sp-3);
+  }
+  /* 真實物理儀表：半寬卡片放不下兩欄，改一欄，標籤不折行（基本樣式寫在檔案後面，用 id 提高權重） */
+  #status-hud .physics-grid {
+    grid-template-columns: 1fr;
+  }
+  #status-hud .physics-live .label {
+    white-space: nowrap;
   }
   .flight-review-live {
     display: flex;

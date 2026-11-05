@@ -4,9 +4,13 @@
 import {
   getSoccerFeel,
   setSoccerFeel,
+  soccerSpeedScale,
   SOCCER_FEELS,
   type SoccerFeelId,
 } from '../soccer/flightFeel';
+import { flags } from '../core/droneState';
+import { bus } from '../core/events';
+import type { FlightPhysics } from '@creafly/shared';
 import { SoccerFeelLayout } from './soccerFeelLayout';
 
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
@@ -133,6 +137,8 @@ export function showSoccerFeel(on: boolean): void {
   if (on) SoccerFeelLayout.apply(document);
   if (!feelWired) {
     feelWired = true;
+    bus.on('physics-changed', paintFeel);
+    bus.on('soccer-field-changed', paintFeel);
     bar.querySelectorAll<HTMLButtonElement>('[data-feel]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.dataset['feel'];
@@ -149,6 +155,22 @@ function paintFeel(): void {
   document.querySelectorAll<HTMLButtonElement>('#soccer-feel [data-feel]').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset['feel'] === current);
   });
+  const note = $('soccer-feel-note');
+  if (note) note.textContent = soccerFeelNote(current, flags.physics, soccerSpeedScale());
+}
+
+const mps = (v: number): string => `${v.toFixed(1)} m/s`;
+
+/** 手感列底下的一行說明：這一檔多快、放開會怎樣（簡易 ↔ 真實物理差在這裡看得出來） */
+export function soccerFeelNote(id: SoccerFeelId, physics: FlightPhysics, scale: number): string {
+  const p = SOCCER_FEELS[id];
+  const top = `最快 ${mps(p.topSpeed * scale)}`;
+  if (physics === 'real') {
+    const same = p.altitudeHold ? '' : '（真實物理本來就不定高，同模擬）';
+    return `真實物理：油門＋重力，放開會滑行・${top}${same}`;
+  }
+  if (!p.altitudeHold) return `${top}・不定高，鬆開上升會往下掉`;
+  return `${top}・升降 ${mps(p.climb * scale)}・放開就停`;
 }
 
 export function soccerFeelButtonLabel(id: SoccerFeelId): string {
