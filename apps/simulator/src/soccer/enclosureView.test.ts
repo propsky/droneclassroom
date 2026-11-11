@@ -46,7 +46,7 @@ describe('球館外殼不要擋住飛行鏡頭', () => {
     expect(enclosureFaceVisible(-posX - 1, -1, negX)).toBe(false);
   });
 
-  it('全場視角站在端牆內側，近端牆仍然畫得出來', () => {
+  it('舊全場內縮點在端牆內側，近端牆仍然畫得出來', () => {
     const teamZ = SOCCER_FIELD.halfZ - SOCCER_TEAM_END_INSET;
     expect(teamZ).toBeLessThan(nearZ);
     expect(enclosureFaceVisible(teamZ, 1, nearZ)).toBe(true);
