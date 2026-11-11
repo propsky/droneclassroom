@@ -32,6 +32,8 @@ export interface CoreEventMap {
   'entitlement-updated': Record<string, never>;
   /** 3-2-1 倒數：n=3,2,1；n=0 表示 GO */
   'countdown': { n: number };
+  /** 倒數中途被作廢（切關、進足球／大亂鬥）：畫面上的數字要收掉 */
+  'countdown-cancelled': Record<string, never>;
   /** 穿過一個圈 */
   'ring-passed': { index: number; collected: number; total: number };
   /** 重置：圈的通過狀態清掉，外觀回到第一圈 */

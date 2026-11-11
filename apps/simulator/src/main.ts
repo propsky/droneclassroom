@@ -248,6 +248,8 @@ setLevelLoadGuard((levelId) => {
 });
 
 const doToggleView = (): void => syncViewButton(cameraRig.toggleView());
+// 進出足球會自動換視角（預設考證），按鈕文字跟著改
+bus.on('camera-view-changed', () => syncViewButton(cameraRig.view()));
 document.getElementById('view-btn')?.addEventListener('click', doToggleView);
 PortraitChrome.init(); // 直式：先收起選單／活動關卡，虛擬搖桿才量得到縮後的區域
 registerJoystickLayout(() => TouchJoystickLayout.apply(document));

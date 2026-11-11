@@ -312,6 +312,13 @@ function setReturnHomeStep(phase: 'pending' | 'return' | 'land' | 'done'): void 
 // ---- 每幀更新（直接 textContent，避免任何框架開銷）----
 const cache = { alt: '', spd: '', head: '', timer: '', air: '', dist: '', top: '', ceil: '' };
 
+// 足球：機頭方向以飛手站的那一端為準（往場內＝前）。藍隊站 -z 端，世界方向要轉 180°，
+// 不然機頭朝對方球門卻顯示「後」。離開足球（sign = null）回到世界方向。
+let pilotYawOffsetDeg = 0;
+bus.on('soccer-view-changed', ({ sign }) => {
+  pilotYawOffsetDeg = sign !== null && sign < 0 ? 180 : 0;
+});
+
 export function updateHudFrame(): void {
   const altEl = $('hud-alt');
   const spdEl = $('hud-spd');
@@ -329,7 +336,7 @@ export function updateHudFrame(): void {
     spdEl.textContent = spd;
     cache.spd = spd;
   }
-  const head = headingLabel(normalizeDeg(droneState.yaw * RAD2DEG));
+  const head = headingLabel(normalizeDeg(droneState.yaw * RAD2DEG - pilotYawOffsetDeg));
   if (headEl && head !== cache.head) {
     headEl.textContent = head;
     cache.head = head;

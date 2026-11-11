@@ -53,7 +53,16 @@ import { soccerScoreboardPoses } from '../soccer/scoreboardPose';
 import { createSoccerScoreboard, stretchScoreboardRods, type SoccerScoreboard } from './soccerScoreboard';
 import { setSoccerArenaAudio } from '../ui/audio';
 import { setSoccerEndScreen, setSoccerFlag } from '../ui/soccerHud';
-import { SOCCER_SIGHT_VEIL, soccerSightVeiled, type SoccerSightMode } from './soccerSight';
+import {
+  SOCCER_SIGHT_VEIL,
+  soccerFixedViewClutter,
+  soccerOccludes,
+  soccerSightVeiled,
+  stepOccluderFade,
+  type OccluderBox,
+  type OccluderRole,
+  type SoccerSightMode,
+} from './soccerSight';
 
 const CLONE_LABEL_Y = 0.34;
 
@@ -147,6 +156,11 @@ export class SoccerFieldVisuals {
   private sightMode: SoccerSightMode = 'follow';
   /** 鏡頭站的 z 端。練習預設 +z。 */
   private nearEnd: 1 | -1 = 1;
+  /** 門環與端牆中橫梁的半透明程度（applySightVeil 設定）；跟遮擋淡化取較低的那個 */
+  private veilLevel = new Map<AbstractMesh, number>();
+  /** 柱子、鋼架、燈具、吊帶、計分板：擋在鏡頭和機身之間就淡掉 */
+  private occluders: { mesh: AbstractMesh; box: OccluderBox; role: OccluderRole; fade: number }[] = [];
+  private lastOccluderMs = -1;
   private previewBurstTick = 0;
   private casters: Mesh[] = [];
 
@@ -255,6 +269,7 @@ export class SoccerFieldVisuals {
       const board = createSoccerScoreboard(scene, pose);
       stretchScoreboardRods(board.root, F.top - 0.05, pose.height);
       this.scoreboards.push(board);
+      for (const m of board.root.getChildMeshes()) this.trackOccluder(m);
     }
     this.applySightVeil();
     this.syncBroadcast();
@@ -374,6 +389,7 @@ export class SoccerFieldVisuals {
       post.isPickable = false;
       this.cast(post);
       this.fieldMeshes.push(post);
+      this.trackOccluder(post, { kind: 'end', end: sz > 0 ? 1 : -1 });
     }
 
     const beamT = 0.16;
@@ -388,8 +404,10 @@ export class SoccerFieldVisuals {
         this.trackSightVeil(beamNeg, -1);
         this.trackSightVeil(beamPos, 1);
       }
-      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, -F.halfX, y, 0, steel);
-      addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, F.halfX, y, 0, steel);
+      this.trackOccluder(beamNeg, { kind: 'end', end: -1 });
+      this.trackOccluder(beamPos, { kind: 'end', end: 1 });
+      this.trackOccluder(addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, -F.halfX, y, 0, steel));
+      this.trackOccluder(addBox('soccerBeamZ', beamT, beamT, F.halfZ * 2, F.halfX, y, 0, steel));
     }
 
     // 兩側護墊：+X 偏紅、-X 偏藍，下緣深、中間一條淺色，不要一片亮白
@@ -537,12 +555,15 @@ export class SoccerFieldVisuals {
     for (const t of [-0.62, -0.2, 0.2, 0.62]) {
       const z = t * F.halfZ;
       const houseY = F.top - 0.7;
-      this.trackFace(
-        addBox('soccerLampHouse', 1.25, 0.1, 0.48, 0, houseY, z, housing, false),
-        'y',
-        1,
-        houseY,
-        0.1,
+      this.trackOccluder(
+        this.trackFace(
+          addBox('soccerLampHouse', 1.25, 0.1, 0.48, 0, houseY, z, housing, false),
+          'y',
+          1,
+          houseY,
+          0.1,
+        ),
+        { kind: 'ceiling' },
       );
       const lamp = MeshBuilder.CreateBox(
         `soccerLamp-${z}`,
@@ -555,6 +576,7 @@ export class SoccerFieldVisuals {
       lamp.material = lampMat;
       lamp.isPickable = false;
       this.fieldMeshes.push(lamp);
+      this.trackOccluder(lamp, { kind: 'ceiling' });
       const light = new PointLight(`soccerLight-${z}`, new Vector3(0, F.top - 0.9, z), scene);
       light.diffuse = hex(0xfff3e4);
       light.specular = hex(0x4a453e);
@@ -648,6 +670,7 @@ export class SoccerFieldVisuals {
       this.fieldMeshes.push(m);
       // 鏡頭飛到鋼架上方時，格子不要擋往下看的視線
       this.trackFace(m, 'y', 1, py, h);
+      this.trackOccluder(m, { kind: 'ceiling' });
     };
     for (const t of [-0.72, -0.36, 0, 0.36, 0.72]) {
       add('soccerTrussZ', 0.22, 0.16, F.halfZ * 2 - 0.45, t * F.halfX, y, 0);
@@ -881,6 +904,7 @@ export class SoccerFieldVisuals {
       strap.material = strapMat;
       strap.isPickable = false;
       this.fieldMeshes.push(strap);
+      this.trackOccluder(strap);
     }
     const bar = MeshBuilder.CreateBox(
       `soccerStrapBar-${z}`,
@@ -891,6 +915,7 @@ export class SoccerFieldVisuals {
     bar.material = strapMat;
     bar.isPickable = false;
     this.fieldMeshes.push(bar);
+    this.trackOccluder(bar);
   }
 
   private async registerGoalCollision(gen: number): Promise<void> {
@@ -973,6 +998,7 @@ export class SoccerFieldVisuals {
   present(x: number, y: number, z: number, yaw: number, visible: boolean): void {
     if (!this.active || !this.myDrone) return;
     this.applyEnclosureVisibility();
+    this.applyOccluderFade(x, y, z);
     const pitch = -(droneState.attitudePitch ?? 0);
     const roll = -(droneState.attitudeRoll ?? 0);
     this.myDrone.pose(x, y, z, yaw, pitch, roll, droneState.propellerRotation);
@@ -1280,8 +1306,49 @@ export class SoccerFieldVisuals {
       if (veil.kind === 'line') {
         veil.mesh.alpha = on ? SOCCER_SIGHT_VEIL : veil.baseAlpha;
       } else {
-        veil.mesh.visibility = on ? SOCCER_SIGHT_VEIL : 1;
+        const level = on ? SOCCER_SIGHT_VEIL : 1;
+        this.veilLevel.set(veil.mesh, level);
+        const occ = this.occluders.find((o) => o.mesh === veil.mesh);
+        veil.mesh.visibility = Math.min(level, occ?.fade ?? 1);
       }
+    }
+  }
+
+  /** 記下會擋視線的鋼架／燈具／計分板，世界座標外框只在建場時算一次（都不會動）。 */
+  private trackOccluder(mesh: AbstractMesh, role: OccluderRole = { kind: 'other' }): void {
+    mesh.computeWorldMatrix(true);
+    const bb = mesh.getBoundingInfo().boundingBox;
+    const lo = bb.minimumWorld;
+    const hi = bb.maximumWorld;
+    this.occluders.push({
+      mesh,
+      box: { min: { x: lo.x, y: lo.y, z: lo.z }, max: { x: hi.x, y: hi.y, z: hi.z } },
+      role,
+      fade: 1,
+    });
+  }
+
+  /**
+   * 鏡頭→機身的視線被柱子、橫梁、天花鋼架、燈具、吊帶或計分板擋到，那一件就淡掉；
+   * 鏡頭埋進去也一樣。考證／全場另外把天花與鏡頭這一端的柱子、橫梁一律淡掉（soccerFixedViewClutter）。
+   * 只改外觀，跟碰撞無關。全場／考證門環的固定半透明取較低者。
+   */
+  private applyOccluderFade(x: number, y: number, z: number): void {
+    const cam = this.scene.activeCamera?.position;
+    if (!cam) return;
+    const now = performance.now();
+    const dtMs = this.lastOccluderMs < 0 ? 1000 : Math.min(250, now - this.lastOccluderMs);
+    this.lastOccluderMs = now;
+    const eye = { x: cam.x, y: cam.y, z: cam.z };
+    const target = { x, y, z };
+    for (const o of this.occluders) {
+      if (o.mesh.isDisposed()) continue;
+      const blocked =
+        soccerFixedViewClutter(this.sightMode, o.role, this.nearEnd) || soccerOccludes(eye, target, o.box);
+      const fade = stepOccluderFade(o.fade, blocked, dtMs);
+      if (fade === o.fade) continue;
+      o.fade = fade;
+      o.mesh.visibility = Math.min(fade, this.veilLevel.get(o.mesh) ?? 1);
     }
   }
 
@@ -1330,6 +1397,9 @@ export class SoccerFieldVisuals {
     this.casters = [];
     this.enclosure = [];
     this.sightVeils = [];
+    this.veilLevel.clear();
+    this.occluders = [];
+    this.lastOccluderMs = -1;
     this.fieldMeshes.forEach((m) => m.dispose(false, true));
     this.fieldMeshes = [];
     this.goalMeshes = [];

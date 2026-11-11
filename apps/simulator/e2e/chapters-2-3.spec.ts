@@ -282,3 +282,43 @@ test.describe('足球練習：鍵盤速度與真實物理', () => {
     expect(fallY).toBeLessThan(stillY - 0.3);
   });
 });
+
+test.describe('足球視角與開場倒數', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('creafly_guide_done_v1', '1');
+    });
+  });
+
+  test('倒數數到一半進足球：數字收掉；足球預設考證視角，離開還原', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await guest(page, '視角');
+    const view = page.locator('#view-btn');
+    await expect(view).toContainText('第三人稱');
+
+    // 關卡 3-2-1 數到「2」時切進足球練習
+    const start = page.locator('#level-intro-start');
+    await expect(start).toBeVisible({ timeout: 15_000 });
+    await start.click();
+    const overlay = page.locator('#countdown-overlay');
+    await expect(overlay).toHaveText('2', { timeout: 3_000 });
+    await page.locator('#soccer-btn').click();
+    await expect.poll(() => page.evaluate(() => window.CREAFLY.practiceState.active)).toBe(true);
+    await expect(overlay).not.toHaveClass(/show/, { timeout: 1_000 });
+    await page.waitForTimeout(2_500);
+    await expect(overlay).not.toHaveClass(/show/);
+
+    // 預設考證視角（站在己方端線外）；C 鍵還是照常切
+    await expect(view).toContainText('考證視角');
+    await page.keyboard.press('c');
+    await expect(view).toContainText('第一視角');
+    await page.keyboard.press('c');
+    await expect(view).toContainText('跟隨視角');
+
+    // 離開足球：回到進場前的第三人稱
+    await page.locator('#soccer-btn').click();
+    await expect.poll(() => page.evaluate(() => window.CREAFLY.practiceState.active)).toBe(false);
+    await expect(view).toContainText('第三人稱');
+  });
+});

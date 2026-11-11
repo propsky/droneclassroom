@@ -445,6 +445,9 @@ class SoccerGame(BaseGame):
         return [{"id": p.record.id, "x": p.spawn_x, "z": p.spawn_z} for p in self._active()]
 
     def snapshot(self) -> dict[str, Any]:
+        if self.status == "idle":
+            # 等老師開賽時也給每人自己隊起飛區的位置，不然全部是 (0, 0)，大家疊在中圈互推
+            self._assign_spawns()
         return {
             "type": "soccer_state",
             "status": self.status,

@@ -913,6 +913,22 @@ export function initOverlays(): void {
   $('level-intro-start')?.addEventListener('click', () => armLevelStart());
 
   // ---- 3-2-1 倒數 ----
+  // 數字之間關卡隔 0.7 秒、伺服器隔 1 秒。下一個數字或 GO 沒有在 COUNTDOWN_STALE_MS 內來
+  // （倒數被作廢、賽局中止、斷線），數字自己收掉，不會一直卡在畫面中間。
+  const COUNTDOWN_STALE_MS = 1600;
+  let countdownHide: ReturnType<typeof setTimeout> | null = null;
+  const clearCountdown = (): void => {
+    if (countdownHide) clearTimeout(countdownHide);
+    countdownHide = null;
+    const el = $('countdown-overlay');
+    if (!el) return;
+    el.className = '';
+    el.textContent = '';
+  };
+  const hideCountdown = (afterMs: number): void => {
+    if (countdownHide) clearTimeout(countdownHide);
+    countdownHide = setTimeout(clearCountdown, afterMs);
+  };
   bus.on('countdown', ({ n }) => {
     const el = $('countdown-overlay');
     if (!el) return;
@@ -921,14 +937,18 @@ export function initOverlays(): void {
       el.className = '';
       void el.offsetWidth; // 重新觸發 pop 動畫
       el.className = 'show';
+      hideCountdown(COUNTDOWN_STALE_MS);
     } else {
       el.textContent = 'GO!';
       el.className = 'show go';
-      setTimeout(() => {
-        el.className = '';
-      }, 650);
+      hideCountdown(650);
     }
   });
+  // 倒數作廢、或離開任何場次（換關、進出足球／大亂鬥）：當下整個清掉，不留數字
+  bus.on('countdown-cancelled', clearCountdown);
+  for (const kind of ['level', 'arena', 'soccer-practice', 'soccer-match'] as const) {
+    GameSession.onExit(kind, clearCountdown);
+  }
 
   // ---- 關卡選單（動態建立，三章；draw 關加畫筆圖標）----
   // 老師鎖定關卡：選單停用，只能由老師廣播切關

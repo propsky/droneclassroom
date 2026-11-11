@@ -96,6 +96,8 @@ export class CameraRig {
   /** ⚽ 足球視角模式已併入 mode：follow 跟隨、team 全場、exam 考證、fpv 第一人稱 */
   /** 進足球或切回跟隨時直接貼到目標，避免從教室鏡頭插值時整段穿在外殼上 */
   private soccerSnap = false;
+  /** 進足球前的視角，離場時還原（全場視角只在場內有，不會存到這裡） */
+  private preSoccerMode: CameraViewMode = 'follow';
   /** 上次 update 的時間（ms），算鏡頭平滑要走多少；-1 = 還沒更新過 */
   private lastUpdateMs = -1;
 
@@ -110,11 +112,19 @@ export class CameraRig {
       this.guideBounds = computeGuideBounds(level);
       this.courseSolids = PilotView.courseSolids(level);
     });
-    // ⚽ 足球模式：進場設 sign（多人依隊伍動態換）。全場視角只在場內有意義。
+    // ⚽ 足球模式：進場設 sign（多人依隊伍動態換）。
+    // 進場預設考證視角（站在己方端線外，跟實際足球賽操作員一樣）；離場還原進場前的視角。
     bus.on('soccer-view-changed', ({ sign }) => {
+      const entering = this.soccerSign === null && sign !== null;
+      const leaving = this.soccerSign !== null && sign === null;
       this.soccerSign = sign;
-      if (sign === null && this.mode === 'team') this.applyMode('follow');
-      else if (sign !== null) this.soccerSnap = true;
+      if (entering) {
+        this.preSoccerMode = this.mode;
+        this.applyMode('exam');
+      } else if (leaving) {
+        this.applyMode(this.preSoccerMode);
+      }
+      if (sign !== null) this.soccerSnap = true;
     });
   }
 
@@ -127,6 +137,11 @@ export class CameraRig {
     const label = PilotView.label(this.mode, this.soccerSign !== null);
     toast(label);
     return { label, fpv: this.fpv, mode: this.mode };
+  }
+
+  /** 目前視角（視角按鈕同步用） */
+  view(): { label: string; fpv: boolean; mode: CameraViewMode } {
+    return { label: PilotView.label(this.mode, this.soccerSign !== null), fpv: this.fpv, mode: this.mode };
   }
 
   /** 直接切到某個視角（截圖與測試用）。場外沒有全場視角時改考證。 */

@@ -184,10 +184,14 @@ export class PilotView {
     });
   }
 
-  /** 場地取樣，再加上對方門心。自己的門在前景，斜看時門管會擋門心，不拿來當必須穿透的點。 */
+  /**
+   * 場地取樣，再加上對方門心與自己的起飛區。自己的門在前景，斜看時門管會擋門心，不拿來當必須穿透的點。
+   * 起飛區就在鏡頭腳下，不加的話停在地上的機身會掉出畫面下緣。
+   */
   static soccerWatchPoints(field: ActiveSoccerField, sign: PilotEnd): SightPoint[] {
     const points = PilotView.keyPoints(PilotView.soccerBox(field));
     points.push({ x: 0, y: field.goalY, z: -sign * field.goalZ });
+    points.push({ x: 0, y: HOME_POSITION.y - field.shieldR, z: sign * field.startZ });
     return points;
   }
 
@@ -516,7 +520,8 @@ export class PilotView {
     const depth = Math.max(box.maxZ - box.minZ, box.maxX - box.minX, 8);
     const far = Math.max(PilotView.MIN_STAND_OFF_M + 4, depth * 2.2);
     let best: PosePick | null = null;
-    for (const back of PilotView.steps(PilotView.MIN_STAND_OFF_M, far, Math.max(0.8, far / 14))) {
+    // 退距細切（0.3 m）：站得越近、場地在畫面裡越大；第一個全看得到的距離就用
+    for (const back of PilotView.steps(PilotView.MIN_STAND_OFF_M, far, 0.3)) {
       for (const xAbs of PilotView.steps(0, xLimit, Math.max(0.8, xLimit / 8))) {
         for (const x of xAbs === 0 ? [0] : [xAbs, -xAbs]) {
           const eyeZ = along + dir * back;

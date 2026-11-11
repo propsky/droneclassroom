@@ -216,6 +216,29 @@ describe('場次生命週期', () => {
     }
   });
 
+  it('3-2-1 數到一半切進足球：倒數作廢並通知畫面收掉數字（不會卡著一個「2」）', () => {
+    vi.useFakeTimers();
+    try {
+      applyLoadLevel('1-1');
+      const seen: number[] = [];
+      let cancelled = 0;
+      const offN = bus.on('countdown', ({ n }) => seen.push(n));
+      const offC = bus.on('countdown-cancelled', () => cancelled++);
+      armLevelStart();
+      vi.advanceTimersByTime(800); // 已顯示 3、2
+      enterSoccerPractice();
+      vi.advanceTimersByTime(5000);
+      offN();
+      offC();
+      expect(seen).toEqual([3, 2]);
+      expect(cancelled).toBe(1);
+      expect(flags.countdownActive).toBe(false);
+      exitSoccerPractice();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('切關會拆掉暫停與進行中的程式，不會用舊程式判定新關過關', async () => {
     applyLoadLevel('1-4');
     levelState.armed = true;

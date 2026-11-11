@@ -357,12 +357,14 @@ export function armLevelStart(): void {
 
 /** 作廢進行中的 3-2-1（切關、離場）。舊回呼不得再改 startTime／countdownActive。 */
 export function cancelCountdown(): void {
+  const wasRunning = flags.countdownActive || countdownTimer !== null;
   countdownToken++;
   if (countdownTimer) {
     GameSession.clearTracked(countdownTimer);
     countdownTimer = null;
   }
   flags.countdownActive = false;
+  if (wasRunning) bus.emit('countdown-cancelled', {});
 }
 
 /** 3 → 2 → 1 → GO! 倒數（期間鎖操控、不判定過關） */

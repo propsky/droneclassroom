@@ -277,8 +277,9 @@ function handleSoccerMessage(msg: SoccerServerMsg): void {
       applyServerField(msg.field);
       applyMyTeamRole(msg.players);
       updateSoccerPlayers(msg.players);
-      // 倒數 / 待機時套用出生點（開賽前大家先站好）
-      if (msg.spawns && (msg.status === 'countdown' || msg.status === 'idle')) {
+      // 倒數時一律回出生點站好；待機只在停在地上時移過去（有人加入、換隊會重排位置，
+      // 不把正在練飛的人拉回去）
+      if (msg.spawns && (msg.status === 'countdown' || (msg.status === 'idle' && !droneState.isFlying))) {
         applyMySpawn(msg.spawns);
       }
       notePhase(prev);

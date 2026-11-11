@@ -67,6 +67,30 @@ def test_自動分隊平衡與前鋒保證(client: TestClient, teacher_ticket: s
             assert strikers == {_gkey("小明"), _gkey("小華")}  # 每隊恰一前鋒（第一人）
 
 
+def test_待機也給各隊起飛區出生點_不會全疊在中圈(client: TestClient) -> None:
+    """開賽前的 soccer_state：藍隊在 -z、紅隊在 +z 的起飛區，同隊左右錯開一個球徑。"""
+    with (
+        client.websocket_connect("/") as s1,
+        client.websocket_connect("/") as s2,
+        client.websocket_connect("/") as s3,
+    ):
+        for ws, name in ((s1, "小明"), (s2, "小華"), (s3, "小美")):
+            ws.receive_json()  # welcome
+            ws.send_json({"type": "register", "name": name, "emoji": "🐱"})
+            state = _join_soccer(ws)
+        assert state["status"] == "idle"
+        team = {p["id"]: p["team"] for p in state["players"]}
+        spawns = {sp["id"]: sp for sp in state["spawns"]}
+        assert len(spawns) == 3
+        z_start = F9A_B.half_z - F9A_B.start_depth / 2
+        for pid, sp in spawns.items():
+            sign = -1 if team[pid] == "blue" else 1
+            assert sp["z"] == pytest.approx(sign * z_start, abs=0.01)
+        blue_x = sorted(sp["x"] for pid, sp in spawns.items() if team[pid] == "blue")
+        assert len(blue_x) == 2
+        assert blue_x[1] - blue_x[0] == pytest.approx(F9A_B.shield_r * 2, abs=0.01)
+
+
 def test_老師手動分隊與指定前鋒(client: TestClient, teacher_ticket: str) -> None:
     """soccer_set_team 換隊（原隊 / 新隊都重新確保前鋒）；soccer_set_striker 指定。"""
     soccer = client.app.state.soccer
