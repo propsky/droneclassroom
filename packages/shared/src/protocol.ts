@@ -250,7 +250,7 @@ export interface DispatchStateMsg {
   waiting: { id: string; name: string; emoji: string }[];
   notice?: string;
 }
-/** 學生留在目前關卡，看板擋飛行。不需學生按確認。 */
+/** 大亂鬥：學生留在目前關卡，看板擋飛行。不需學生按確認。（足球派送直接送 dispatch_go 進場） */
 export interface DispatchHoldMsg {
   type: 'dispatch_hold';
   activity: DispatchActivity;

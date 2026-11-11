@@ -259,6 +259,9 @@ async def _apply_broadcast(room: Room, payload: TeacherBroadcastPayload) -> None
             await room.arena.stop("level_switch")
         if ClassLevelSend.stops_soccer(level_id):
             await room.soccer.stop("level_switch")
+            if payload.type != "reset_all":
+                # 還沒開賽：派送進球場等待的人跟著新關卡走，名單清掉、全房入口解鎖
+                await TeacherDispatch.finish(room, "soccer", "level_switch")
     if payload.type in ("load_level", "race_start"):
         # 記住課程關卡：遲到 / 重整的學生連上時補載入
         room.roster.current_level_id = payload.levelId

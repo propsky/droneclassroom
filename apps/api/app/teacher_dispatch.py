@@ -1,7 +1,9 @@
 """同房教師派送。等待名單只活在這間房的記憶體，不寫資料庫、不改 schema。
 
-足球與大亂鬥各一條名單。學生被派送後留在目前關卡；老師按開始才進場。
-比賽中不可追加。老師離開時清掉還沒進場的名單，避免學生卡在等待看板。
+足球與大亂鬥各一條名單。
+足球：一派送就直接進球場、自動平均分隊，可先練飛；老師按開始才倒數。
+大亂鬥：場地與玩法要等老師按開始才定，所以學生留在目前關卡看等待看板，開始時才進場。
+比賽中不可追加。老師離開時放開大亂鬥的等待看板；足球的人已經在場上，名單留著等老師回來。
 """
 
 from __future__ import annotations
@@ -197,10 +199,33 @@ class TeacherDispatch:
             waiting_ids.add(record.id)
             accepted.append(record)
         for record in accepted:
-            await TeacherDispatch._send(record, TeacherDispatch._hold(activity))
+            await TeacherDispatch._admit(room, activity, record)
         notice = TeacherDispatch._add_notice(activity, cap, rejected_cap, rejected_off)
         await TeacherDispatch._sync_state(room, activity, notice=notice)
         await TeacherDispatch.sync_gate(room)
+
+    @staticmethod
+    async def _admit(room: Any, activity: DispatchActivity, record: StudentRecord) -> None:
+        """派送當下：足球直接進場（伺服器先加入、學生端跟著切畫面）；大亂鬥看等待看板。"""
+        if activity != "soccer":
+            await TeacherDispatch._send(record, TeacherDispatch._hold(activity))
+            return
+        await room.arena.leave(record)
+        await room.soccer.join(record)
+        await TeacherDispatch._send(record, {"type": "dispatch_go", "activity": "soccer"})
+
+    @staticmethod
+    async def _send_back(room: Any, activity: DispatchActivity, seat: DispatchSeat) -> None:
+        """足球名單上被取消的人已經在場上：退出球場、送回派送前的關卡。"""
+        record = TeacherDispatch._by_key(room, seat.key)
+        if record is None:
+            return
+        if activity == "soccer":
+            await room.soccer.leave(record)
+            back = TeacherDispatch._return_level(room, seat.return_level, record)
+            if back:
+                await TeacherDispatch._send(record, {"type": "load_level", "levelId": back})
+        await TeacherDispatch._send(record, {"type": "dispatch_release"})
 
     @staticmethod
     async def cancel(
@@ -225,9 +250,7 @@ class TeacherDispatch:
             drop = {seat.key for seat in targets}
             queue.waiting = [seat for seat in queue.waiting if seat.key not in drop]
         for seat in targets:
-            record = TeacherDispatch._by_key(room, seat.key)
-            if record is not None:
-                await TeacherDispatch._send(record, {"type": "dispatch_release"})
+            await TeacherDispatch._send_back(room, activity, seat)
         await TeacherDispatch._sync_state(room, activity)
         await TeacherDispatch.sync_gate(room)
 
@@ -239,7 +262,7 @@ class TeacherDispatch:
         arena_mode: str | None = None,
         arena_field: str | None = None,
     ) -> bool:
-        """老師按開始：名單上的人這時才加入賽局，並通知學生切畫面。"""
+        """老師按開始：名單轉成這一場的人。大亂鬥這時才進場；足球已在場上，不在的才補拉進來。"""
         queue = _queue(room, activity)
         if not queue.waiting:
             return False
@@ -251,6 +274,9 @@ class TeacherDispatch:
                 continue
             queue.playing[seat.key] = seat.return_level
             if activity == "soccer":
+                player = room.soccer.players.get(seat.key)
+                if player is not None and player.active:
+                    continue
                 await room.arena.leave(record)
                 await room.soccer.join(record)
             else:
@@ -301,11 +327,14 @@ class TeacherDispatch:
 
     @staticmethod
     async def on_teachers_left(room: Any) -> None:
-        """這間房沒有老師了：清掉還沒進場的名單，學生恢復可飛。進行中的比賽留著。"""
-        logger.info("[Dispatch] 房 %s 沒有老師，釋放等待名單", room.code)
-        for activity in _ACTIVITIES:
-            await TeacherDispatch._release_waiting(room, activity)
-            await TeacherDispatch._sync_state(room, activity)
+        """這間房沒有老師了：大亂鬥的等待看板放開，學生恢復可飛。
+
+        足球名單上的人已經在球場上能飛，名單留著：老師重新整理頁面回來還看得到、按開始照常。
+        進行中的比賽留著。
+        """
+        logger.info("[Dispatch] 房 %s 沒有老師，釋放大亂鬥等待名單", room.code)
+        await TeacherDispatch._release_waiting(room, "arena")
+        await TeacherDispatch._sync_state(room, "arena")
         await TeacherDispatch.sync_gate(room)
 
     @staticmethod
@@ -322,7 +351,7 @@ class TeacherDispatch:
                     seat.emoji = record.emoji
                     touched = True
             if touched:
-                await TeacherDispatch._send(record, TeacherDispatch._hold(activity))
+                await TeacherDispatch._admit(room, activity, record)
                 await TeacherDispatch._sync_state(room, activity)
             if key in queue.pending_return and not TeacherDispatch.match_is_live(
                 room, activity
@@ -487,10 +516,14 @@ class TeacherDispatch:
 
     @staticmethod
     async def _release_waiting(room: Any, activity: DispatchActivity) -> None:
+        """切關時清名單。足球的人跟著老師廣播的新關卡走（學生端收到 load_level 會退出球場）。"""
         queue = _queue(room, activity)
         seats = list(queue.waiting)
         queue.waiting.clear()
         for seat in seats:
             record = TeacherDispatch._by_key(room, seat.key)
-            if record is not None:
-                await TeacherDispatch._send(record, {"type": "dispatch_release"})
+            if record is None:
+                continue
+            if activity == "soccer":
+                await room.soccer.leave(record)
+            await TeacherDispatch._send(record, {"type": "dispatch_release"})

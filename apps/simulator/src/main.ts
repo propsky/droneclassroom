@@ -143,7 +143,7 @@ ClassLevelCommand.bind({
   chapterTitle: (levelId) => levelState.levels.find((l) => l.id === levelId)?.name ?? null,
 });
 
-// 教師派送：老師按開始才切進足球／大亂鬥。先綁好再連線。
+// 教師派送：足球一派送就進場；大亂鬥老師按開始才進場。先綁好再連線。
 StudentDispatch.bind(
   (activity, opts) => {
     if (activity === 'soccer') enterSoccerMatch();

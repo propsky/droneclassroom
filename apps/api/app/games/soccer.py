@@ -138,6 +138,8 @@ class SoccerPlayer:
     disconnected: bool = False
     was_striker: bool = False
     team: str | None = None
+    # 老師手動換過隊：離場再進來、自動平衡都不動他
+    team_pinned: bool = False
     striker: bool = False
     x: float = 0.0
     y: float = 0.4
@@ -283,6 +285,7 @@ class SoccerGame(BaseGame):
             for p in members:
                 if p.record.id not in keep:
                     p.team = None
+                    p.team_pinned = False
                     p.striker = False
             self._ensure_striker(team)
 
@@ -351,7 +354,8 @@ class SoccerGame(BaseGame):
     def _auto_assign_team(self, p: SoccerPlayer) -> None:
         """自動平均分隊。每隊不超過子類上限（F9A-A 5、F9A-B 3）；兩邊都滿就先不編隊。"""
         cap = self.field.max_players
-        others = [q for q in self._active() if q is not p]
+        # 斷線保留位子的人也算一席，回來時隊伍才不會超編
+        others = [q for q in self._present() if q is not p]
         blue = sum(1 for q in others if q.team == "blue")
         red = sum(1 for q in others if q.team == "red")
         if blue >= cap and red >= cap:
@@ -363,6 +367,33 @@ class SoccerGame(BaseGame):
             p.team = "blue"
         else:
             p.team = "blue" if blue <= red else "red"
+
+    def _rebalance(self) -> bool:
+        """兩隊差兩人以上時，把多的那隊最晚進來、沒被老師指定的人移到另一隊。
+
+        前鋒最後才動。老師手動換過隊的人不動，所以老師刻意排的 3v1 會留著。
+        """
+        cap = self.field.max_players
+        moved = False
+        while True:
+            blue = [p for p in self._present() if p.team == "blue"]
+            red = [p for p in self._present() if p.team == "red"]
+            if abs(len(blue) - len(red)) <= 1:
+                return moved
+            big, small_team = (blue, "red") if len(blue) > len(red) else (red, "blue")
+            if len(red if small_team == "red" else blue) >= cap:
+                return moved
+            movable = [p for p in reversed(big) if not p.team_pinned]
+            if not movable:
+                return moved
+            movable.sort(key=lambda p: 1 if p.striker else 0)
+            p = movable[0]
+            old = p.team
+            p.team = small_team
+            p.striker = False
+            self._ensure_striker(old)
+            self._ensure_striker(small_team)
+            moved = True
 
     def _ensure_striker(self, team: str | None) -> None:
         """確保某隊恰 1 名前鋒：0 名 → 補第一人；>1 名 → 只留第一個。"""
@@ -603,8 +634,13 @@ class SoccerGame(BaseGame):
         p.disconnected = False
         p.striker = False
         p.was_striker = False
+        if not p.team_pinned:
+            # 下次進來重新平均分隊，不沿用上次（不然每個人單獨練習時都被排到藍隊，之後全擠一邊）
+            p.team = None
         if was_striker and team:
             self._ensure_striker(team)
+        if self.status in ("idle", "done"):
+            self._rebalance()
         await self.broadcast_state()
 
     async def disconnect(self, record: StudentRecord) -> None:
@@ -626,6 +662,8 @@ class SoccerGame(BaseGame):
             return
         if p.striker and p.team:
             self._ensure_striker(p.team)
+        if self.status in ("idle", "done"):
+            self._rebalance()
         await self.broadcast_state()
 
     def _player_for(self, record: StudentRecord) -> SoccerPlayer | None:
@@ -727,6 +765,7 @@ class SoccerGame(BaseGame):
         self._clear_return_flags()
         self._clear_discipline(restore=True, match=True)
         self.winner = None
+        self._rebalance()  # 有人中途離開造成 2:0 之類，開賽前補平（老師指定的不動）
         self._ensure_striker("blue")  # 開賽前未指定的隊 → 自動補第一人
         self._ensure_striker("red")
         self._assign_spawns()
@@ -779,6 +818,7 @@ class SoccerGame(BaseGame):
             return
         old_team = p.team
         p.team = team
+        p.team_pinned = True
         p.striker = False
         if old_team:
             self._ensure_striker(old_team)
@@ -815,6 +855,7 @@ class SoccerGame(BaseGame):
             p.needs_return = False
             if clear_teams:
                 p.team = None
+                p.team_pinned = False
         if clear_teams:
             cap = self.field.max_players
             blue_n = red_n = 0

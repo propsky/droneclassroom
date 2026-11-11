@@ -1,4 +1,5 @@
-// 學生端的教師派送：留在目前關卡看等待看板、不能飛，右下活動鈕關掉。
+// 學生端的教師派送。足球：伺服器送 dispatch_go 直接進球場等開賽。
+// 大亂鬥：留在目前關卡看等待看板、不能飛，老師按開始才進場。右下活動鈕都關掉。
 // 進場由 main 注入，避免這裡 import 多人模組跟 ws 循環。
 import { TeacherDispatch, type DispatchActivity } from '@creafly/shared';
 import { droneState, flags } from '../core/droneState';
@@ -60,6 +61,9 @@ export class StudentDispatch {
   static go(activity: DispatchActivity, opts: DispatchEnterOpts = {}): void {
     this.release();
     this.enter?.(activity, opts);
+    if (activity === 'soccer') {
+      toast('老師把你排入足球對戰：可以先練飛，老師按開始會回起飛區倒數');
+    }
   }
 
   /** 伺服器拒絕自行進場（比賽中或有派送名單）：退出這個活動，不要停在空場上。 */
@@ -72,12 +76,16 @@ export class StudentDispatch {
   static gate(locked: boolean): void {
     const group = this.byId('entry-group');
     if (!group) return;
+    // 隱藏靠 .dispatch-locked 的 !important（#entry-group 自己有 display，蓋過 [hidden]）。
+    // 足球派送不畫看板，樣式不能只在看板裡注入。
+    const doc = this.doc();
+    if (doc) this.ensureStyle(doc);
     group.classList.toggle('dispatch-locked', locked);
     if (locked) group.setAttribute('hidden', '');
     else group.removeAttribute('hidden');
   }
 
-  /** 斷線：不要卡在看板上。重連後若還在名單，伺服器會再送 hold。 */
+  /** 斷線：不要卡在看板上。重連後若還在名單，伺服器會再送 hold（大亂鬥）或 go（足球）。 */
   static reset(): void {
     this.release();
     this.gate(false);

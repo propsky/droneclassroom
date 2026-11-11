@@ -35,7 +35,7 @@ def _between(ws, stop: str) -> list[dict]:
     raise AssertionError(f"沒等到 {stop}")
 
 
-def test_派送到等待_開始才進場_賽後回原關(
+def test_足球派送立刻進場_開始只倒數_賽後回原關(
     client: TestClient, teacher_ticket: str
 ) -> None:
     with teacher_connect(client, teacher_ticket) as t:
@@ -45,8 +45,14 @@ def test_派送到等待_開始才進場_賽後回原關(
             s.send_json({"type": "progress", "levelId": "1-2"})
             recv_until(t, "student_update")
             t.send_json({"type": "dispatch_add", "activity": "soccer", "studentIds": [sid]})
-            hold = recv_until(s, "dispatch_hold")
-            assert hold == {"type": "dispatch_hold", "activity": "soccer", "title": "足球對戰"}
+            # 一派送伺服器就把他加進球場、分好隊，學生端跟著切畫面
+            seen = _between(s, "dispatch_go")
+            assert seen[-1] == {"type": "dispatch_go", "activity": "soccer"}
+            assert "dispatch_hold" not in [m["type"] for m in seen]
+            player = next(
+                p for p in client.app.state.soccer.players.values() if p.record.id == sid
+            )
+            assert player.active and player.team in ("blue", "red")
             gate = recv_until(s, "dispatch_gate")
             assert gate == {"type": "dispatch_gate", "locked": True}
             state = recv_until(t, "dispatch_state")
@@ -54,16 +60,18 @@ def test_派送到等待_開始才進場_賽後回原關(
             assert state["cap"] == 6
             assert state["waiting"] == [{"id": sid, "name": "小明", "emoji": "🐱"}]
 
-            # 還在等待時自己進場要被拒絕
+            # 學生端進場後送的 soccer_join 不能被名單擋掉
             s.send_json({"type": "soccer_join"})
             s.send_json({"type": "ping", "t": 1})
             kinds = [m["type"] for m in _between(s, "pong")]
-            assert "soccer_state" not in kinds
+            assert "soccer_state" in kinds
+            assert "dispatch_join_rejected" not in kinds
 
+            # 開始：人已經在場上，不再送一次 dispatch_go，直接倒數
             t.send_json({"type": "soccer_start", "durationSec": 30})
-            go = recv_until(s, "dispatch_go")
-            assert go["activity"] == "soccer"
-            assert any(p.record.id == sid for p in client.app.state.soccer.players.values())
+            kinds = [m["type"] for m in _between(s, "soccer_countdown")]
+            assert "dispatch_go" not in kinds
+            assert recv_until(t, "dispatch_state")["phase"] == "live"
             t.send_json({"type": "soccer_stop"})
             back = recv_until(s, "load_level")
             assert back == {"type": "load_level", "levelId": "1-2"}
@@ -98,6 +106,10 @@ def test_超過上限有提示且多出來的人不進名單(
             sockets[6].send_json({"type": "ping", "t": 1})
             kinds = [m["type"] for m in _between(sockets[6], "pong")]
             assert "dispatch_hold" not in kinds
+            assert "dispatch_go" not in kinds
+            # 進場的 6 人自動平均成 3v3
+            teams = [p.team for p in client.app.state.soccer.players.values() if p.active]
+            assert sorted(teams) == ["blue", "blue", "blue", "red", "red", "red"]
 
 
 def test_大亂鬥上限是8且可單人派送(client: TestClient, teacher_ticket: str) -> None:
@@ -138,21 +150,42 @@ def test_取消一人_其餘留在名單(client: TestClient, teacher_ticket: str
         with client.websocket_connect("/") as a, client.websocket_connect("/") as b:
             id_a = _register(a, t, "小明")
             id_b = _register(b, t, "小華")
+            a.send_json({"type": "progress", "levelId": "2-1"})
+            recv_until(t, "student_update")
             t.send_json(
                 {"type": "dispatch_add", "activity": "soccer", "studentIds": [id_a, id_b]}
             )
-            recv_until(a, "dispatch_hold")
-            recv_until(b, "dispatch_hold")
+            recv_until(a, "dispatch_go")
+            recv_until(b, "dispatch_go")
             recv_until(t, "dispatch_state")
             t.send_json(
                 {"type": "dispatch_cancel", "activity": "soccer", "studentIds": [id_a]}
             )
+            # 被取消的人已經在球場上：退出球場、送回派送前那一關
+            assert recv_until(a, "load_level") == {"type": "load_level", "levelId": "2-1"}
             assert recv_until(a, "dispatch_release")["type"] == "dispatch_release"
             state = recv_until(t, "dispatch_state")
             assert [row["id"] for row in state["waiting"]] == [id_b]
+            soccer = client.app.state.soccer
+            active = {p.record.id for p in soccer.players.values() if p.active}
+            assert active == {id_b}
 
 
-def test_老師離開時等待中的學生被放開(
+def test_老師離開時大亂鬥等待中的學生被放開(
+    client: TestClient, teacher_ticket: str
+) -> None:
+    with client.websocket_connect("/") as s:
+        with teacher_connect(client, teacher_ticket) as t:
+            recv_until(t, "student_list")
+            sid = _register(s, t, "小明")
+            t.send_json({"type": "dispatch_add", "activity": "arena", "studentIds": [sid]})
+            recv_until(s, "dispatch_hold")
+        settle(client)
+        assert recv_until(s, "dispatch_release")["type"] == "dispatch_release"
+        assert recv_until(s, "dispatch_gate") == {"type": "dispatch_gate", "locked": False}
+
+
+def test_老師重新整理_足球名單留著_人還在球場上(
     client: TestClient, teacher_ticket: str
 ) -> None:
     with client.websocket_connect("/") as s:
@@ -160,10 +193,35 @@ def test_老師離開時等待中的學生被放開(
             recv_until(t, "student_list")
             sid = _register(s, t, "小明")
             t.send_json({"type": "dispatch_add", "activity": "soccer", "studentIds": [sid]})
-            recv_until(s, "dispatch_hold")
+            recv_until(s, "dispatch_go")
         settle(client)
-        assert recv_until(s, "dispatch_release")["type"] == "dispatch_release"
-        assert recv_until(s, "dispatch_gate") == {"type": "dispatch_gate", "locked": False}
+        with teacher_connect(client, teacher_ticket) as t2:
+            recv_until(t2, "student_list")
+            t2.send_json({"type": "soccer_state_req"})
+            state = recv_until(t2, "soccer_state")
+            assert [p["id"] for p in state["players"]] == [sid]
+        s.send_json({"type": "ping", "t": 1})
+        kinds = [m["type"] for m in _between(s, "pong")]
+        assert "dispatch_release" not in kinds
+        assert "load_level" not in kinds
+
+
+def test_足球等待中老師切到一般關卡_名單清掉跟新關卡走(
+    client: TestClient, teacher_ticket: str
+) -> None:
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s:
+            sid = _register(s, t, "小明")
+            t.send_json({"type": "dispatch_add", "activity": "soccer", "studentIds": [sid]})
+            recv_until(s, "dispatch_go")
+            recv_until(t, "dispatch_state")
+            t.send_json({"type": "broadcast", "payload": {"type": "load_level", "levelId": "1-3"}})
+            assert recv_until(s, "dispatch_release")["type"] == "dispatch_release"
+            assert recv_until(s, "load_level")["levelId"] == "1-3"
+            state = recv_until(t, "dispatch_state")
+            assert state["phase"] == "idle" and state["waiting"] == []
+            assert not any(p.active for p in client.app.state.soccer.players.values())
 
 
 def test_學生斷線重連仍在等待名單且看板上得回來(

@@ -403,7 +403,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           <div class="card" id="soccer-dispatch">
             <div class="card-head"><h2 class="card-title">教師派送</h2></div>
             <div class="card-body">
-              <p class="note">勾選後一次派送，或對某一位按「派送」。學生留在目前關卡看等待看板、不能飛。你按「開始足球賽」才進場並自動分隊。上限 6 人（3v3）。超過會提示，比賽中不能再加。</p>
+              <p class="note">勾選後一次派送，或對某一位按「派送」。學生一派送就直接進球場、自動平均分隊，可以先練飛。你按「開始足球賽」才回起飛區倒數。上限 6 人（3v3）。超過會提示，比賽中不能再加。</p>
               <div id="soccer-dispatch-list" class="dispatch-list"></div>
               <p class="hint" id="soccer-dispatch-status"></p>
             </div>
@@ -415,7 +415,7 @@ export function renderDashboard(root: HTMLElement, opts: DashboardOptions): Dash
           <div class="card">
             <div class="card-head"><h2 class="card-title">隊伍名單</h2></div>
             <div class="card-body">
-              <p class="note">開始後自動平均分隊。進場後可點「設為前鋒」（每隊 1 名，換隊後系統自動補位）、點「換隊」把學生調到對面。還沒派送、也沒有比賽時，學生仍可自己點右下角進場。</p>
+              <p class="note">每個人進場就自動平均分隊，離場再進來會重新分。進場後可點「設為前鋒」（每隊 1 名，換隊後系統自動補位）、點「換隊」把學生調到對面。還沒派送、也沒有比賽時，學生仍可自己點右下角進場。</p>
               <div class="soccer-teams">
                 <div class="team-col blue"><h3>藍隊</h3><div id="soccer-blue"><div class="empty">尚無人加入</div></div></div>
                 <div class="team-col red"><h3>紅隊</h3><div id="soccer-red"><div class="empty">尚無人加入</div></div></div>

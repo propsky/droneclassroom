@@ -91,6 +91,78 @@ def test_待機也給各隊起飛區出生點_不會全疊在中圈(client: Test
         assert blue_x[1] - blue_x[0] == pytest.approx(F9A_B.shield_r * 2, abs=0.01)
 
 
+def test_各自練習過再一起進場_不會全擠藍隊(client: TestClient) -> None:
+    """每人先單獨進場（都被排到藍隊）再離開，之後一起進場要重新平均分。"""
+    soccer = client.app.state.soccer
+    with (
+        client.websocket_connect("/") as s1,
+        client.websocket_connect("/") as s2,
+        client.websocket_connect("/") as s3,
+        client.websocket_connect("/") as s4,
+    ):
+        sockets = ((s1, "小明"), (s2, "小華"), (s3, "小美"), (s4, "小強"))
+        for ws, name in sockets:
+            ws.receive_json()  # welcome
+            ws.send_json({"type": "register", "name": name, "emoji": "🐱"})
+        for ws, name in sockets:
+            _join_soccer(ws)
+            assert soccer.players[_gkey(name)].team == "blue"  # 場上只有他一個
+            ws.send_json({"type": "soccer_leave"})
+            settle(client)
+            assert soccer.players[_gkey(name)].team is None
+        for ws, _name in sockets:
+            _join_soccer(ws)
+        teams = sorted(soccer.players[_gkey(n)].team for _ws, n in sockets)
+        assert teams == ["blue", "blue", "red", "red"]
+        assert {p.team for p in soccer.players.values() if p.striker} == {"blue", "red"}
+
+
+def test_老師手動換隊的人離場再進來保留隊伍(
+    client: TestClient, teacher_ticket: str
+) -> None:
+    soccer = client.app.state.soccer
+    with teacher_connect(client, teacher_ticket) as t:
+        recv_until(t, "student_list")
+        with client.websocket_connect("/") as s1, client.websocket_connect("/") as s2:
+            _register(s1, t, "小明")
+            _register(s2, t, "小華")
+            _join_soccer(s1)  # 藍
+            _join_soccer(s2)  # 紅
+            t.send_json({"type": "soccer_set_team", "studentId": "s1", "team": "red"})
+            settle(client)
+            assert soccer.players[_gkey("小明")].team == "red"
+            s1.send_json({"type": "soccer_leave"})
+            settle(client)
+            _join_soccer(s1)
+            # 老師指定的不動：還是紅隊，不會被自動分回藍
+            assert soccer.players[_gkey("小明")].team == "red"
+            assert soccer.players[_gkey("小華")].team == "red"
+
+
+def test_等待中有人離場_兩隊差兩人自動補平(client: TestClient) -> None:
+    soccer = client.app.state.soccer
+    with (
+        client.websocket_connect("/") as s1,
+        client.websocket_connect("/") as s2,
+        client.websocket_connect("/") as s3,
+        client.websocket_connect("/") as s4,
+    ):
+        sockets = ((s1, "小明"), (s2, "小華"), (s3, "小美"), (s4, "小強"))
+        for ws, name in sockets:
+            ws.receive_json()
+            ws.send_json({"type": "register", "name": name, "emoji": "🐱"})
+            _join_soccer(ws)
+        # 藍：小明、小美；紅：小華、小強。紅隊兩人都走 → 2:0 → 補一位到紅
+        s2.send_json({"type": "soccer_leave"})
+        s4.send_json({"type": "soccer_leave"})
+        settle(client)
+        blue = [n for _ws, n in sockets if soccer.players[_gkey(n)].team == "blue"]
+        red = [n for _ws, n in sockets if soccer.players[_gkey(n)].team == "red"]
+        assert len(blue) == 1 and len(red) == 1
+        assert soccer.players[_gkey(blue[0])].striker
+        assert soccer.players[_gkey(red[0])].striker
+
+
 def test_老師手動分隊與指定前鋒(client: TestClient, teacher_ticket: str) -> None:
     """soccer_set_team 換隊（原隊 / 新隊都重新確保前鋒）；soccer_set_striker 指定。"""
     soccer = client.app.state.soccer
